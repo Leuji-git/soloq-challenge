@@ -1,0 +1,11 @@
+# L'ancienne version hors-ligne, gardée en local comme référence.
+# Inutile de la publier : elle ferait doublon avec le vrai site.
+demo-artifact.html
+
+# Vercel
+.vercel/
+
+# Système
+.DS_Store
+Thumbs.db
+desktop.ini

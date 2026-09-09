@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Les Médiocres contre Les Pitoyables — SoloQ Challenge</title>
+<meta name="description" content="Classement du SoloQ Challenge de 21 jours : chaque joueur declare ses parties, le score est le LP net.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%9A%94%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&family=Outfit:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="in">
+    <div class="who" id="whoBox">
+      <span class="lbl">Chargement…</span>
+    </div>
+    <span class="pill live" id="livePill" hidden>● En direct</span>
+    <button type="button" class="btn ghost sm" id="btnRules">Règlement</button>
+    <button type="button" class="btn ghost sm" id="btnSync" hidden>Recaler mon rang</button>
+    <button type="button" class="btn discord" id="btnLogin" hidden>
+      <svg width="16" height="12" viewBox="0 0 71 55" aria-hidden="true"><path fill="currentColor" d="M60.1 4.9A58.5 58.5 0 0 0 45.6.4a41 41 0 0 0-1.9 3.8 54.1 54.1 0 0 0-16.2 0A40 40 0 0 0 25.5.4 58.4 58.4 0 0 0 11 4.9C1.8 18.6-.7 32 .5 45.2a58.9 58.9 0 0 0 17.8 9 43.3 43.3 0 0 0 3.8-6.2 38.2 38.2 0 0 1-6-2.9l1.5-1.2a42 42 0 0 0 36 0l1.5 1.2a38.2 38.2 0 0 1-6 2.9 42.9 42.9 0 0 0 3.8 6.2 58.7 58.7 0 0 0 17.8-9c1.4-15.3-2.4-28.6-10.6-40.3ZM23.7 37.1c-3.5 0-6.4-3.2-6.4-7.2s2.8-7.2 6.4-7.2c3.6 0 6.5 3.3 6.4 7.2 0 4-2.8 7.2-6.4 7.2Zm23.6 0c-3.5 0-6.4-3.2-6.4-7.2s2.8-7.2 6.4-7.2c3.6 0 6.5 3.3 6.4 7.2 0 4-2.8 7.2-6.4 7.2Z"/></svg>
+      Se connecter avec Discord
+    </button>
+    <a class="btn ghost sm" id="lnkAdmin" href="admin.html" hidden>Console admin</a>
+    <button type="button" class="btn sm" id="btnClaim" hidden>Créer mon profil</button>
+    <button type="button" class="btn ghost sm" id="btnLogout" hidden>Déconnexion</button>
+  </div>
+</div>
+
+<dialog id="claimDialog" class="modal">
+  <div id="regStep">
+    <h2>Bienvenue dans le challenge</h2>
+    <p class="hint">Une seule fois, pour créer ton profil. Il sera lié à ton compte&nbsp;: personne d'autre ne pourra saisir tes parties.</p>
+
+    <div class="form" style="grid-template-columns:1fr">
+      <div class="field">
+        <label for="regId">Ton pseudo League, avec le hashtag</label>
+        <input type="text" id="regId" placeholder="Pseudo#EUW" autocomplete="off" spellcheck="false" required>
+        <span class="fieldnote" id="regIdNote">Copie-le depuis le client&nbsp;: il doit contenir un #</span>
+      </div>
+    </div>
+
+    <div class="form">
+      <div class="field">
+        <label for="regTier">Palier actuel</label>
+        <select id="regTier" required></select>
+      </div>
+      <div class="field">
+        <label for="regDiv">Division</label>
+        <select id="regDiv" required>
+          <option value="1">I</option><option value="2">II</option>
+          <option value="3">III</option><option value="4" selected>IV</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="regLp">LP actuels</label>
+        <input type="number" id="regLp" min="0" max="2000" step="1" placeholder="0" inputmode="numeric" required>
+      </div>
+    </div>
+
+    <div class="regpreview">
+      <span class="crest" id="regCrest"></span>
+      <div>
+        <div class="pn" id="regName">—</div>
+        <div class="psub" id="regRank">—</div>
+      </div>
+    </div>
+
+    <p class="hint">Ton équipe sera <strong>tirée au sort</strong>. Le tirage est fait par le serveur&nbsp;: ni toi ni personne ne peut le forcer.</p>
+    <div class="btnrow">
+      <button type="button" class="btn" id="regGo">Lancer la roulette</button>
+    </div>
+    <div class="log" id="claimLog"></div>
+  </div>
+
+  <div id="wheelStep" hidden>
+    <h2 id="wheelTitle">Tirage de ton équipe</h2>
+    <div class="wheel">
+      <div class="wheelmask"><div class="wheelstrip" id="wheelStrip"></div></div>
+      <div class="wheelneedle"></div>
+    </div>
+    <div class="wheelresult" id="wheelResult" hidden></div>
+    <div class="btnrow" id="wheelDone" hidden>
+      <button type="button" class="btn" id="regClose">C'est parti</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="betDialog" class="modal betmodal">
+  <form method="dialog" class="modalclose" id="betCloseRow"><button class="x" aria-label="Fermer">✕</button></form>
+
+  <div id="betStep1">
+    <h2>Poser ta mise</h2>
+    <p class="hint">Tu pars en duo contre quelqu'un d'en face. Mise bas si tu sens le coup dur, haut si tu es sûr de toi&nbsp;: <strong>plus la mise est grosse, plus la défaite coûte cher</strong>.</p>
+
+    <div class="form" style="grid-template-columns:1fr">
+      <div class="field">
+        <label for="betPartner">Ton adversaire du moment</label>
+        <select id="betPartner"></select>
+      </div>
+    </div>
+
+    <div class="dialwrap">
+      <svg class="dial" id="dial" viewBox="0 0 260 260" role="slider"
+           aria-label="Montant de la mise en LP" aria-valuemin="5" aria-valuemax="50"
+           aria-valuenow="10" tabindex="0">
+        <path id="dialTrack" fill="none" stroke-linecap="round" stroke-width="16"></path>
+        <path id="dialFill"  fill="none" stroke-linecap="round" stroke-width="16"></path>
+        <circle id="dialKnob" r="13" stroke-width="4"></circle>
+        <text id="dialValue" x="130" y="118" text-anchor="middle">10</text>
+        <text id="dialUnit"  x="130" y="140" text-anchor="middle">LP misés</text>
+        <text id="dialWin"   x="130" y="168" text-anchor="middle"></text>
+        <text id="dialLoss"  x="130" y="188" text-anchor="middle"></text>
+      </svg>
+      <div class="dialdetail">
+        <span class="sv win" id="dialWinDetail">—</span>
+        <span class="sv loss" id="dialLossDetail">—</span>
+      </div>
+      <div class="dialhint hint">Fais glisser sur l'anneau, ou utilise les flèches du clavier.</div>
+    </div>
+
+    <div class="btnrow" style="justify-content:center">
+      <button type="button" class="btn" id="betLock">Verrouiller la mise et jouer</button>
+    </div>
+    <div class="log" id="betLog"></div>
+  </div>
+
+  <div id="betStep2" hidden>
+    <h2>Pari en cours</h2>
+    <p class="hint">L'écran reste bloqué jusqu'à ce que tu déclares le résultat. Va jouer ta partie, puis reviens ici.</p>
+
+    <div class="betlocked">
+      <div class="betbig"><b id="lockAmount">0</b> <span>LP misés</span></div>
+      <div class="psub" id="lockAgainst">—</div>
+      <div class="betoutcomes">
+        <span class="sv win" id="lockWin">—</span>
+        <span class="sv loss" id="lockLoss">—</span>
+      </div>
+    </div>
+
+    <div class="form">
+      <div class="field">
+        <label for="betLpIn">LP de la partie</label>
+        <input type="number" id="betLpIn" min="1" max="200" step="1" value="20" inputmode="numeric">
+      </div>
+      <div class="field"><label>&nbsp;</label><button type="button" class="btn win"  id="betResWin">+ Victoire</button></div>
+      <div class="field"><label>&nbsp;</label><button type="button" class="btn loss" id="betResLoss">− Défaite</button></div>
+    </div>
+
+    <div class="log" id="betLog2"></div>
+    <div class="btnrow" style="justify-content:center;margin-top:6px">
+      <button type="button" class="btn ghost sm" id="betAbort">La partie n'a pas eu lieu — annuler</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="syncDialog" class="modal">
+  <form method="dialog" class="modalclose"><button class="x" aria-label="Fermer">✕</button></form>
+  <h2>Recaler mon rang</h2>
+  <p class="hint">Purement cosmétique&nbsp;: remet l'écusson affiché en phase avec ton vrai rang. Ça ne touche pas à ton total de LP nets ni au classement.</p>
+  <div class="form">
+    <div class="field">
+      <label for="fTier">Palier</label>
+      <select id="fTier"></select>
+    </div>
+    <div class="field">
+      <label for="fDiv">Division</label>
+      <select id="fDiv"><option value="1">I</option><option value="2">II</option><option value="3">III</option><option value="4" selected>IV</option></select>
+    </div>
+    <div class="field">
+      <label for="fRankLp">LP actuels</label>
+      <input type="number" id="fRankLp" min="0" max="2000" step="1" value="0" inputmode="numeric">
+    </div>
+    <div class="field">
+      <label>&nbsp;</label>
+      <button type="button" class="btn" id="fSync">Recaler</button>
+    </div>
+  </div>
+  <div class="log" id="syncLog"></div>
+</dialog>
+
+<div class="scrim" id="rulesScrim" hidden></div>
+<aside class="drawer" id="rulesDrawer" aria-hidden="true" aria-label="Règlement">
+  <div class="drawerhead">
+    <h2>Règlement</h2>
+    <button type="button" class="x" id="rulesClose" aria-label="Fermer le règlement">✕</button>
+  </div>
+  <nav class="drawertabs" id="rulesTabs" role="tablist"></nav>
+  <div class="drawerbody" id="rulesBody" role="tabpanel"></div>
+</aside>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div>
+      <div class="lbl">SoloQ Challenge · <span id="hDays">21</span> jours · EUW</div>
+      <h1 id="hTitle">Les Médiocres <span class="vs">contre</span> Les Pitoyables</h1>
+      <div class="sub" id="daterange">—</div>
+    </div>
+    <div class="clock">
+      <div class="lbl" id="clocklbl">Jour</div>
+      <div class="big num" id="clockbig">—<span class="clocksmall" id="clocksmall"></span></div>
+      <div class="bar"><i id="clockbar" style="width:0%"></i></div>
+    </div>
+  </header>
+
+  <div class="notice bad" id="errBox" hidden>
+    <span>⚠</span><div id="errTxt"></div>
+  </div>
+
+  <div class="balance">
+    <div class="heads">
+      <div>
+        <div class="tname a" id="tnA">Les Médiocres</div>
+        <div class="tscore a" id="scoreA">—</div>
+      </div>
+      <div class="lbl" style="align-self:center;text-align:center">Balance des LP</div>
+      <div style="text-align:right">
+        <div class="tname b" id="tnB">Les Pitoyables</div>
+        <div class="tscore b" id="scoreB">—</div>
+      </div>
+    </div>
+    <div class="beam">
+      <div class="fa" id="fillA"></div>
+      <div class="fb" id="fillB"></div>
+      <div class="center"></div>
+      <div class="pivot" id="pivot" style="left:50%"></div>
+    </div>
+    <div class="lead" id="leadTxt">—</div>
+  </div>
+
+  <div class="rosters" id="rosters"></div>
+
+  <section class="block" id="entryBlock" hidden>
+    <header>
+      <h2>Déclarer une partie</h2>
+      <span class="pill" id="entryFor">—</span>
+    </header>
+    <div class="body">
+      <div class="sect">
+        <div class="modes" role="tablist" aria-label="Type de partie">
+          <button type="button" class="mode" data-duo="solo"  aria-pressed="true">Solo</button>
+          <button type="button" class="mode" data-duo="team"  aria-pressed="false">Duo allié</button>
+          <button type="button" class="mode" data-duo="enemy" aria-pressed="false">Duo adverse</button>
+        </div>
+        <input type="hidden" id="fDuo" value="solo">
+        <p class="modehint" id="modeHint"></p>
+
+        <div class="form">
+          <div class="field" id="adminPickWrap" hidden>
+            <label for="fPlayer">Joueur (admin)</label>
+            <select id="fPlayer"></select>
+          </div>
+          <div class="field" id="lpWrap">
+            <label for="fLp">LP de la partie</label>
+            <input type="number" id="fLp" min="1" max="200" step="1" value="20" inputmode="numeric">
+          </div>
+          <div class="field" id="partnerWrap" hidden>
+            <label for="fPartner" id="partnerLabel">Avec qui&nbsp;?</label>
+            <select id="fPartner"></select>
+          </div>
+          <div class="field" id="winWrap">
+            <label>&nbsp;</label>
+            <button type="button" class="btn win" id="fWin">+ Victoire</button>
+          </div>
+          <div class="field" id="lossWrap">
+            <label>&nbsp;</label>
+            <button type="button" class="btn loss" id="fLoss">− Défaite</button>
+          </div>
+        </div>
+
+        <div class="betcta" id="betCta" hidden>
+          <button type="button" class="betbtn" id="betOpenBtn">
+            <span>Ouvrir le pari</span>
+            <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M5 12h13m0 0-5.5-5.5M18 12l-5.5 5.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="log" id="entryLog"></div>
+      </div>
+
+      <div class="sect">
+        <h4 id="feedTitle">Mes parties</h4>
+        <div class="feed" id="feed"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <header>
+      <h2>Classement</h2>
+      <div class="seg" role="group" aria-label="Période du classement">
+        <button type="button" id="perAll" aria-pressed="true">Depuis le début</button>
+        <button type="button" id="perWeek" aria-pressed="false">7 derniers jours</button>
+      </div>
+    </header>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="pos">#</th>
+            <th class="avh"></th>
+            <th>Joueur</th>
+            <th class="r">LP nets</th>
+            <th class="r">Winrate</th>
+            <th class="r">LP / partie</th>
+            <th class="r">Meilleur jour</th>
+            <th>10 dernières</th>
+            <th>Rang estimé</th>
+          </tr>
+        </thead>
+        <tbody id="ladder"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="block">
+    <header>
+      <h2>Progression</h2>
+      <div class="seg" role="group" aria-label="Granularité du graphique">
+        <button type="button" id="chartPlayers" aria-pressed="true">Joueurs</button>
+        <button type="button" id="chartTeams" aria-pressed="false">Équipes</button>
+      </div>
+    </header>
+    <div class="charttools">
+      <span class="lbl">Échelle <b id="zoomLabel">—</b></span>
+      <span class="charthint">Molette pour zoomer · glisser pour se déplacer · double-clic pour tout revoir</span>
+      <button type="button" class="btn ghost sm" id="zoomReset">Tout voir</button>
+    </div>
+    <div class="chartbox"><svg id="chart" viewBox="0 0 920 360" role="img" aria-label="LP nets cumulés dans le temps"></svg></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <details class="panel" id="adminPanel" hidden>
+    <summary>Administration</summary>
+    <div class="body">
+      <div class="sect">
+        <h4>Réglages du challenge</h4>
+        <div class="form">
+          <div class="field"><label for="aName">Nom</label><input type="text" id="aName"></div>
+          <div class="field"><label for="aStart">Date de début</label><input type="date" id="aStart"></div>
+          <div class="field"><label for="aDays">Durée (jours)</label><input type="number" id="aDays" min="1" max="365"></div>
+          <div class="field"><label for="aTeamA">Équipe A</label><input type="text" id="aTeamA"></div>
+          <div class="field"><label for="aTeamB">Équipe B</label><input type="text" id="aTeamB"></div>
+          <div class="field"><label>&nbsp;</label><button type="button" class="btn" id="aSaveChallenge">Enregistrer</button></div>
+        </div>
+      </div>
+      <div class="sect">
+        <h4>Joueurs</h4>
+        <p class="hint">Modifie les pseudos, les tags et la répartition des équipes. « Libérer » détache le compte associé pour qu'un autre puisse réclamer le profil.</p>
+        <div class="tablewrap"><table class="admintable" id="aPlayers"></table></div>
+        <div class="btnrow"><button type="button" class="btn" id="aSavePlayers">Enregistrer les joueurs</button></div>
+      </div>
+      <div class="log" id="adminLog"></div>
+    </div>
+  </details>
+
+  <footer>
+    <div id="foot">—</div>
+    <div style="margin-top:8px">
+      <a class="joinlink" href="https://discord.gg/8JEHBD9uY" target="_blank" rel="noopener noreferrer">
+        <svg width="15" height="12" viewBox="0 0 71 55" aria-hidden="true"><path fill="currentColor" d="M60.1 4.9A58.5 58.5 0 0 0 45.6.4a41 41 0 0 0-1.9 3.8 54.1 54.1 0 0 0-16.2 0A40 40 0 0 0 25.5.4 58.4 58.4 0 0 0 11 4.9C1.8 18.6-.7 32 .5 45.2a58.9 58.9 0 0 0 17.8 9 43.3 43.3 0 0 0 3.8-6.2 38.2 38.2 0 0 1-6-2.9l1.5-1.2a42 42 0 0 0 36 0l1.5 1.2a38.2 38.2 0 0 1-6 2.9 42.9 42.9 0 0 0 3.8 6.2 58.7 58.7 0 0 0 17.8-9c1.4-15.3-2.4-28.6-10.6-40.3ZM23.7 37.1c-3.5 0-6.4-3.2-6.4-7.2s2.8-7.2 6.4-7.2c3.6 0 6.5 3.3 6.4 7.2 0 4-2.8 7.2-6.4 7.2Zm23.6 0c-3.5 0-6.4-3.2-6.4-7.2s2.8-7.2 6.4-7.2c3.6 0 6.5 3.3 6.4 7.2 0 4-2.8 7.2-6.4 7.2Z"/></svg>
+        Rejoindre le Discord
+      </a>
+    </div>
+  </footer>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

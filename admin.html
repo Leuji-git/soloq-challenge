@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Console — SoloQ Challenge</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%9A%99%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&family=Outfit:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="in">
+    <div class="who" id="whoBox"><span class="lbl">Chargement…</span></div>
+    <a class="btn ghost sm" href="index.html">← Le classement</a>
+    <button type="button" class="btn discord" id="btnLogin" hidden>Se connecter avec Discord</button>
+    <button type="button" class="btn ghost sm" id="btnLogout" hidden>Déconnexion</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div>
+      <div class="lbl">Réservé aux administrateurs</div>
+      <h1>Console</h1>
+      <div class="sub" id="sub">—</div>
+    </div>
+  </header>
+
+  <div class="notice bad" id="errBox" hidden><span>⚠</span><div id="errTxt"></div></div>
+
+  <div class="notice" id="gateBox" hidden><span>🔒</span><div id="gateTxt"></div></div>
+
+  <div id="panels" hidden>
+
+    <!-- ---------- challenge ---------- -->
+    <section class="block">
+      <header><h2>Le challenge</h2></header>
+      <div class="body">
+        <div class="form">
+          <div class="field"><label for="cName">Nom affiché</label><input type="text" id="cName"></div>
+          <div class="field"><label for="cStart">Date de début</label><input type="date" id="cStart"></div>
+          <div class="field"><label for="cDays">Durée (jours)</label><input type="number" id="cDays" min="1" max="365"></div>
+          <div class="field"><label for="cTeamA">Équipe A</label><input type="text" id="cTeamA"></div>
+          <div class="field"><label for="cTeamB">Équipe B</label><input type="text" id="cTeamB"></div>
+          <div class="field"><label>&nbsp;</label><button type="button" class="btn" id="cSave">Enregistrer</button></div>
+        </div>
+        <p class="hint">Le nom s'affiche coupé en deux autour du mot « contre » sur la page publique. La date de début pilote le compte à rebours et le verrou de saisie.</p>
+        <div class="log" id="cLog"></div>
+      </div>
+    </section>
+
+    <!-- ---------- joueurs ---------- -->
+    <section class="block">
+      <header>
+        <h2>Joueurs</h2>
+        <span class="pill" id="pCount">—</span>
+      </header>
+      <div class="tablewrap">
+        <table id="pTable">
+          <thead>
+            <tr>
+              <th>Pseudo</th><th>Tag</th><th>Équipe</th>
+              <th>Rang de départ</th><th>Compte lié</th><th class="r">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="pBody"></tbody>
+        </table>
+      </div>
+      <div class="body">
+        <div class="sect">
+          <h4>Ajouter un joueur</h4>
+          <div class="form">
+            <div class="field"><label for="nId">Identifiant court</label><input type="text" id="nId" placeholder="ex. kevin"></div>
+            <div class="field"><label for="nName">Pseudo</label><input type="text" id="nName"></div>
+            <div class="field"><label for="nTag">Tag</label><input type="text" id="nTag" placeholder="EUW"></div>
+            <div class="field"><label for="nTeam">Équipe</label><select id="nTeam"></select></div>
+            <div class="field"><label>&nbsp;</label><button type="button" class="btn" id="nAdd">Ajouter</button></div>
+          </div>
+        </div>
+        <div class="btnrow"><button type="button" class="btn" id="pSave">Enregistrer les modifications</button></div>
+        <div class="log" id="pLog"></div>
+      </div>
+    </section>
+
+    <!-- ---------- parties ---------- -->
+    <section class="block">
+      <header>
+        <h2>Parties déclarées</h2>
+        <div class="btnrow">
+          <select id="gFilter" style="width:auto"></select>
+          <span class="pill" id="gCount">—</span>
+        </div>
+      </header>
+      <div class="body">
+        <div class="sect">
+          <h4>Ajouter une partie à la main</h4>
+          <p class="hint">Pour corriger un oubli. En tant qu'admin tu n'es pas soumis à la fenêtre de dates du challenge.</p>
+          <div class="form">
+            <div class="field"><label for="gPlayer">Joueur</label><select id="gPlayer"></select></div>
+            <div class="field"><label for="gLp">LP</label><input type="number" id="gLp" min="1" max="200" value="20"></div>
+            <div class="field"><label for="gDate">Date</label><input type="date" id="gDate"></div>
+            <div class="field"><label for="gDuo">Duo</label>
+              <select id="gDuo"><option value="solo">Solo</option><option value="team">Coéquipier</option><option value="enemy">Adversaire</option></select>
+            </div>
+            <div class="field"><label for="gSteal">LP sacrifiés</label><input type="number" id="gSteal" min="0" max="200" value="0"></div>
+            <div class="field"><label>&nbsp;</label><button type="button" class="btn win" id="gWin">+ Victoire</button></div>
+            <div class="field"><label>&nbsp;</label><button type="button" class="btn loss" id="gLoss">− Défaite</button></div>
+          </div>
+          <div class="log" id="gLog"></div>
+        </div>
+        <div class="feed" id="gFeed" style="max-height:420px"></div>
+      </div>
+    </section>
+
+    <!-- ---------- comptes ---------- -->
+    <section class="block">
+      <header><h2>Comptes connectés</h2></header>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th class="avh"></th><th>Compte Discord</th><th>Profil joueur</th><th class="r">Administrateur</th></tr></thead>
+          <tbody id="aBody"></tbody>
+        </table>
+      </div>
+      <div class="body"><div class="log" id="aLog"></div></div>
+    </section>
+
+    <!-- ---------- zone rouge ---------- -->
+    <section class="block danger">
+      <header><h2>Zone rouge</h2></header>
+      <div class="body">
+        <p class="hint">Irréversible. À n'utiliser que pour nettoyer les parties de test avant le lancement.</p>
+        <div class="btnrow">
+          <button type="button" class="btn loss" id="wipe">Supprimer toutes les parties</button>
+          <span class="log" id="wLog"></span>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <footer>Console d'administration · les droits sont vérifiés par la base, pas par cette page</footer>
+</div>
+
+<script type="module" src="admin.js"></script>
+</body>
+</html>
