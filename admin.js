@@ -23,7 +23,7 @@ const signed = n => (n>0 ? "+" : n<0 ? "−" : "±") + Math.abs(n);
 const iso = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 const emblem = t => "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-shared-components/global/default/" + t.toLowerCase() + ".png";
 
-const S = { challenge:null, players:[], games:[], profiles:[], session:null, me:null };
+const S = { challenge:null, players:[], games:[], profiles:[], snaps:{}, sync:null, session:null, me:null };
 let gameFilter = "all";
 
 let sb = null;
@@ -48,19 +48,23 @@ const playerById = id => S.players.find(p => p.id === id);
 /* =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, pr] = await Promise.all([
+  const [ch, pl, gm, pr, sn, st] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at", { ascending:false }),
-    sb.from("profiles").select("id, display_name, avatar_url, is_admin")
+    sb.from("profiles").select("id, display_name, avatar_url, is_admin"),
+    sb.from("rank_snapshots").select("*"),
+    sb.from("sync_state").select("*").eq("id",1).maybeSingle()
   ]);
-  const err = ch.error || pl.error || gm.error || pr.error;
+  const err = ch.error || pl.error || gm.error || pr.error || sn.error || st.error;
   if(err) return fatal("<b>Base injoignable</b><br>" + esc(err.message));
 
   S.challenge = ch.data;
   S.players   = pl.data || [];
   S.games     = gm.data || [];
   S.profiles  = pr.data || [];
+  S.snaps     = Object.fromEntries((sn.data || []).map(r => [r.player_id, r]));
+  S.sync      = st.data || null;
   S.me = S.session ? S.profiles.find(p => p.id === S.session.user.id) || null : null;
   render();
 }
@@ -96,6 +100,7 @@ function render(){
     + S.profiles.filter(p => p.is_admin).length + " administrateur(s)";
 
   renderChallenge();
+  renderSync();
   renderPlayers();
   renderGames();
   renderAccounts();
@@ -111,6 +116,21 @@ function renderChallenge(){
   $("#cTeamB").value = c.team_b_name;
 }
 
+function renderSync(){
+  const st = S.sync, pill = $("#sPill"), det = $("#sDetail");
+  if(!st || !st.last_run){
+    pill.className = "syncpill wait"; pill.textContent = "Jamais lancé";
+    det.textContent = "Vérifie que la fonction « riot » est déployée et que la tâche planifiée tourne.";
+    return;
+  }
+  const depuis = t => { const m = Math.floor((Date.now() - new Date(t).getTime()) / 60000); return m < 1 ? "à l'instant" : "il y a " + m + " min"; };
+  const retard = !st.last_ok || (Date.now() - new Date(st.last_ok).getTime()) > 12 * 60000;
+  pill.className = "syncpill " + (st.last_error ? "err" : retard ? "wait" : "ok");
+  pill.textContent = st.last_error ? "Perturbé" : retard ? "En retard" : "Opérationnel";
+  det.textContent = "Dernier relevé réussi : " + (st.last_ok ? depuis(st.last_ok) : "jamais")
+    + (st.last_error ? " · " + st.last_error : "");
+}
+
 function tierSelect(cls, sel){
   return '<select class="'+cls+'">' + TIERS.map(([k,fr]) =>
     '<option value="'+k+'"'+(k===sel?" selected":"")+'>'+fr+'</option>').join("") + '</select>';
@@ -123,23 +143,29 @@ function renderPlayers(){
     + '<option value="b"'+(sel==="b"?" selected":"")+'>'+esc(teamName("b"))+'</option></select>';
 
   $("#pBody").innerHTML = S.players.map(p => {
-    const r = fromScore(p.seed_score);
+    const snap = S.snaps[p.id];
     const prof = p.claimed_by ? S.profiles.find(x => x.id === p.claimed_by) : null;
-    const linked = prof
+    const discord = prof
       ? (prof.avatar_url ? '<img class="av" src="'+esc(prof.avatar_url)+'" alt="">' : '')
         + ' <span class="wl">'+esc(prof.display_name || "compte")+'</span>'
-      : '<span class="wr">libre</span>';
+      : '<span class="wr">aucun compte Discord</span>';
+    const riotOk = !!p.puuid;
+    const rang = snap && snap.ranked && snap.tier
+      ? '<img class="minicrest" src="'+emblem(snap.tier)+'" alt=""> <span class="wl">'
+        + esc(TIERS[TIDX[snap.tier]][1] + (TIDX[snap.tier] >= APEX ? "" : " " + ROMAN[snap.division]) + " · " + snap.lp + " LP")
+        + '</span><div class="wr">'+snap.wins+'V '+snap.losses+'D</div>'
+      : '<span class="wr">'+(riotOk ? "non classé" : "—")+'</span>';
+    // Un compte rattaché porte le pseudo officiel de Riot : on ne le modifie plus.
+    const verrou = riotOk ? ' disabled title="Pseudo officiel relevé chez Riot"' : '';
     return '<tr data-id="'+esc(p.id)+'">'
-      + '<td><input type="text" class="pn2" value="'+esc(p.name)+'"></td>'
-      + '<td style="width:110px"><input type="text" class="pt2" value="'+esc(p.tag)+'"></td>'
+      + '<td><input type="text" class="pn2" value="'+esc(p.name)+'"'+verrou+'></td>'
+      + '<td style="width:110px"><input type="text" class="pt2" value="'+esc(p.tag)+'"'+verrou+'></td>'
       + '<td style="width:150px">'+teamSel(p.team)+'</td>'
-      + '<td style="width:250px"><div class="inline">'
-        + '<img class="minicrest" src="'+emblem(r.t)+'" alt="">'
-        + tierSelect("ptier", r.t)
-        + '<select class="pdiv">' + [1,2,3,4].map(d => '<option value="'+d+'"'+(d===r.d?" selected":"")+'>'+ROMAN[d]+'</option>').join("") + '</select>'
-        + '<input type="number" class="plp2" value="'+r.lp+'" min="0" max="2000" style="width:74px">'
-      + '</div></td>'
-      + '<td>'+linked+'</td>'
+      + '<td style="width:200px"><div class="inline">'+rang+'</div></td>'
+      + '<td>'+(riotOk
+          ? '<span class="pill live">Riot rattaché</span>'
+          : '<span class="pill">En attente</span><div class="wr">rattaché au prochain relevé si le pseudo est exact</div>')
+        + '<div style="margin-top:4px">'+discord+'</div></td>'
       + '<td class="r"><div class="btnrow" style="justify-content:flex-end">'
         + (p.claimed_by ? '<button type="button" class="btn ghost sm release">Délier</button>' : '')
         + '<button type="button" class="btn ghost sm del">Supprimer</button>'
@@ -152,9 +178,6 @@ function renderPlayers(){
     b.addEventListener("click", () => deletePlayer(b.closest("tr").dataset.id)));
 
   const opts = S.players.map(p => '<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join("");
-  const keep = $("#gPlayer").value;
-  $("#gPlayer").innerHTML = opts;
-  if(keep && S.players.some(p => p.id === keep)) $("#gPlayer").value = keep;
 
   const kf = $("#gFilter").value;
   $("#gFilter").innerHTML = '<option value="all">Tous les joueurs</option>' + opts;
@@ -165,19 +188,24 @@ function renderPlayers(){
 
 function renderGames(){
   const list = gameFilter === "all" ? S.games : S.games.filter(g => g.player_id === gameFilter);
-  $("#gCount").textContent = list.length + " parties";
+  $("#gCount").textContent = list.filter(g => g.kind !== "adjust").length + " parties";
   if(!list.length){ $("#gFeed").innerHTML = '<div class="empty">Aucune partie.</div>'; return; }
 
   $("#gFeed").innerHTML = list.slice(0, 300).map(g => {
     const p = playerById(g.player_id);
     const bits = [];
-    if(g.duo === "team")  bits.push("duo");
-    if(g.duo === "enemy") bits.push("duo adverse");
-    if(g.steal)           bits.push(g.steal + " sacrifiés → −" + (g.steal*2) + " pour eux");
+    if(g.kind === "adjust") bits.push("ajustement hors partie");
+    else {
+      bits.push(g.win ? "victoire" : "défaite");
+      if(g.champion) bits.push(g.champion);
+      if(g.duo === "team")  bits.push("duo allié");
+      if(g.duo === "enemy") bits.push(g.stake ? "duo adverse, pari " + g.stake + " LP" : "duo adverse sans pari");
+      if(g.approx) bits.push("LP estimés");
+    }
     return '<div class="row">'
-      + '<span class="delta '+(g.lp>=0?"up":"down")+'" style="min-width:52px">'+signed(g.lp)+'</span>'
+      + '<span class="delta '+(g.lp>=0?"up":"down")+'" style="min-width:52px">'+(g.approx ? "≈" : "")+signed(g.lp)+'</span>'
       + '<span class="wl" style="min-width:130px">'+esc(p ? p.name : g.player_id)+'</span>'
-      + '<span class="g">'+esc(g.played_on)+' · '+(g.win?"victoire":"défaite")+(bits.length ? " · "+esc(bits.join(" · ")) : "")+'</span>'
+      + '<span class="g">'+esc(g.played_on)+' · '+esc(bits.join(" · "))+'</span>'
       + '<button type="button" class="x" data-id="'+esc(g.id)+'" aria-label="Supprimer">✕</button></div>';
   }).join("");
 
@@ -216,15 +244,13 @@ async function saveChallenge(){
 
 async function savePlayers(){
   for(const tr of $("#pBody").querySelectorAll("tr")){
-    const t  = tr.querySelector(".ptier").value;
-    const d  = parseInt(tr.querySelector(".pdiv").value, 10);
-    const lp = parseInt(tr.querySelector(".plp2").value, 10) || 0;
-    const { error } = await sb.from("players").update({
-      name: tr.querySelector(".pn2").value.trim(),
-      tag:  tr.querySelector(".pt2").value.trim(),
-      team: tr.querySelector(".pteam").value,
-      seed_score: toScore(t, d, lp)
-    }).eq("id", tr.dataset.id);
+    const p = playerById(tr.dataset.id);
+    const maj = { team: tr.querySelector(".pteam").value };
+    if(p && !p.puuid){                       // pseudo modifiable tant que Riot n'est pas rattaché
+      maj.name = tr.querySelector(".pn2").value.trim();
+      maj.tag  = tr.querySelector(".pt2").value.trim();
+    }
+    const { error } = await sb.from("players").update(maj).eq("id", tr.dataset.id);
     if(error) return say("#pLog", "Erreur : " + error.message, true);
   }
   say("#pLog", "Joueurs enregistrés.");
@@ -261,22 +287,39 @@ async function releasePlayer(id){
   await loadAll();
 }
 
-async function addGame(win){
-  const raw = Math.abs(parseInt($("#gLp").value, 10) || 0);
-  if(!raw) return say("#gLog", "Indique le nombre de LP.", true);
-  const duo = $("#gDuo").value;
-  const steal = (duo === "enemy" && win) ? Math.min(Math.abs(parseInt($("#gSteal").value,10) || 0), raw) : 0;
-  const { error } = await sb.from("games").insert({
-    player_id: $("#gPlayer").value,
-    lp: win ? raw : -raw,
-    win, duo, steal,
-    played_on: $("#gDate").value || iso(new Date())
-  });
-  say("#gLog", error ? "Erreur : " + error.message : "Partie ajoutée.", !!error);
-  await loadAll();
+async function forceSync(){
+  const btn = $("#sForce");
+  btn.disabled = true;
+  say("#gLog", "Relevé en cours chez Riot…");
+  try{
+    const { data, error } = await sb.functions.invoke("riot", { body: { action: "sync", force: true } });
+    let res = data;
+    if(error){
+      let msg = error.message;
+      try{ const b = await error.context.json(); if(b && b.error) msg = b.error; }catch(_){}
+      throw new Error(msg);
+    }
+    if(res && res.error) throw new Error(res.error);
+    if(res && res.skipped){ say("#gLog", "Un relevé est déjà en cours, réessaie dans une minute."); }
+    else {
+      const parts = [res.games + " partie(s)"];
+      if(res.linked)  parts.push(res.linked + " compte(s) rattaché(s)");
+      if(res.bets)    parts.push(res.bets + " pari(s) résolu(s)");
+      if(res.adjusts) parts.push(res.adjusts + " ajustement(s)");
+      if(res.waiting && res.waiting.length) parts.push("en attente : " + res.waiting.join(", "));
+      const erreurs = res.errors && res.errors.length ? " — " + res.errors.join(" | ") : "";
+      say("#gLog", "Relevé terminé : " + parts.join(", ") + "." + erreurs, !!erreurs);
+    }
+  }catch(e){
+    say("#gLog", "Relevé impossible : " + e.message, true);
+  }finally{
+    btn.disabled = false;
+    await loadAll();
+  }
 }
 
 async function deleteGame(id){
+  if(!confirm("Supprimer cette ligne ? Elle ne sera pas réimportée : son identifiant Riot reste connu.")) return;
   const { error } = await sb.from("games").delete().eq("id", id);
   say("#gLog", error ? "Erreur : " + error.message : "Partie supprimée.", !!error);
   await loadAll();
@@ -301,12 +344,10 @@ async function wipeGames(){
 
 /* ===================== câblage ===================== */
 function initUI(){
-  $("#gDate").value = iso(new Date());
   $("#cSave").addEventListener("click", saveChallenge);
   $("#pSave").addEventListener("click", savePlayers);
   $("#nAdd").addEventListener("click", addPlayer);
-  $("#gWin").addEventListener("click", () => addGame(true));
-  $("#gLoss").addEventListener("click", () => addGame(false));
+  $("#sForce").addEventListener("click", forceSync);
   $("#wipe").addEventListener("click", wipeGames);
   $("#gFilter").addEventListener("change", e => { gameFilter = e.target.value; renderGames(); });
   $("#btnLogin").addEventListener("click", async () => {

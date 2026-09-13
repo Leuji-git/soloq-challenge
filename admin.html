@@ -50,7 +50,7 @@
           <div class="field"><label for="cTeamB">Équipe B</label><input type="text" id="cTeamB"></div>
           <div class="field"><label>&nbsp;</label><button type="button" class="btn" id="cSave">Enregistrer</button></div>
         </div>
-        <p class="hint">Le nom s'affiche coupé en deux autour du mot « contre » sur la page publique. La date de début pilote le compte à rebours et le verrou de saisie.</p>
+        <p class="hint">Le nom s'affiche coupé en deux autour du mot « contre » sur la page publique. La date de début pilote le compte à rebours : seules les parties lancées pendant le challenge sont relevées.</p>
         <div class="log" id="cLog"></div>
       </div>
     </section>
@@ -66,7 +66,7 @@
           <thead>
             <tr>
               <th>Pseudo</th><th>Tag</th><th>Équipe</th>
-              <th>Rang de départ</th><th>Compte lié</th><th class="r">Actions</th>
+              <th>Rang actuel</th><th>Riot / Discord</th><th class="r">Actions</th>
             </tr>
           </thead>
           <tbody id="pBody"></tbody>
@@ -91,7 +91,7 @@
     <!-- ---------- parties ---------- -->
     <section class="block">
       <header>
-        <h2>Parties déclarées</h2>
+        <h2>Parties relevées</h2>
         <div class="btnrow">
           <select id="gFilter" style="width:auto"></select>
           <span class="pill" id="gCount">—</span>
@@ -99,18 +99,12 @@
       </header>
       <div class="body">
         <div class="sect">
-          <h4>Ajouter une partie à la main</h4>
-          <p class="hint">Pour corriger un oubli. En tant qu'admin tu n'es pas soumis à la fenêtre de dates du challenge.</p>
-          <div class="form">
-            <div class="field"><label for="gPlayer">Joueur</label><select id="gPlayer"></select></div>
-            <div class="field"><label for="gLp">LP</label><input type="number" id="gLp" min="1" max="200" value="20"></div>
-            <div class="field"><label for="gDate">Date</label><input type="date" id="gDate"></div>
-            <div class="field"><label for="gDuo">Duo</label>
-              <select id="gDuo"><option value="solo">Solo</option><option value="team">Coéquipier</option><option value="enemy">Adversaire</option></select>
-            </div>
-            <div class="field"><label for="gSteal">LP sacrifiés</label><input type="number" id="gSteal" min="0" max="200" value="0"></div>
-            <div class="field"><label>&nbsp;</label><button type="button" class="btn win" id="gWin">+ Victoire</button></div>
-            <div class="field"><label>&nbsp;</label><button type="button" class="btn loss" id="gLoss">− Défaite</button></div>
+          <h4>Suivi automatique</h4>
+          <p class="hint">Les parties sont relevées chez Riot toutes les 3 minutes. Aucune saisie manuelle n'est possible : tu peux seulement supprimer une ligne erronée, qui ne sera pas réimportée.</p>
+          <div class="syncbox">
+            <span class="syncpill wait" id="sPill">—</span>
+            <span class="wr" id="sDetail">—</span>
+            <button type="button" class="btn ghost sm" id="sForce">Forcer un relevé</button>
           </div>
           <div class="log" id="gLog"></div>
         </div>

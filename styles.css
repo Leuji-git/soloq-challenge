@@ -754,3 +754,26 @@ dialog.modal .form{margin-bottom:12px}
   .betbtn:hover{transform:none}
   .betbtn::after{display:none}
 }
+
+/* ---------- état du relevé automatique ---------- */
+.syncpill{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase;white-space:nowrap;
+  padding:4px 11px 4px 22px;border-radius:var(--pill);position:relative;
+  background:var(--surface-2);color:var(--muted);
+}
+.syncpill::before{
+  content:"";position:absolute;left:10px;top:50%;width:6px;height:6px;margin-top:-3px;
+  border-radius:var(--pill);background:currentColor;
+}
+.syncpill.ok{color:var(--up);background:color-mix(in srgb, var(--up) 13%, transparent)}
+.syncpill.wait{color:var(--accent);background:color-mix(in srgb, var(--accent) 13%, transparent)}
+.syncpill.err{color:var(--down);background:color-mix(in srgb, var(--down) 13%, transparent)}
+
+.wheelrank{
+  display:block;margin-top:6px;
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:13px;font-weight:600;
+  color:var(--muted);letter-spacing:.02em;
+}
+.syncbox{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.syncbox .wr{flex:1 1 260px}

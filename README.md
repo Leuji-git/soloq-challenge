@@ -1,6 +1,8 @@
 # SoloQ Challenge
 
 Site statique + Supabase. Aucune étape de build : les fichiers sont servis tels quels.
+Les parties sont **relevées automatiquement chez Riot** par une Edge Function Supabase :
+personne ne déclare rien.
 
 ```
 index.html      le classement public
@@ -11,6 +13,7 @@ styles.css      le design
 config.js       l'URL et la clé publique Supabase
 vercel.json     en-têtes de sécurité
 supabase/       les scripts SQL
+supabase/functions/riot/index.ts   la fonction serveur qui interroge Riot
 ```
 
 ---
@@ -26,6 +29,90 @@ supabase/       les scripts SQL
 | 3 | `registration.sql` | Inscription auto-service + tirage d'équipe côté serveur |
 | 4 | `bets.sql` | Partenaires de duo et paris verrouillés |
 | 5 | `bet-required.sql` | Rend le pari obligatoire en duo adverse (mise ≥ 5) |
+| 6 | `riot-api.sql` | Suivi automatique : relevés, verrouillage des écritures, tâche planifiée — **après** avoir déployé la fonction |
+
+---
+
+## Suivi automatique par l'API Riot
+
+### Comment ça marche
+
+L'API Riot ne donne pas les LP d'une partie. La fonction relève le rang de chaque
+joueur toutes les 3 minutes (League-V4) ; quand son total victoires + défaites
+augmente, l'écart de LP entre deux relevés est le gain de la partie. Match-V5
+dit laquelle, le champion, et si un autre joueur du challenge était dans la même
+équipe (duo allié ou adverse, reconnu tout seul).
+
+- **Promotions / rétrogradations** : gérées, le calcul passe par le score absolu.
+- **Deux parties entre deux relevés** : total exact, répartition estimée (« ≈ »).
+- **Esquive / décroissance** : enregistrée comme *ajustement*, compte dans le net.
+- **Remakes, Flex, ARAM, placements** : ignorés.
+- **Hors des dates du challenge** : ignoré.
+- **Pari** : ne s'applique qu'à un duo adverse *lancé après* son ouverture ;
+  s'éteint sans effet au bout de 6 h.
+
+### La clé API Riot
+
+| Type | Durée | Usage |
+|---|---|---|
+| Développement | **expire toutes les 24 h** | pour mettre en place et tester |
+| Personnelle | n'expire pas | pour le challenge — **environ 2 semaines d'examen** |
+
+Demande la clé personnelle sur <https://developer.riotgames.com> → **Register Product** → *Personal*.
+
+### 1. Déployer la fonction
+
+Supabase → **Edge Functions** → **Deploy a new function** → **Via Editor**.
+
+- Nom : `riot` (exactement)
+- Colle tout le contenu de `supabase/functions/riot/index.ts`
+- **Deploy**
+
+Puis, dans les réglages de la fonction, **désactive « Verify JWT »**.
+
+> ⚠️ Bug connu du tableau de bord : cet interrupteur **se réactive tout seul à chaque
+> modification** de la fonction. Revérifie-le après chaque mise à jour. S'il est
+> réactivé, la tâche planifiée échoue ; le site continue de relancer des relevés
+> pour les joueurs connectés, mais la console affichera « En retard ».
+
+### 2. Ajouter la clé
+
+Supabase → **Edge Functions** → **Secrets** → nouveau secret :
+
+```
+RIOT_API_KEY = RGAPI-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+Avec une clé de développement, reviens la remplacer ici chaque jour.
+
+### 3. Lancer `supabase/riot-api.sql`
+
+Il crée les tables de relevé, **ferme toute écriture de partie depuis le navigateur**,
+et programme le relevé toutes les 3 minutes.
+
+Si `create extension pg_cron` est refusé : **Database → Extensions**, active
+`pg_cron` et `pg_net`, puis relance le script.
+
+### 4. Pousser le nouveau site
+
+Enchaîne-le juste après le script SQL : l'ancien site ne sait plus écrire une fois
+le script passé, et le nouveau a besoin des tables qu'il crée.
+
+### 5. Vérifier
+
+Console admin → **Parties relevées** → **Forcer un relevé**. Le compte rendu doit
+indiquer les comptes rattachés : les joueurs inscrits avant le suivi automatique
+sont retrouvés à partir de leur pseudo et de leur tag.
+
+Un joueur « En attente » dont le compte reste introuvable a une faute dans son
+pseudo : corrige-la dans la console (possible tant que Riot n'est pas rattaché).
+
+### Tester avant le 1er octobre
+
+Seules les parties du challenge sont relevées. Pour voir une vraie partie arriver :
+avance la date de début à aujourd'hui dans la console, joue une classée, attends
+quelques minutes, puis **Zone rouge → Supprimer toutes les parties** et remets la
+vraie date.
 
 ---
 

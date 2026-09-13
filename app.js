@@ -35,7 +35,7 @@ function fromScore(s){
   const i = Math.floor(s/400), rest = s - i*400;
   return { t:TIERS[i].k, d:4 - Math.floor(rest/100), lp:rest%100 };
 }
-const rankLabel = r => TIDX[r.t] >= APEX
+const rankLabel = r => r.unranked ? "Non classé" : TIDX[r.t] >= APEX
   ? TIERS[TIDX[r.t]].fr + " " + r.lp + " LP"
   : TIERS[TIDX[r.t]].fr + " " + ROMAN[r.d] + " · " + r.lp + " LP";
 const shortRank = r => TIDX[r.t] >= APEX ? TIERS[TIDX[r.t]].fr : TIERS[TIDX[r.t]].fr + " " + ROMAN[r.d];
@@ -60,7 +60,8 @@ const S = {
   challenge: null,
   players: [],
   games: [],
-  syncs: {},
+  snaps: {},        // id joueur -> dernier rang relevé chez Riot
+  sync: null,       // état du relevé automatique
   profiles: {},     // id du compte -> { display_name, avatar_url, is_admin }
   bets: {},         // id joueur -> pari ouvert
   session: null,
@@ -95,23 +96,25 @@ if(!SUPABASE_URL || SUPABASE_URL.includes("xxxxxxxx") || SUPABASE_ANON_KEY.inclu
 =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, sy, pr, bt] = await Promise.all([
+  const [ch, pl, gm, sn, pr, bt, st] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at"),
-    sb.from("rank_syncs").select("*"),
+    sb.from("rank_snapshots").select("*"),
     sb.from("profiles").select("id, display_name, avatar_url, is_admin"),
-    sb.from("pending_bets").select("*")
+    sb.from("pending_bets").select("*"),
+    sb.from("sync_state").select("*").eq("id",1).maybeSingle()
   ]);
-  const err = ch.error || pl.error || gm.error || sy.error || pr.error || bt.error;
+  const err = ch.error || pl.error || gm.error || sn.error || pr.error || bt.error || st.error;
   if(err){
-    fatal("<b>Base injoignable</b><br>" + esc(err.message) + "<br>Vérifie que <code>supabase/schema.sql</code> a bien été exécuté dans le SQL Editor.");
+    fatal("<b>Base injoignable</b><br>" + esc(err.message) + "<br>Vérifie que <code>supabase/riot-api.sql</code> a bien été exécuté dans le SQL Editor.");
     return;
   }
   S.challenge = ch.data || { name:"SoloQ Challenge", start_date:iso(new Date()), days:21, team_a_name:"Équipe A", team_b_name:"Équipe B" };
   S.players = pl.data || [];
   S.games   = gm.data || [];
-  S.syncs    = Object.fromEntries((sy.data||[]).map(r => [r.player_id, r]));
+  S.snaps    = Object.fromEntries((sn.data||[]).map(r => [r.player_id, r]));
+  S.sync     = st.data || null;
   S.profiles = Object.fromEntries((pr.data||[]).map(r => [r.id, r]));
   S.profile  = S.session ? (S.profiles[S.session.user.id] || null) : null;
   S.bets     = Object.fromEntries((bt.data||[]).map(r => [r.player_id, r]));
@@ -125,7 +128,8 @@ function subscribeRealtime(){
   sb.channel("board")
     .on("postgres_changes", { event:"*", schema:"public", table:"games" },      loadAll)
     .on("postgres_changes", { event:"*", schema:"public", table:"players" },    loadAll)
-    .on("postgres_changes", { event:"*", schema:"public", table:"rank_syncs" }, loadAll)
+    .on("postgres_changes", { event:"*", schema:"public", table:"rank_snapshots" }, loadAll)
+    .on("postgres_changes", { event:"*", schema:"public", table:"sync_state" },  loadAll)
     .on("postgres_changes", { event:"*", schema:"public", table:"challenge" },  loadAll)
     .on("postgres_changes", { event:"*", schema:"public", table:"pending_bets" }, loadAll)
     .subscribe(status => { $("#livePill").hidden = status !== "SUBSCRIBED"; });
@@ -150,13 +154,16 @@ function stateFor(p){
   const all = gamesOf(p.id);
   const from = windowStart();
   const games = all.filter(g => dayOf(g.played_on) >= from);
+  // Le net compte tout, esquives comprises ; victoires et défaites ne
+  // comptent que les vraies parties.
   const net = games.reduce((a,g) => a + g.lp, 0);
-  const w = games.filter(g => g.win).length;
+  const played = games.filter(g => g.kind !== "adjust");
+  const w = played.filter(g => g.win).length;
   const byDay = {};
   games.forEach(g => { const d = dayOf(g.played_on); byDay[d] = (byDay[d]||0) + g.lp; });
   let best = null;
   Object.keys(byDay).forEach(k => { if(!best || byDay[k] > best.lp) best = { day:+k, lp:byDay[k] }; });
-  return { player:p, all, games, net, w, l:games.length - w, best };
+  return { player:p, all, games: played, net, w, l: played.length - w, best };
 }
 const allStates = () => S.players.map(stateFor);
 
@@ -221,14 +228,12 @@ function teamScores(){
   return out;
 }
 
+// Le rang affiché est le vrai rang, relevé chez Riot.
 function estRank(p){
-  const g = gamesOf(p.id);
-  const sync = S.syncs[p.id];
-  let score, after;
-  if(sync){ score = sync.score; after = new Date(sync.synced_at).getTime(); }
-  else    { score = p.seed_score; after = 0; }
-  g.forEach(x => { if(new Date(x.created_at).getTime() > after) score += x.lp; });
-  return fromScore(Math.max(0, score));
+  const s = S.snaps[p.id];
+  if(s && s.ranked && s.tier) return { t: s.tier, d: s.division || 1, lp: s.lp };
+  if(s && !s.ranked) return { t: "IRON", d: 4, lp: 0, unranked: true };
+  return fromScore(Math.max(0, p.seed_score || 0));
 }
 
 /* ===================================================================
@@ -637,75 +642,47 @@ function renderClaim(){
   const dlg = $("#claimDialog");
   const needed = !!S.session && !myPlayer();
   $("#btnClaim").hidden = !needed;
-  $("#btnSync").hidden  = !(S.session && myPlayer());
-  if(!needed){ if(dlg.open) dlg.close(); return; }
-  regPreview();
+  // On ne ferme jamais la fenêtre pendant que la roulette tourne.
+  if(!needed){ if(dlg.open && $("#wheelStep").hidden) dlg.close(); return; }
   if(!dlg.open && !claimDismissed) dlg.showModal();
 }
 
-/* ---------- inscription ---------- */
-function parseRiotId(v){
-  const i = String(v || "").lastIndexOf("#");
-  if(i < 1) return null;
-  const name = v.slice(0, i).trim();
-  const tag  = v.slice(i + 1).trim();
-  return (name && tag) ? { name, tag } : null;
-}
-function regRank(){
-  const t = $("#regTier").value;
-  const d = parseInt($("#regDiv").value, 10);
-  const lp = Math.max(0, Math.min(2000, parseInt($("#regLp").value, 10) || 0));
-  return { t, d, lp };
-}
-function regPreview(){
-  const id = parseRiotId($("#regId").value);
-  const r = regRank();
-  const apex = TIDX[r.t] >= APEX;
-  $("#regDiv").disabled = apex;
-  $("#regName").textContent = id ? id.name + " #" + id.tag : "\u2014";
-  $("#regRank").textContent = rankLabel(r);
-  $("#regCrest").innerHTML = '<img src="' + emblem(r.t) + '" alt="">';
-  $("#regIdNote").classList.toggle("bad", !!$("#regId").value && !id);
+/* Appel de la fonction serveur « riot ». Les erreurs métier arrivent
+   dans le corps de la réponse : on les remonte telles quelles. */
+async function callRiot(action, payload){
+  const { data, error } = await sb.functions.invoke("riot", { body: Object.assign({ action }, payload || {}) });
+  if(error){
+    let msg = error.message;
+    try{ const b = await error.context.json(); if(b && b.error) msg = b.error; }catch(_){}
+    throw new Error(msg);
+  }
+  if(data && data.error) throw new Error(data.error);
+  return data;
 }
 
-function slugify(v){
-  return String(v).toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "joueur";
-}
-
+/* ---------- inscription : le compte est vérifié chez Riot ---------- */
 async function register(){
-  const id = parseRiotId($("#regId").value);
-  if(!id) return say("#claimLog", "Indique ton pseudo complet, avec le # (ex. Pseudo#EUW).", true);
-  if($("#regLp").value === "") return say("#claimLog", "Indique tes LP actuels.", true);
-
-  const r = regRank();
-  let slug = slugify(id.name + "-" + id.tag);
-  if(S.players.some(p => p.id === slug)) slug += "-" + Math.random().toString(36).slice(2, 5);
-
+  const riotId = $("#regId").value.trim();
+  const cut = riotId.lastIndexOf("#");
+  if(cut < 1 || cut === riotId.length - 1){
+    return say("#claimLog", "Indique ton pseudo complet avec le #, par exemple Pseudo#EUW.", true);
+  }
   $("#regGo").disabled = true;
-  say("#claimLog", "Cr\u00e9ation du profil\u2026");
-
-  const { data, error } = await sb.from("players").insert({
-    id: slug,
-    name: id.name,
-    tag: id.tag,
-    team: "a",                       // ignor\u00e9 : la base tranche
-    seed_score: toScore(r.t, TIDX[r.t] >= APEX ? 1 : r.d, r.lp),
-    claimed_by: S.session.user.id,
-    sort: S.players.length + 1
-  }).select().single();
-
-  $("#regGo").disabled = false;
-  if(error) return say("#claimLog", "Impossible : " + error.message, true);
-
-  say("#claimLog", "");
-  await loadAll();
-  spinWheel(data.team);
+  say("#claimLog", "Vérification de ton compte chez Riot…");
+  try{
+    const res = await callRiot("register", { riotId });
+    say("#claimLog", "");
+    spinWheel(res.player.team, res.rank);   // avant le rechargement : la fenêtre reste ouverte
+    await loadAll();
+  }catch(e){
+    say("#claimLog", e.message, true);
+  }finally{
+    $("#regGo").disabled = false;
+  }
 }
 
-/* ---------- roulette : elle r\u00e9v\u00e8le, elle ne d\u00e9cide pas ---------- */
-function spinWheel(team){
+/* ---------- roulette : elle révèle, elle ne décide pas ---------- */
+function spinWheel(team, rank){
   $("#regStep").hidden = true;
   $("#wheelStep").hidden = false;
 
@@ -721,7 +698,6 @@ function spinWheel(team){
   strip.style.transition = "none";
   strip.style.transform = "translateX(0px)";
 
-  // derni\u00e8re cellule de la bonne \u00e9quipe, loin dans la bande
   let target = CELLS - 6;
   while(((target % 2 === 0) ? "a" : "b") !== team) target--;
 
@@ -732,132 +708,22 @@ function spinWheel(team){
     const mask = strip.parentElement.getBoundingClientRect().width;
     const jitter = (Math.random() - 0.5) * cw * 0.5;
     const x = target * (cw + gap) - (mask / 2 - cw / 2) + jitter;
-
     strip.style.transition = "transform 4.2s cubic-bezier(.12,.72,.12,1)";
     strip.style.transform = "translateX(" + (-x) + "px)";
   });
 
+  const rangTxt = rank && rank.ranked
+    ? rankLabel({ t: rank.tier, d: rank.division, lp: rank.lp })
+    : "pas encore classé en Solo/Duo";
   setTimeout(() => {
     const res = $("#wheelResult");
     res.hidden = false;
     res.className = "wheelresult " + team;
-    res.innerHTML = "Tu rejoins <b>" + esc(names[team]) + "</b>";
-    $("#wheelTitle").textContent = "Ton \u00e9quipe";
+    res.innerHTML = "Tu rejoins <b>" + esc(names[team]) + "</b>"
+      + '<span class="wheelrank">Rang relevé chez Riot : ' + esc(rangTxt) + '</span>';
+    $("#wheelTitle").textContent = "Ton équipe";
     $("#wheelDone").hidden = false;
   }, 4400);
-}
-
-/* ---------- duo : partenaire à taguer + état du pari ---------- */
-const MODES = {
-  solo:  { label:"Avec qui ?",   hint:"Une partie classée jouée seul. Renseigne les LP gagnés ou perdus, c'est tout." },
-  team:  { label:"Avec qui ?",   hint:"Duo avec quelqu'un de ton équipe. Tague-le : ça alimente vos winrates communs. Rien d'autre ne change." },
-  enemy: { label:"Contre qui ?", hint:"Duo avec quelqu'un d'en face : le pari est obligatoire. Tout se passe sur l'écran de pari, adversaire compris." }
-};
-
-function setDuo(mode){
-  $("#fDuo").value = mode;
-  document.querySelectorAll(".mode").forEach(b =>
-    b.setAttribute("aria-pressed", String(b.dataset.duo === mode)));
-  duoUI();
-}
-
-function duoUI(){
-  const duo = $("#fDuo").value;
-  const t = targetPlayer();
-  const m = MODES[duo] || MODES.solo;
-
-  const enemy = duo === "enemy";
-  // En duo adverse, tout passe par l'écran de pari : on retire le reste.
-  $("#lpWrap").hidden      = enemy;
-  $("#winWrap").hidden     = enemy;
-  $("#lossWrap").hidden    = enemy;
-  $("#partnerWrap").hidden = enemy || duo === "solo";
-  $("#partnerLabel").textContent = m.label;
-  // En duo adverse on ne laisse que le bouton : pas de texte autour.
-  $("#modeHint").textContent = m.hint;
-  $("#modeHint").hidden = enemy;
-
-  if(duo === "team" && t){
-    const pool = S.players.filter(p => p.id !== t.id
-      && (duo === "team" ? p.team === t.team : p.team !== t.team));
-    const keep = $("#fPartner").value;
-    $("#fPartner").innerHTML = pool.length
-      ? pool.map(p => '<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join("")
-      : '<option value="">Personne dans cette équipe</option>';
-    if(keep && pool.some(p => p.id === keep)) $("#fPartner").value = keep;
-  }
-
-  const bet = t ? S.bets[t.id] : null;
-  $("#betCta").hidden = !(enemy && t && !bet);
-}
-
-/* ------------------------------------------------------------------
-   Écran de pari bloquant : tant qu'une mise est ouverte, on ne fait
-   rien d'autre que déclarer le résultat.
------------------------------------------------------------------- */
-function renderBetLock(){
-  const t = myPlayer();
-  const bet = t ? S.bets[t.id] : null;
-  const dlg = $("#betDialog");
-
-  if(!bet){
-    if(dlg.open && !$("#betStep2").hidden) dlg.close();
-    return;
-  }
-
-  const us   = t.team === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
-  const them = t.team === "a" ? S.challenge.team_b_name : S.challenge.team_a_name;
-  const partner = S.players.find(p => p.id === bet.partner_id);
-  const perte = betLoss(bet.stake);
-
-  $("#lockAmount").textContent  = bet.stake;
-  $("#lockAgainst").textContent = partner ? "En duo contre " + partner.name : "Adversaire non précisé";
-  $("#lockWin").textContent  = "Gagné · " + us + " " + signed(bet.stake) + " · " + them + " " + signed(-bet.stake);
-  $("#lockLoss").textContent = "Perdu · " + us + " " + signed(-perte)    + " · " + them + " " + signed(perte);
-
-  $("#betStep1").hidden = true;
-  $("#betStep2").hidden = false;
-  $("#betCloseRow").hidden = true;          // pas de croix : l'écran est bloqué
-  if(!dlg.open) dlg.showModal();
-}
-
-async function resolveBet(win){
-  const t = myPlayer();
-  const bet = t ? S.bets[t.id] : null;
-  if(!bet) return;
-  const raw = Math.abs(parseInt($("#betLpIn").value, 10) || 0);
-  if(!raw)      return say("#betLog2", "Indique le nombre de LP de la partie.", true);
-  if(raw > 200) return say("#betLog2", "200 LP maximum pour une partie.", true);
-
-  const btns = [$("#betResWin"), $("#betResLoss")];
-  btns.forEach(b => b.disabled = true);
-  const { error } = await sb.from("games").insert({
-    player_id: t.id,
-    lp: win ? raw : -raw,
-    win: win,
-    duo: "enemy",
-    stake: bet.stake,
-    partner_id: bet.partner_id,
-    played_on: iso(new Date())
-  });
-  btns.forEach(b => b.disabled = false);
-  if(error) return say("#betLog2", "Erreur : " + error.message, true);
-
-  await sb.from("pending_bets").delete().eq("player_id", t.id);
-  await loadAll();
-  const gain = win ? bet.stake : -betLoss(bet.stake);
-  say("#entryLog", win
-    ? "Pari remporté : " + bet.stake + " LP pris à l'équipe adverse."
-    : "Pari perdu : " + betLoss(bet.stake) + " LP cédés à l'équipe adverse.");
-}
-
-async function abortBet(){
-  const t = myPlayer();
-  if(!t) return;
-  if(!confirm("Annuler ce pari sans déclarer de résultat ?")) return;
-  const { error } = await sb.from("pending_bets").delete().eq("player_id", t.id);
-  if(error) return say("#betLog2", "Erreur : " + error.message, true);
-  await loadAll();
 }
 
 function targetPlayer(){
@@ -865,25 +731,60 @@ function targetPlayer(){
   return myPlayer();
 }
 
+/* ---------- état du relevé automatique ---------- */
+function renderSyncStatus(){
+  const st = S.sync, pill = $("#syncPill");
+  if(!st || !st.last_ok){
+    pill.className = "syncpill wait";
+    pill.textContent = st && st.last_error ? "Relevé en échec" : "Relevé pas encore lancé";
+    pill.title = st && st.last_error ? st.last_error : "";
+    return;
+  }
+  const min = Math.floor((Date.now() - new Date(st.last_ok).getTime()) / 60000);
+  const etat = st.last_error ? "err" : (min > 12 ? "wait" : "ok");
+  pill.className = "syncpill " + etat;
+  pill.textContent = st.last_error ? "Relevé perturbé"
+    : (min < 1 ? "Relevé à l'instant" : "Relevé il y a " + min + " min");
+  pill.title = st.last_error || "Les parties apparaissent quelques minutes après leur fin.";
+}
+
+function renderBetArea(mine){
+  const bet = mine ? S.bets[mine.id] : null;
+  $("#betCta").hidden = !(mine && !bet && started());
+  $("#betWait").hidden = !bet;
+  if(!bet) return;
+
+  const us   = mine.team === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
+  const them = mine.team === "a" ? S.challenge.team_b_name : S.challenge.team_a_name;
+  const perte = betLoss(bet.stake);
+  $("#betAmount").textContent  = bet.stake;
+  $("#betWinTxt").textContent  = "Gagné · " + us + " " + signed(bet.stake) + " · " + them + " " + signed(-bet.stake);
+  $("#betLossTxt").textContent = "Perdu · " + us + " " + signed(-perte) + " · " + them + " " + signed(perte);
+  const reste = Math.max(1, Math.ceil((6 * 3600e3 - (Date.now() - new Date(bet.opened_at).getTime())) / 3600e3));
+  $("#betWaitHint").textContent = "Il s'appliquera à ton prochain duo avec un joueur de l'équipe adverse, lancé après l'ouverture du pari. "
+    + "Sans duo adverse d'ici " + reste + " h, il s'éteint sans effet.";
+}
+
 function renderEntry(){
   const block = $("#entryBlock");
   const mine = myPlayer();
   if(!S.session || (!mine && !isAdmin())){ block.hidden = true; return; }
-  if(!started() && !isAdmin()){ block.hidden = true; return; }
   block.hidden = false;
 
-  const wrap = $("#adminPickWrap");
-  wrap.hidden = !isAdmin();
+  $("#adminPickWrap").hidden = !isAdmin();
   if(isAdmin()){
     const cur = $("#fPlayer").value;
     $("#fPlayer").innerHTML = S.players.map(p => '<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join("");
     $("#fPlayer").value = cur && S.players.some(p => p.id === cur) ? cur : (mine ? mine.id : (S.players[0] && S.players[0].id));
   }
 
-  const t = targetPlayer();
-  $("#entryFor").textContent = t ? t.name : "—";
-  duoUI();
-  renderFeed(t);
+  $("#autoHint").textContent = started()
+    ? "Tes parties classées Solo/Duo sont relevées automatiquement chez Riot, quelques minutes après leur fin. Les duos avec un joueur du challenge sont reconnus tout seuls."
+    : "Le relevé automatique commencera le jour du lancement. Les parties jouées avant ne comptent pas.";
+
+  renderSyncStatus();
+  renderBetArea(mine);
+  renderFeed(targetPlayer());
 }
 
 /* Photo Discord cerclée de la couleur de l'équipe.
@@ -914,17 +815,30 @@ function renderFeed(t){
   }
 
   const g = gamesOf(t.id).slice().reverse();
+  const nb = g.filter(x => x.kind !== "adjust").length;
   head.innerHTML = avatarRing(t, { lg:true })
-    + '<span class="feedcount">'
-    + (g.length ? g.length + (g.length > 1 ? " parties déclarées" : " partie déclarée") : "aucune partie")
-    + '</span>';
+    + '<span class="feedcount">' + (nb ? nb + (nb > 1 ? " parties relevées" : " partie relevée") : "aucune partie") + '</span>';
 
   if(!g.length){
-    box.innerHTML = '<div class="empty">Rien de déclaré pour l\'instant.</div>';
+    box.innerHTML = '<div class="empty">Rien pour l\'instant. Tes parties classées apparaîtront ici quelques minutes après leur fin.</div>';
     return;
   }
 
-  box.innerHTML = g.slice(0,80).map(x => {
+  const admin = isAdmin();
+  box.innerHTML = g.slice(0, 80).map(x => {
+    const del = admin
+      ? '<button type="button" class="x" data-id="' + esc(x.id) + '" aria-label="Supprimer cette ligne">✕</button>' : '';
+    const time = '<div class="rowtime"><b>' + heureDe(x) + '</b><span>' + jourDe(x) + '</span></div>';
+
+    if(x.kind === "adjust"){
+      return '<div class="row">'
+        + '<span class="delta ' + (x.lp >= 0 ? "up" : "down") + '">' + signed(x.lp) + '</span>'
+        + '<span class="pavpair">' + avatarRing(t) + '</span>'
+        + '<div class="rowmain"><div class="rowtitle">Hors partie<span class="tagchip solo">ajustement</span></div>'
+        + '<div class="rowmeta">Esquive ou décroissance : des LP ont bougé sans partie jouée</div></div>'
+        + time + del + '</div>';
+    }
+
     const partner = x.partner_id ? S.players.find(q => q.id === x.partner_id) : null;
     const st = stakeOf(x);
 
@@ -936,19 +850,21 @@ function renderFeed(t){
     if(st) meta = x.win
       ? "Pari de " + st + " LP remporté · " + signed(st) + " pour l'équipe"
       : "Pari de " + st + " LP perdu · " + signed(-betLoss(st)) + " pour l'équipe";
+    else if(x.duo === "enemy") meta = "Avec " + (partner ? partner.name : "un adversaire") + " · sans pari, aucun point d'équipe déplacé";
     else if(partner) meta = "Avec " + partner.name;
-    else meta = "Partie solo · jour " + dayOf(x.played_on);
+    else meta = "Partie solo";
+    if(x.champion) meta = x.champion + " · " + meta;
+    if(x.approx) meta += " · LP estimés (plusieurs parties entre deux relevés)";
 
     return '<div class="row">'
-      + '<span class="delta ' + (x.lp >= 0 ? "up" : "down") + '">' + signed(x.lp) + '</span>'
+      + '<span class="delta ' + (x.lp >= 0 ? "up" : "down") + '"' + (x.approx ? ' title="Valeur estimée"' : '') + '>'
+        + (x.approx ? "≈" : "") + signed(x.lp) + '</span>'
       + '<span class="pavpair">' + avatarRing(t) + (partner ? avatarRing(partner) : "") + '</span>'
       + '<div class="rowmain">'
         + '<div class="rowtitle">' + (x.win ? "Victoire" : "Défaite") + chip + '</div>'
         + '<div class="rowmeta">' + esc(meta) + '</div>'
       + '</div>'
-      + '<div class="rowtime"><b>' + heureDe(x) + '</b><span>' + jourDe(x) + '</span></div>'
-      + '<button type="button" class="x" data-id="' + esc(x.id) + '" aria-label="Supprimer cette partie">✕</button>'
-      + '</div>';
+      + time + del + '</div>';
   }).join("");
 
   box.querySelectorAll(".x").forEach(b => b.addEventListener("click", () => removeGame(b.dataset.id)));
@@ -986,7 +902,6 @@ function render(){
   renderBalance(states);
   renderRosters(states);
   renderEntry();
-  renderBetLock();
   renderLadder(states);
   renderChart();
   renderAdmin();
@@ -1001,27 +916,34 @@ const RULES = [
     "<p>Le <strong>LP net</strong> : la somme des LP gagnés moins ceux perdus, partie après partie. Tu gagnes une game à +20 ? +20 au compteur. Tu la perds à −18 ? −18.</p>"
   + "<p>Ton rang de départ n'entre pas dans le calcul. Un Argent qui enchaîne bat un Diamant qui stagne.</p>" },
 
-  { t:"Déclaration", h:
-    "<p>Chacun saisit ses propres parties. Ton profil est lié à ton compte Discord : tu ne peux écrire que sur ta ligne, et c'est la base de données qui le garantit, pas la page.</p>"
-  + "<p>Quand tu joues en duo, <strong>tague la personne</strong> : le classement affiche alors ton winrate avec chacun, à côté de son winrate global.</p>"
-  + "<p>Une erreur de saisie se corrige en supprimant la ligne dans ton historique.</p>" },
+  { t:"Suivi automatique", h:
+    "<p>Personne ne déclare rien : <strong>tes parties sont relevées directement chez Riot</strong>, toutes les trois minutes environ. Une partie apparaît quelques minutes après sa fin.</p>"
+  + "<p>L'API Riot ne donne pas les LP d'une partie : le site les déduit en comparant ton rang avant et après. Les promotions et rétrogradations sont prises en compte.</p>"
+  + "<p>Si tu enchaînes deux parties entre deux relevés, leur total est exact mais la répartition est estimée : elle est alors marquée « ≈ ».</p>"
+  + "<p>Une esquive ou une décroissance fait perdre des LP sans partie : elle apparaît comme un <em>ajustement</em> et compte dans ton net.</p>" },
+
+  { t:"Les duos", h:
+    "<p>Deux joueurs du challenge dans la <strong>même équipe LoL</strong> sont comptés comme un duo, allié ou adverse selon leurs équipes du challenge. Rien à taguer.</p>"
+  + "<p>Le classement affiche ton winrate avec chacun, à côté de son winrate global.</p>"
+  + "<p>L'API ne distingue pas un vrai duo de deux joueurs tombés ensemble par hasard : entre joueurs du même niveau, ça peut arriver.</p>" },
 
   { t:"Le duel d'équipes", h:
     "<p>Le score d'une équipe est la somme des LP nets de ses membres, plus ou moins les paris remportés et perdus.</p>"
   + "<p>Une seule mauvaise soirée peut faire basculer la balance : personne n'est jamais à l'abri.</p>" },
 
   { t:"Le pari du duo adverse", h:
-    "<p>Duo avec un coéquipier : rien ne change. Duo avec quelqu'un d'en face : <strong>le pari est obligatoire</strong>. Tu poses une mise de 5 à 50 LP avant de lancer la partie — il n'y a pas d'autre façon de déclarer ce type de partie.</p>"
+    "<p>Avant de lancer un duo avec quelqu'un d'en face, <strong>ouvre un pari</strong> de 5 à 50 LP. Il s'appliquera à ton prochain duo adverse.</p>"
   + "<p>Le gain est linéaire, la perte ne l'est pas. <strong>Plus tu mises, plus la défaite coûte cher</strong> :</p>"
   + "<table class=\"minitable\"><tr><th>Mise</th><th>Gagné</th><th>Perdu</th></tr>"
   + "<tr><td>10</td><td class=\"g\">+10</td><td class=\"r\">−12</td></tr>"
   + "<tr><td>25</td><td class=\"g\">+25</td><td class=\"r\">−38</td></tr>"
   + "<tr><td>50</td><td class=\"g\">+50</td><td class=\"r\">−100</td></tr></table>"
-  + "<p>Le pari se verrouille avant la partie et l'écran reste bloqué jusqu'à ce que tu déclares le résultat : impossible de choisir sa mise une fois l'issue connue.</p>" },
+  + "<p>Un pari ne compte que pour une partie <strong>lancée après</strong> son ouverture : impossible de parier en cours de partie. Il ne s'annule plus dès qu'une partie a commencé.</p>"
+  + "<p>Sans duo adverse dans les 6 heures, le pari s'éteint sans effet. Un duo adverse joué sans pari compte normalement pour tes LP, mais ne déplace aucun point d'équipe.</p>" },
 
   { t:"Ce qui compte", h:
-    "<p>File <strong>Solo/Duo classée</strong> uniquement — ni Flex, ni ARAM. Le duo est autorisé, avec un coéquipier comme avec un adversaire. Les placements ne rapportent rien tant que le rang n'est pas attribué.</p>"
-  + "<p>Le rang affiché est une <em>estimation</em> reconstruite depuis tes LP ; recale-le quand tu veux, ça ne touche pas à ton score.</p>" },
+    "<p>File <strong>Solo/Duo classée</strong> uniquement — ni Flex, ni ARAM. Les remakes sont ignorés, les placements ne rapportent rien tant que le rang n'est pas attribué.</p>"
+  + "<p>Seules les parties lancées pendant le challenge comptent.</p>" },
 
   { t:"Durée", h:
     "<p>21 jours pleins. Le relevé qui compte est celui du dernier soir : le classement au coup de sifflet, pas le pic de la semaine 2.</p>" }
@@ -1046,16 +968,8 @@ function openRules(open){
    Ouverture du pari
 =================================================================== */
 function openBetDialog(){
-  const t = targetPlayer();
-  if(!t) return;
-  const pool = S.players.filter(p => p.team !== t.team);
-  $("#betPartner").innerHTML = pool.length
-    ? pool.map(p => '<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join("")
-    : '<option value="">Aucun adversaire inscrit</option>';
+  if(!myPlayer()) return;
   dialValue = Math.max(MISE_MIN, 10);
-  $("#betStep1").hidden = false;
-  $("#betStep2").hidden = true;
-  $("#betCloseRow").hidden = false;
   drawDial();
   say("#betLog", "");
   const d = $("#betDialog");
@@ -1087,7 +1001,7 @@ function drawDial(){
   $("#dialKnob").setAttribute("cx", kx.toFixed(1));
   $("#dialKnob").setAttribute("cy", ky.toFixed(1));
 
-  const t2 = targetPlayer();
+  const t2 = myPlayer();
   const us   = t2 ? (t2.team === "a" ? S.challenge.team_a_name : S.challenge.team_b_name) : "Toi";
   const them = t2 ? (t2.team === "a" ? S.challenge.team_b_name : S.challenge.team_a_name) : "Eux";
   // Au centre : court, pour ne jamais déborder du cercle.
@@ -1123,83 +1037,58 @@ function say(sel, msg, bad){
   el.textContent = msg;
 }
 
-async function claim(id){
-  const { error } = await sb.from("players").update({ claimed_by: S.session.user.id }).eq("id", id).is("claimed_by", null);
-  if(error) return say("#claimLog", "Impossible : " + error.message, true);
-  await loadAll();
-  say("#claimLog", "Profil réclamé.");
-}
-
 async function releasePlayer(id){
   const { error } = await sb.from("players").update({ claimed_by: null }).eq("id", id);
   say("#adminLog", error ? "Erreur : " + error.message : "Profil libéré.", !!error);
   await loadAll();
 }
 
-async function addGame(win){
-  const t = targetPlayer();
-  if(!t) return say("#entryLog", "Réclame d'abord ton profil joueur.", true);
-  const raw = Math.abs(parseInt($("#fLp").value, 10) || 0);
-  if(!raw) return say("#entryLog", "Indique le nombre de LP de la partie.", true);
-  if(raw > 200) return say("#entryLog", "200 LP maximum pour une partie.", true);
-
-  const duo = $("#fDuo").value;
-  if(duo === "enemy"){
-    return say("#entryLog", "Le duo adverse passe par un pari : ouvre-le avant de jouer.", true);
-  }
-  const partner = duo === "solo" ? null : ($("#fPartner").value || null);
-
-  const btns = [$("#fWin"), $("#fLoss")];
-  btns.forEach(b => b.disabled = true);
-  const { error } = await sb.from("games").insert({
-    player_id: t.id,
-    lp: win ? raw : -raw,
-    win: win,
-    duo: duo,
-    stake: 0,
-    partner_id: partner,
-    played_on: iso(new Date())
-  });
-  btns.forEach(b => b.disabled = false);
-
-  if(error){
-    const denied = /row-level security|violates/i.test(error.message);
-    return say("#entryLog", denied
-      ? "Refusé par la base : tu ne peux déclarer des parties que pour ton propre profil."
-      : "Erreur : " + error.message, true);
-  }
-  await loadAll();
-  say("#entryLog", (win ? "Victoire " : "Défaite ") + signed(win ? raw : -raw) + " LP enregistrée pour " + t.name + ".");
-}
-
 async function removeGame(id){
+  if(!confirm("Supprimer cette ligne ? Elle ne sera pas réimportée : son identifiant Riot reste connu.")) return;
   const { error } = await sb.from("games").delete().eq("id", id);
   if(error) return say("#entryLog", "Suppression refusée : " + error.message, true);
   await loadAll();
-  say("#entryLog", "Partie supprimée.");
+  say("#entryLog", "Ligne supprimée.");
 }
 
 async function lockBet(){
-  const t = targetPlayer();
-  if(!t) return say("#betLog", "Crée d'abord ton profil joueur.", true);
   $("#betLock").disabled = true;
-  const { error } = await sb.from("pending_bets")
-    .insert({ player_id: t.id, partner_id: $("#betPartner").value || null, stake: dialValue });
-  $("#betLock").disabled = false;
-  if(error) return say("#betLog", "Impossible : " + error.message, true);
-  say("#betLog", "");
-  await loadAll();   // renderBetLock() bascule l'écran sur l'étape 2
+  say("#betLog", "Vérification chez Riot…");
+  try{
+    await callRiot("open_bet", { stake: dialValue });
+    const d = $("#betDialog");
+    if(d.open) d.close();
+    await loadAll();
+    say("#entryLog", "Mise de " + dialValue + " LP verrouillée. Elle s'appliquera à ton prochain duo adverse.");
+  }catch(e){
+    say("#betLog", e.message, true);
+  }finally{
+    $("#betLock").disabled = false;
+  }
 }
 
-async function syncRank(){
-  const t = targetPlayer();
-  if(!t) return say("#entryLog", "Réclame d'abord ton profil joueur.", true);
-  const score = toScore($("#fTier").value, parseInt($("#fDiv").value,10), parseInt($("#fRankLp").value,10) || 0);
-  const { error } = await sb.from("rank_syncs")
-    .upsert({ player_id: t.id, score, synced_at: new Date().toISOString() }, { onConflict:"player_id" });
-  if(error) return say("#entryLog", "Refusé : " + error.message, true);
-  await loadAll();
-  say("#entryLog", "Rang recalé pour " + t.name + " — le total de LP nets est inchangé.");
+async function cancelBet(){
+  if(!confirm("Annuler ton pari en cours ?")) return;
+  $("#betCancel").disabled = true;
+  try{
+    await callRiot("cancel_bet");
+    await loadAll();
+    say("#entryLog", "Pari annulé.");
+  }catch(e){
+    say("#entryLog", e.message, true);
+  }finally{
+    $("#betCancel").disabled = false;
+  }
+}
+
+/* Relance un relevé si le dernier date de plus de 3 minutes. On n'attend
+   pas la réponse : le temps réel ramènera les nouvelles parties. C'est la
+   roue de secours si la tâche planifiée tombe. */
+function nudgeSync(){
+  if(!sb || !S.ready) return;
+  const last = S.sync && S.sync.last_run ? new Date(S.sync.last_run).getTime() : 0;
+  if(Date.now() - last < 180e3) return;
+  sb.functions.invoke("riot", { body: { action: "sync" } }).catch(() => {});
 }
 
 async function saveChallenge(){
@@ -1238,33 +1127,17 @@ function segment(aSel, bSel, onA, onB){
 }
 
 function initUI(){
-  const tierOpts = TIERS.map(t => '<option value="'+t.k+'">'+t.fr+'</option>').join("");
-  $("#fTier").innerHTML = tierOpts;
-  $("#fTier").value = "GOLD";
-  $("#regTier").innerHTML = tierOpts;
-  $("#regTier").value = "GOLD";
-  $("#fWin").addEventListener("click", () => addGame(true));
-  $("#fLoss").addEventListener("click", () => addGame(false));
-  $("#fLp").addEventListener("keydown", e => { if(e.key === "Enter") addGame(true); });
-  $("#fSync").addEventListener("click", syncRank);
-  $("#fPlayer").addEventListener("change", () => { renderEntry(); duoUI(); });
-  document.querySelectorAll(".mode").forEach(b =>
-    b.addEventListener("click", () => setDuo(b.dataset.duo)));
+  $("#fPlayer").addEventListener("change", () => renderEntry());
   $("#btnRules").addEventListener("click", () => openRules(true));
   $("#rulesClose").addEventListener("click", () => openRules(false));
   $("#rulesScrim").addEventListener("click", () => openRules(false));
   document.addEventListener("keydown", e => {
     if(e.key === "Escape" && $("#rulesDrawer").classList.contains("open")) openRules(false);
   });
-  $("#betLock").addEventListener("click", lockBet);
-  $("#betResWin").addEventListener("click", () => resolveBet(true));
-  $("#betResLoss").addEventListener("click", () => resolveBet(false));
-  $("#betAbort").addEventListener("click", abortBet);
-  // Échap ne ferme pas un pari verrouillé.
-  $("#betDialog").addEventListener("cancel", e => {
-    if(!$("#betStep2").hidden) e.preventDefault();
-  });
+
   $("#betOpenBtn").addEventListener("click", openBetDialog);
+  $("#betLock").addEventListener("click", lockBet);
+  $("#betCancel").addEventListener("click", cancelBet);
 
   const dial = $("#dial");
   let dragging = false;
@@ -1281,7 +1154,9 @@ function initUI(){
     if(e.key === "Home"){ dialValue = MISE_MIN; drawDial(); e.preventDefault(); }
     if(e.key === "End"){  dialValue = MISE_MAX; drawDial(); e.preventDefault(); }
   });
-  setInterval(tickCountdown, 60000);   // jours + heures : inutile de battre la seconde
+
+  setInterval(tickCountdown, 60000);
+  setInterval(() => { if(S.ready){ renderSyncStatus(); nudgeSync(); } }, 60000);
   $("#aSaveChallenge").addEventListener("click", saveChallenge);
   $("#aSavePlayers").addEventListener("click", savePlayers);
 
@@ -1299,21 +1174,11 @@ function initUI(){
     if(!dlg.open) dlg.showModal();
   });
   $("#claimDialog").addEventListener("close", () => { claimDismissed = true; });
-  $("#btnSync").addEventListener("click", () => {
-    const t = myPlayer();
-    if(t){
-      const r = estRank(t);
-      $("#fTier").value = r.t;
-      $("#fDiv").value = r.d;
-      $("#fRankLp").value = r.lp;
-    }
-    const d = $("#syncDialog");
-    if(!d.open) d.showModal();
-  });
 
-  ["#regId", "#regTier", "#regDiv", "#regLp"].forEach(sel =>
-    $(sel).addEventListener("input", regPreview));
-  $("#regTier").addEventListener("change", regPreview);
+  $("#regId").addEventListener("input", () => {
+    const v = $("#regId").value.trim(), cut = v.lastIndexOf("#");
+    $("#regIdNote").classList.toggle("bad", !!v && (cut < 1 || cut === v.length - 1));
+  });
   $("#regGo").addEventListener("click", register);
   $("#regId").addEventListener("keydown", e => { if(e.key === "Enter") register(); });
   $("#regClose").addEventListener("click", () => {
@@ -1341,6 +1206,7 @@ async function boot(){
   S.session = data.session;
   await loadAll();
   subscribeRealtime();
+  nudgeSync();
 
   sb.auth.onAuthStateChange(async (_e, session) => {
     S.session = session;
