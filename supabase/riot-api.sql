@@ -79,7 +79,7 @@ begin
      set running_until = now() + interval '100 seconds', last_run = now()
    where id = 1
      and (running_until is null or running_until < now())
-     and (p_force or last_run is null or last_run < now() - interval '150 seconds')
+     and (p_force or last_run is null or last_run < now() - interval '240 seconds')
   returning true into ok;
   return coalesce(ok, false);
 end $$;
@@ -177,7 +177,7 @@ end $$;
 
 
 -- ---------------------------------------------------------------------
--- 5. Relevé toutes les 3 minutes
+-- 5. Relevé toutes les 5 minutes
 --    Si pg_cron refuse de s'activer ici, active-le d'abord dans
 --    Database > Extensions (pg_cron et pg_net), puis relance ce bloc.
 -- ---------------------------------------------------------------------
@@ -186,7 +186,7 @@ create extension if not exists pg_net;
 
 select cron.unschedule(jobid) from cron.job where jobname = 'riot-sync';
 
-select cron.schedule('riot-sync', '*/3 * * * *', $cron$
+select cron.schedule('riot-sync', '*/5 * * * *', $cron$
   select net.http_post(
     url := 'https://krdohsbydwvuyoegbsub.supabase.co/functions/v1/riot',
     headers := '{"Content-Type": "application/json"}'::jsonb,

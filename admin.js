@@ -19,6 +19,8 @@ function fromScore(s){
 }
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+// Caractères de contrôle invisibles d'un copier-coller Discord (voir app.js).
+const cleanRiot = v => String(v ?? "").replace(/[​-‏‪-‮⁠-⁩﻿]/g, "").trim();
 const signed = n => (n>0 ? "+" : n<0 ? "−" : "±") + Math.abs(n);
 const iso = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 const emblem = t => "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-shared-components/global/default/" + t.toLowerCase() + ".png";
@@ -60,7 +62,7 @@ async function loadAll(){
   if(err) return fatal("<b>Base injoignable</b><br>" + esc(err.message));
 
   S.challenge = ch.data;
-  S.players   = pl.data || [];
+  S.players   = (pl.data || []).map(p => Object.assign({}, p, { name: cleanRiot(p.name), tag: cleanRiot(p.tag) }));
   S.games     = gm.data || [];
   S.profiles  = pr.data || [];
   S.snaps     = Object.fromEntries((sn.data || []).map(r => [r.player_id, r]));
@@ -247,8 +249,8 @@ async function savePlayers(){
     const p = playerById(tr.dataset.id);
     const maj = { team: tr.querySelector(".pteam").value };
     if(p && !p.puuid){                       // pseudo modifiable tant que Riot n'est pas rattaché
-      maj.name = tr.querySelector(".pn2").value.trim();
-      maj.tag  = tr.querySelector(".pt2").value.trim();
+      maj.name = cleanRiot(tr.querySelector(".pn2").value);
+      maj.tag  = cleanRiot(tr.querySelector(".pt2").value);
     }
     const { error } = await sb.from("players").update(maj).eq("id", tr.dataset.id);
     if(error) return say("#pLog", "Erreur : " + error.message, true);
@@ -259,11 +261,11 @@ async function savePlayers(){
 
 async function addPlayer(){
   const id = $("#nId").value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
-  const name = $("#nName").value.trim();
+  const name = cleanRiot($("#nName").value);
   if(!id || !name) return say("#pLog", "Il faut au moins un identifiant et un pseudo.", true);
   if(playerById(id)) return say("#pLog", "Cet identifiant est déjà pris.", true);
   const { error } = await sb.from("players").insert({
-    id, name, tag: $("#nTag").value.trim(), team: $("#nTeam").value,
+    id, name, tag: cleanRiot($("#nTag").value), team: $("#nTeam").value,
     seed_score: 0, sort: S.players.length + 1
   });
   if(error) return say("#pLog", "Erreur : " + error.message, true);

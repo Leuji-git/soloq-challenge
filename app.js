@@ -45,7 +45,11 @@ const shortRank = r => TIDX[r.t] >= APEX ? TIERS[TIDX[r.t]].fr : TIERS[TIDX[r.t]
 // Émeraude compris — contrairement à `ranked-emblem` (visuel 2560x1440,
 // illisible en petit) et à `ranked-mini-crests` (Émeraude manquant).
 const emblem = t => "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-shared-components/global/default/" + t.toLowerCase() + ".png";
-const dpmUrl = p => "https://dpm.lol/" + encodeURIComponent(p.name) + "-" + encodeURIComponent(p.tag);
+// Un pseudo copié depuis Discord traîne souvent des caractères de contrôle
+// bidirectionnels invisibles (U+2066–U+2069…) : encodés dans l'URL, ils
+// cassaient le lien dpm.lol (ex. « LEUJI-OIOIO%E2%81%A9 »).
+const cleanRiot = v => String(v ?? "").replace(/[​-‏‪-‮⁠-⁩﻿]/g, "").trim();
+const dpmUrl = p => "https://dpm.lol/" + encodeURIComponent(cleanRiot(p.name)) + "-" + encodeURIComponent(cleanRiot(p.tag));
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
@@ -111,7 +115,8 @@ async function loadAll(){
     return;
   }
   S.challenge = ch.data || { name:"SoloQ Challenge", start_date:iso(new Date()), days:21, team_a_name:"Équipe A", team_b_name:"Équipe B" };
-  S.players = pl.data || [];
+  // Nettoyés dès le chargement : liens, affichage et infobulles en profitent tous.
+  S.players = (pl.data || []).map(p => Object.assign({}, p, { name: cleanRiot(p.name), tag: cleanRiot(p.tag) }));
   S.games   = gm.data || [];
   S.snaps    = Object.fromEntries((sn.data||[]).map(r => [r.player_id, r]));
   S.sync     = st.data || null;
@@ -779,7 +784,7 @@ function renderEntry(){
   }
 
   $("#autoHint").textContent = started()
-    ? "Tes parties classées Solo/Duo sont relevées automatiquement chez Riot, quelques minutes après leur fin. Les duos avec un joueur du challenge sont reconnus tout seuls."
+    ? "Tes parties classées Solo/Duo sont relevées automatiquement chez Riot, dans les minutes qui suivent leur fin. Les duos avec un joueur du challenge sont reconnus tout seuls."
     : "Le relevé automatique commencera le jour du lancement. Les parties jouées avant ne comptent pas.";
 
   renderSyncStatus();
@@ -917,7 +922,7 @@ const RULES = [
   + "<p>Ton rang de départ n'entre pas dans le calcul. Un Argent qui enchaîne bat un Diamant qui stagne.</p>" },
 
   { t:"Suivi automatique", h:
-    "<p>Personne ne déclare rien : <strong>tes parties sont relevées directement chez Riot</strong>, toutes les trois minutes environ. Une partie apparaît quelques minutes après sa fin.</p>"
+    "<p>Personne ne déclare rien : <strong>tes parties sont relevées directement chez Riot</strong>, toutes les cinq minutes environ. Une partie apparaît quelques minutes après sa fin.</p>"
   + "<p>L'API Riot ne donne pas les LP d'une partie : le site les déduit en comparant ton rang avant et après. Les promotions et rétrogradations sont prises en compte.</p>"
   + "<p>Si tu enchaînes deux parties entre deux relevés, leur total est exact mais la répartition est estimée : elle est alors marquée « ≈ ».</p>"
   + "<p>Une esquive ou une décroissance fait perdre des LP sans partie : elle apparaît comme un <em>ajustement</em> et compte dans ton net.</p>" },
@@ -1087,7 +1092,7 @@ async function cancelBet(){
 function nudgeSync(){
   if(!sb || !S.ready) return;
   const last = S.sync && S.sync.last_run ? new Date(S.sync.last_run).getTime() : 0;
-  if(Date.now() - last < 180e3) return;
+  if(Date.now() - last < 300e3) return;   // meme cadence que la tache planifiee : 5 min
   sb.functions.invoke("riot", { body: { action: "sync" } }).catch(() => {});
 }
 

@@ -30,6 +30,7 @@ supabase/functions/riot/index.ts   la fonction serveur qui interroge Riot
 | 4 | `bets.sql` | Partenaires de duo et paris verrouillés |
 | 5 | `bet-required.sql` | Rend le pari obligatoire en duo adverse (mise ≥ 5) |
 | 6 | `riot-api.sql` | Suivi automatique : relevés, verrouillage des écritures, tâche planifiée — **après** avoir déployé la fonction |
+| 7 | `clean-riot-ids.sql` | Retire les caractères invisibles des pseudos et tags (lien dpm.lol cassé), et empêche leur retour |
 
 ---
 
@@ -38,7 +39,7 @@ supabase/functions/riot/index.ts   la fonction serveur qui interroge Riot
 ### Comment ça marche
 
 L'API Riot ne donne pas les LP d'une partie. La fonction relève le rang de chaque
-joueur toutes les 3 minutes (League-V4) ; quand son total victoires + défaites
+joueur toutes les 5 minutes (League-V4) ; quand son total victoires + défaites
 augmente, l'écart de LP entre deux relevés est le gain de la partie. Match-V5
 dit laquelle, le champion, et si un autre joueur du challenge était dans la même
 équipe (duo allié ou adverse, reconnu tout seul).
@@ -88,7 +89,7 @@ Avec une clé de développement, reviens la remplacer ici chaque jour.
 ### 3. Lancer `supabase/riot-api.sql`
 
 Il crée les tables de relevé, **ferme toute écriture de partie depuis le navigateur**,
-et programme le relevé toutes les 3 minutes.
+et programme le relevé toutes les 5 minutes.
 
 Si `create extension pg_cron` est refusé : **Database → Extensions**, active
 `pg_cron` et `pg_net`, puis relance le script.
