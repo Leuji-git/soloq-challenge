@@ -65,37 +65,6 @@
   </div>
 </dialog>
 
-<dialog id="betDialog" class="modal betmodal">
-  <form method="dialog" class="modalclose"><button class="x" aria-label="Fermer">✕</button></form>
-  <h2>Poser ta mise</h2>
-  <p class="hint">Pour ton prochain duo avec un joueur de l'équipe adverse. Mise bas si tu sens le coup dur, haut si tu es sûr de toi&nbsp;: <strong>plus la mise est grosse, plus la défaite coûte cher</strong>.</p>
-
-  <div class="dialwrap">
-    <svg class="dial" id="dial" viewBox="0 0 260 260" role="slider"
-         aria-label="Montant de la mise en LP" aria-valuemin="5" aria-valuemax="50"
-         aria-valuenow="10" tabindex="0">
-      <path id="dialTrack" fill="none" stroke-linecap="round" stroke-width="16"></path>
-      <path id="dialFill"  fill="none" stroke-linecap="round" stroke-width="16"></path>
-      <circle id="dialKnob" r="13" stroke-width="4"></circle>
-      <text id="dialValue" x="130" y="118" text-anchor="middle">10</text>
-      <text id="dialUnit"  x="130" y="140" text-anchor="middle">LP misés</text>
-      <text id="dialWin"   x="130" y="168" text-anchor="middle"></text>
-      <text id="dialLoss"  x="130" y="188" text-anchor="middle"></text>
-    </svg>
-    <div class="dialdetail">
-      <span class="sv win" id="dialWinDetail">—</span>
-      <span class="sv loss" id="dialLossDetail">—</span>
-    </div>
-    <div class="dialhint hint">Fais glisser sur l'anneau, ou utilise les flèches du clavier. Le résultat sera relevé chez Riot, tu n'auras rien à déclarer.</div>
-  </div>
-
-  <div class="btnrow" style="justify-content:center">
-    <button type="button" class="btn" id="betLock">Verrouiller la mise</button>
-  </div>
-  <div class="log" id="betLog"></div>
-</dialog>
-
-
 <div class="scrim" id="rulesScrim" hidden></div>
 <aside class="drawer" id="rulesDrawer" aria-hidden="true" aria-label="Règlement">
   <div class="drawerhead">
@@ -157,30 +126,6 @@
       <div class="sect">
         <p class="hint" id="autoHint"></p>
 
-        <div class="betcta" id="betCta" hidden>
-          <button type="button" class="betbtn" id="betOpenBtn">
-            <span>Ouvrir le pari</span>
-            <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M5 12h13m0 0-5.5-5.5M18 12l-5.5 5.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
-        </div>
-
-        <div class="betopen" id="betWait" hidden>
-          <div class="betopenhead">
-            <span class="lbl">Pari en cours</span>
-            <span class="betamount"><b id="betAmount">0</b> LP en jeu</span>
-          </div>
-          <div class="betoutcomes">
-            <span class="sv win" id="betWinTxt">—</span>
-            <span class="sv loss" id="betLossTxt">—</span>
-          </div>
-          <p class="hint" id="betWaitHint"></p>
-          <div class="btnrow">
-            <button type="button" class="btn ghost sm" id="betCancel">Annuler le pari</button>
-          </div>
-        </div>
-
         <div class="log" id="entryLog"></div>
       </div>
 
@@ -192,6 +137,17 @@
         <h4 id="feedTitle">Mes parties</h4>
         <div class="feed" id="feed"></div>
       </div>
+    </div>
+  </section>
+
+  <section class="block" id="itemsBlock">
+    <header>
+      <h2>Objets</h2>
+      <span class="pill" id="itemsCount">—</span>
+    </header>
+    <div class="body">
+      <p class="hint" id="itemsHint"></p>
+      <div class="itemgrid" id="itemGrid"></div>
     </div>
   </section>
 

@@ -777,3 +777,42 @@ dialog.modal .form{margin-bottom:12px}
 }
 .syncbox{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
 .syncbox .wr{flex:1 1 260px}
+
+/* =====================================================================
+   Les objets — rumeur tant qu'on ne les a pas, effet une fois découverts
+===================================================================== */
+.itemgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(252px,1fr));gap:12px}
+.item{
+  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:14px 15px;display:flex;flex-direction:column;gap:9px;
+  position:relative;overflow:hidden;
+}
+/* un liseré discret rappelle la rareté */
+.item::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--muted)}
+.item.rare::before{background:var(--team-a)}
+.item.legendaire::before{background:var(--accent)}
+.itemhead{display:flex;align-items:center;gap:11px}
+.itemicon{font-size:26px;line-height:1;flex:none;filter:drop-shadow(0 2px 5px rgba(0,0,0,.45))}
+.itemid{min-width:0;flex:1}
+.itemname{font-family:"Outfit",system-ui,sans-serif;font-weight:600;font-size:15px;letter-spacing:-.01em}
+.itemtags{display:flex;flex-wrap:wrap;gap:6px;margin-top:3px}
+.rarity,.itemtarget{
+  font-family:"Barlow Semi Condensed",sans-serif;text-transform:uppercase;
+  letter-spacing:.09em;font-size:10px;font-weight:700;
+  padding:2px 7px;border-radius:var(--pill);background:var(--surface-3);color:var(--muted);
+}
+.rarity.rare{background:color-mix(in srgb, var(--team-a) 18%, transparent);color:var(--team-a)}
+.rarity.legendaire{background:color-mix(in srgb, var(--accent) 20%, transparent);color:var(--accent)}
+.itemcount{
+  font-family:"Outfit",system-ui,sans-serif;font-weight:700;font-size:15px;color:var(--up);
+  background:color-mix(in srgb, var(--up) 14%, transparent);
+  padding:3px 9px;border-radius:var(--pill);flex:none;
+}
+.itemtext{margin:0;font-size:13.5px;line-height:1.55;color:var(--ink-2)}
+.itemtext.teaser{font-style:italic;color:var(--muted)}
+
+/* non découvert : présent, mais en retrait */
+.item.locked{border-style:dashed;background:transparent}
+.item.locked .itemname{color:var(--muted)}
+.item.locked .itemicon{filter:none;opacity:.55}
+.item.locked::before{opacity:.35}

@@ -67,7 +67,8 @@ const S = {
   snaps: {},        // id joueur -> dernier rang relevé chez Riot
   sync: null,       // état du relevé automatique
   profiles: {},     // id du compte -> { display_name, avatar_url, is_admin }
-  bets: {},         // id joueur -> pari ouvert
+  items: [],        // catalogue des objets
+  inventory: [],    // exemplaires possédés, tous joueurs confondus
   session: null,
   profile: null,
   ready: false
@@ -100,16 +101,17 @@ if(!SUPABASE_URL || SUPABASE_URL.includes("xxxxxxxx") || SUPABASE_ANON_KEY.inclu
 =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, sn, pr, bt, st] = await Promise.all([
+  const [ch, pl, gm, sn, pr, bt, st, pi] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at"),
     sb.from("rank_snapshots").select("*"),
     sb.from("profiles").select("id, display_name, avatar_url, is_admin"),
-    sb.from("pending_bets").select("*"),
-    sb.from("sync_state").select("*").eq("id",1).maybeSingle()
+    sb.from("items").select("*").eq("active", true).order("sort"),
+    sb.from("sync_state").select("*").eq("id",1).maybeSingle(),
+    sb.from("player_items").select("*").order("obtained_at")
   ]);
-  const err = ch.error || pl.error || gm.error || sn.error || pr.error || bt.error || st.error;
+  const err = ch.error || pl.error || gm.error || sn.error || pr.error || bt.error || st.error || pi.error;
   if(err){
     fatal("<b>Base injoignable</b><br>" + esc(err.message) + "<br>Vérifie que <code>supabase/riot-api.sql</code> a bien été exécuté dans le SQL Editor.");
     return;
@@ -122,7 +124,8 @@ async function loadAll(){
   S.sync     = st.data || null;
   S.profiles = Object.fromEntries((pr.data||[]).map(r => [r.id, r]));
   S.profile  = S.session ? (S.profiles[S.session.user.id] || null) : null;
-  S.bets     = Object.fromEntries((bt.data||[]).map(r => [r.player_id, r]));
+  S.items     = bt.data || [];
+  S.inventory = pi.data || [];
   S.ready = true;
   $("#errBox").hidden = true;
   render();
@@ -136,7 +139,7 @@ function subscribeRealtime(){
     .on("postgres_changes", { event:"*", schema:"public", table:"rank_snapshots" }, loadAll)
     .on("postgres_changes", { event:"*", schema:"public", table:"sync_state" },  loadAll)
     .on("postgres_changes", { event:"*", schema:"public", table:"challenge" },  loadAll)
-    .on("postgres_changes", { event:"*", schema:"public", table:"pending_bets" }, loadAll)
+    .on("postgres_changes", { event:"*", schema:"public", table:"player_items" }, loadAll)
     .subscribe(status => { $("#livePill").hidden = status !== "SUBSCRIBED"; });
 }
 
@@ -189,46 +192,16 @@ function duoWinrate(meId, otherId){
 const started = () => new Date() >= startDate();
 
 /* ------------------------------------------------------------------
-   Duo adverse : le pari.
-   La mise est posée AVANT la partie (table pending_bets), puis elle
-   change de camp selon le résultat. Elle ne touche jamais au compteur
-   individuel : seuls les scores d'équipe bougent.
-   MISE_MAX est le seul curseur d'équilibrage.
+   Score d'équipe : la somme des LP nets de ses membres.
 ------------------------------------------------------------------ */
-const MISE_MAX = 50;
-const MISE_MIN = 5;    // une mise à 0 ne serait pas un pari (voir supabase/bet-required.sql)
-
-const stakeOf = g => (g.duo === "enemy") ? Math.max(0, Math.min(g.stake || 0, MISE_MAX)) : 0;
-
-/* Le gain est linéaire, la perte ne l'est pas : miser gros double la
-   facture. À 50 (le maximum), on gagne 50 mais on en perd 100.
-   perte = mise x (1 + mise / MISE_MAX) */
-const betLoss = st => Math.round(st * (1 + st / MISE_MAX));
-
-// Impact d'une partie sur les deux scores d'équipe.
-function impact(g){
-  const st = stakeOf(g);
-  if(!st) return { mine: g.lp, theirs: 0 };
-  if(g.win) return { mine: g.lp + st, theirs: -st };
-  const l = betLoss(st);
-  return { mine: g.lp - l, theirs: l };
-}
-
-/* Le score d'équipe n'est PLUS la somme des LP nets de ses membres :
-   les paris déplacent des points d'un camp à l'autre. */
 function teamScores(){
   const from = windowStart();
-  const out = { a:0, b:0, won:0, lost:0 };
+  const out = { a:0, b:0 };
   S.games.forEach(g => {
     if(dayOf(g.played_on) < from) return;
     const p = S.players.find(x => x.id === g.player_id);
     if(!p) return;
-    const other = p.team === "a" ? "b" : "a";
-    const im = impact(g);
-    out[p.team] += im.mine;
-    out[other]  += im.theirs;
-    const st = stakeOf(g);
-    if(st){ if(g.win) out.won += st; else out.lost += st; }
+    out[p.team] += g.lp;
   });
   return out;
 }
@@ -324,10 +297,7 @@ function renderBalance(states){
   const lead = diff === 0
     ? "Égalité parfaite"
     : "<b>" + esc(diff>0 ? S.challenge.team_a_name : S.challenge.team_b_name) + "</b> mène de <b>" + Math.abs(diff) + " LP</b>";
-  const bits = [];
-  if(ts.won)  bits.push(ts.won + " LP de paris remportés");
-  if(ts.lost) bits.push(ts.lost + " LP de paris perdus");
-  $("#leadTxt").innerHTML = lead + (bits.length ? ' <span class="raid">· ' + bits.join(" · ") + '</span>' : "");
+  $("#leadTxt").innerHTML = lead;
 }
 
 function renderRosters(states){
@@ -443,15 +413,13 @@ function playerPoints(id){
   let run = 0;
   return gs.map(g => ({ t: tsOf(g), y: (run += g.lp) }));
 }
-// Paliers cumulés d'une équipe, paris compris.
+// Paliers cumulés d'une équipe.
 function teamPoints(tk){
   const evts = [];
   S.games.forEach(g => {
     const p = S.players.find(x => x.id === g.player_id);
-    if(!p) return;
-    const im = impact(g);
-    const d = (p.team === tk) ? im.mine : im.theirs;
-    if(d) evts.push({ t: tsOf(g), d });
+    if(!p || p.team !== tk || !g.lp) return;
+    evts.push({ t: tsOf(g), d: g.lp });
   });
   evts.sort((a,b) => a.t - b.t);
   let run = 0;
@@ -753,21 +721,55 @@ function renderSyncStatus(){
   pill.title = st.last_error || "Les parties apparaissent quelques minutes après leur fin.";
 }
 
-function renderBetArea(mine){
-  const bet = mine ? S.bets[mine.id] : null;
-  $("#betCta").hidden = !(mine && !bet && started());
-  $("#betWait").hidden = !bet;
-  if(!bet) return;
+/* ------------------------------------------------------------------
+   Les objets. Tant qu'on n'en a jamais obtenu un, on ne lit que sa
+   description mystérieuse. Une fois découvert, l'effet reste visible.
+------------------------------------------------------------------ */
+const RARETES = { commun:"Commun", rare:"Rare", legendaire:"Légendaire" };
 
-  const us   = mine.team === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
-  const them = mine.team === "a" ? S.challenge.team_b_name : S.challenge.team_a_name;
-  const perte = betLoss(bet.stake);
-  $("#betAmount").textContent  = bet.stake;
-  $("#betWinTxt").textContent  = "Gagné · " + us + " " + signed(bet.stake) + " · " + them + " " + signed(-bet.stake);
-  $("#betLossTxt").textContent = "Perdu · " + us + " " + signed(-perte) + " · " + them + " " + signed(perte);
-  const reste = Math.max(1, Math.ceil((6 * 3600e3 - (Date.now() - new Date(bet.opened_at).getTime())) / 3600e3));
-  $("#betWaitHint").textContent = "Il s'appliquera à ton prochain duo avec un joueur de l'équipe adverse, lancé après l'ouverture du pari. "
-    + "Sans duo adverse d'ici " + reste + " h, il s'éteint sans effet.";
+function renderItems(){
+  const grille = $("#itemGrid");
+  const mine = myPlayer();
+  if(!S.items.length){
+    $("#itemsCount").textContent = "—";
+    $("#itemsHint").textContent = "Le catalogue n'est pas encore en place.";
+    grille.innerHTML = '<div class="empty">Aucun objet configuré.</div>';
+    return;
+  }
+
+  // Découvert = obtenu au moins une fois, même déjà utilisé.
+  const aMoi = mine ? S.inventory.filter(r => r.player_id === mine.id) : [];
+  const decouverts = new Set(aMoi.map(r => r.item_key));
+  const enStock = {};
+  aMoi.filter(r => !r.used_at).forEach(r => { enStock[r.item_key] = (enStock[r.item_key] || 0) + 1; });
+
+  const total = aMoi.filter(r => !r.used_at).length;
+  $("#itemsCount").textContent = mine
+    ? decouverts.size + " / " + S.items.length + " découverts"
+    : S.items.length + " objets";
+  $("#itemsHint").textContent = mine
+    ? "Un objet tombe à chaque victoire en duo avec un coéquipier. Tant que tu n'en as jamais obtenu un, tu n'en connais que la rumeur."
+      + (total ? " Tu en as " + total + " en réserve." : "")
+    : "Connecte-toi pour voir ceux que tu as découverts. Un objet tombe à chaque victoire en duo avec un coéquipier.";
+
+  grille.innerHTML = S.items.map(it => {
+    const connu = decouverts.has(it.key);
+    const n = enStock[it.key] || 0;
+    return '<article class="item' + (connu ? "" : " locked") + ' ' + esc(it.rarity) + '">'
+      + '<div class="itemhead">'
+        + '<span class="itemicon">' + (connu ? esc(it.icon) : "🔒") + '</span>'
+        + '<div class="itemid">'
+          + '<div class="itemname">' + esc(connu ? it.name : "Objet inconnu") + '</div>'
+          + '<div class="itemtags">'
+            + '<span class="rarity ' + esc(it.rarity) + '">' + esc(RARETES[it.rarity] || it.rarity) + '</span>'
+            + '<span class="itemtarget">' + (it.target === "soi" ? "pour toi" : "sur un adversaire") + '</span>'
+          + '</div>'
+        + '</div>'
+        + (n > 1 ? '<span class="itemcount">×' + n + '</span>' : n === 1 ? '<span class="itemcount">×1</span>' : '')
+      + '</div>'
+      + '<p class="itemtext' + (connu ? "" : " teaser") + '">' + esc(connu ? it.effect : it.teaser) + '</p>'
+      + '</article>';
+  }).join("");
 }
 
 function renderEntry(){
@@ -788,7 +790,6 @@ function renderEntry(){
     : "Le relevé automatique commencera le jour du lancement. Les parties jouées avant ne comptent pas.";
 
   renderSyncStatus();
-  renderBetArea(mine);
   renderFeed(targetPlayer());
 }
 
@@ -845,19 +846,15 @@ function renderFeed(t){
     }
 
     const partner = x.partner_id ? S.players.find(q => q.id === x.partner_id) : null;
-    const st = stakeOf(x);
 
     let chip = '<span class="tagchip solo">solo</span>';
     if(x.duo === "team")  chip = '<span class="tagchip">duo allié</span>';
     if(x.duo === "enemy") chip = '<span class="tagchip enemy">duo adverse</span>';
 
     let meta;
-    if(st) meta = x.win
-      ? "Pari de " + st + " LP remporté · " + signed(st) + " pour l'équipe"
-      : "Pari de " + st + " LP perdu · " + signed(-betLoss(st)) + " pour l'équipe";
-    else if(x.duo === "enemy") meta = "Avec " + (partner ? partner.name : "un adversaire") + " · sans pari, aucun point d'équipe déplacé";
-    else if(partner) meta = "Avec " + partner.name;
-    else meta = "Partie solo";
+    if(x.duo === "team") meta = "Avec " + (partner ? partner.name : "un coéquipier") + (x.win ? " · un objet est tombé" : "");
+    else if(partner)     meta = "Avec " + partner.name;
+    else                 meta = "Partie solo";
     if(x.champion) meta = x.champion + " · " + meta;
     if(x.approx) meta += " · LP estimés (plusieurs parties entre deux relevés)";
 
@@ -907,6 +904,7 @@ function render(){
   renderBalance(states);
   renderRosters(states);
   renderEntry();
+  renderItems();
   renderLadder(states);
   renderChart();
   renderAdmin();
@@ -928,23 +926,19 @@ const RULES = [
   + "<p>Une esquive ou une décroissance fait perdre des LP sans partie : elle apparaît comme un <em>ajustement</em> et compte dans ton net.</p>" },
 
   { t:"Les duos", h:
-    "<p>Deux joueurs du challenge dans la <strong>même équipe LoL</strong> sont comptés comme un duo, allié ou adverse selon leurs équipes du challenge. Rien à taguer.</p>"
+    "<p>Deux joueurs du challenge dans la <strong>même équipe LoL</strong> sont reconnus comme un duo, allié ou adverse selon leurs équipes du challenge. Rien à taguer.</p>"
   + "<p>Le classement affiche ton winrate avec chacun, à côté de son winrate global.</p>"
   + "<p>L'API ne distingue pas un vrai duo de deux joueurs tombés ensemble par hasard : entre joueurs du même niveau, ça peut arriver.</p>" },
 
   { t:"Le duel d'équipes", h:
-    "<p>Le score d'une équipe est la somme des LP nets de ses membres, plus ou moins les paris remportés et perdus.</p>"
+    "<p>Le score d'une équipe est la somme des LP nets de ses membres.</p>"
   + "<p>Une seule mauvaise soirée peut faire basculer la balance : personne n'est jamais à l'abri.</p>" },
 
-  { t:"Le pari du duo adverse", h:
-    "<p>Avant de lancer un duo avec quelqu'un d'en face, <strong>ouvre un pari</strong> de 5 à 50 LP. Il s'appliquera à ton prochain duo adverse.</p>"
-  + "<p>Le gain est linéaire, la perte ne l'est pas. <strong>Plus tu mises, plus la défaite coûte cher</strong> :</p>"
-  + "<table class=\"minitable\"><tr><th>Mise</th><th>Gagné</th><th>Perdu</th></tr>"
-  + "<tr><td>10</td><td class=\"g\">+10</td><td class=\"r\">−12</td></tr>"
-  + "<tr><td>25</td><td class=\"g\">+25</td><td class=\"r\">−38</td></tr>"
-  + "<tr><td>50</td><td class=\"g\">+50</td><td class=\"r\">−100</td></tr></table>"
-  + "<p>Un pari ne compte que pour une partie <strong>lancée après</strong> son ouverture : impossible de parier en cours de partie. Il ne s'annule plus dès qu'une partie a commencé.</p>"
-  + "<p>Sans duo adverse dans les 6 heures, le pari s'éteint sans effet. Un duo adverse joué sans pari compte normalement pour tes LP, mais ne déplace aucun point d'équipe.</p>" },
+  { t:"Les objets", h:
+    "<p><strong>Gagne une partie en duo avec un coéquipier</strong> : un objet tombe. C'est la seule façon d'en obtenir.</p>"
+  + "<p>Un objet est un <strong>bonus</strong> que tu gardes pour toi, ou un <strong>malus</strong> que tu lances sur un adversaire. Il s'applique à la partie suivante.</p>"
+  + "<p>Tant que tu n'as jamais obtenu un objet, l'onglet n'en montre qu'une <em>rumeur</em> : tu sais qu'il existe, pas ce qu'il fait. Dès que tu en décroches un, son effet t'est révélé pour de bon.</p>"
+  + "<p>Plus un objet est rare, plus il est puissant — et plus il se fait attendre.</p>" },
 
   { t:"Ce qui compte", h:
     "<p>File <strong>Solo/Duo classée</strong> uniquement — ni Flex, ni ARAM. Les remakes sont ignorés, les placements ne rapportent rien tant que le rang n'est pas attribué.</p>"
@@ -970,70 +964,6 @@ function openRules(open){
 }
 
 /* ===================================================================
-   Ouverture du pari
-=================================================================== */
-function openBetDialog(){
-  if(!myPlayer()) return;
-  dialValue = Math.max(MISE_MIN, 10);
-  drawDial();
-  say("#betLog", "");
-  const d = $("#betDialog");
-  if(!d.open) d.showModal();
-}
-
-/* ===================================================================
-   Cadran de mise — arc de 270°, de 0 à MISE_MAX
-=================================================================== */
-const DIAL = { cx:130, cy:130, r:96, a0:135, sweep:270 };
-let dialValue = 10;
-
-function dialPoint(deg){
-  const a = deg * Math.PI / 180;
-  return [DIAL.cx + DIAL.r * Math.cos(a), DIAL.cy + DIAL.r * Math.sin(a)];
-}
-function arcPath(fromDeg, toDeg){
-  const [x0,y0] = dialPoint(fromDeg), [x1,y1] = dialPoint(toDeg);
-  const large = (toDeg - fromDeg) > 180 ? 1 : 0;
-  return "M " + x0.toFixed(1) + " " + y0.toFixed(1)
-       + " A " + DIAL.r + " " + DIAL.r + " 0 " + large + " 1 " + x1.toFixed(1) + " " + y1.toFixed(1);
-}
-function drawDial(){
-  const t = dialValue / MISE_MAX;
-  const end = DIAL.a0 + DIAL.sweep * t;
-  $("#dialTrack").setAttribute("d", arcPath(DIAL.a0, DIAL.a0 + DIAL.sweep));
-  $("#dialFill").setAttribute("d", t > 0.001 ? arcPath(DIAL.a0, end) : "M 0 0");
-  const [kx,ky] = dialPoint(end);
-  $("#dialKnob").setAttribute("cx", kx.toFixed(1));
-  $("#dialKnob").setAttribute("cy", ky.toFixed(1));
-
-  const t2 = myPlayer();
-  const us   = t2 ? (t2.team === "a" ? S.challenge.team_a_name : S.challenge.team_b_name) : "Toi";
-  const them = t2 ? (t2.team === "a" ? S.challenge.team_b_name : S.challenge.team_a_name) : "Eux";
-  // Au centre : court, pour ne jamais déborder du cercle.
-  $("#dialValue").textContent = dialValue;
-  const perte = betLoss(dialValue);
-  $("#dialWin").textContent  = signed(dialValue) + " si tu gagnes";
-  $("#dialLoss").textContent = signed(-perte)    + " si tu perds";
-  // Le détail par équipe a de la place sous le cadran.
-  $("#dialWinDetail").textContent  = "Gagné · " + us + " " + signed(dialValue) + " · " + them + " " + signed(-dialValue);
-  $("#dialLossDetail").textContent = "Perdu · " + us + " " + signed(-perte)    + " · " + them + " " + signed(perte);
-  $("#dial").setAttribute("aria-valuenow", dialValue);
-  $("#dial").setAttribute("aria-valuetext", dialValue + " LP misés");
-}
-function setDialFromPointer(ev){
-  const box = $("#dial").getBoundingClientRect();
-  const scale = 260 / box.width;
-  const x = (ev.clientX - box.left) * scale - DIAL.cx;
-  const y = (ev.clientY - box.top)  * scale - DIAL.cy;
-  let deg = Math.atan2(y, x) * 180 / Math.PI;
-  if(deg < 0) deg += 360;
-  if(deg < DIAL.a0) deg += 360;
-  const t = Math.max(0, Math.min(1, (deg - DIAL.a0) / DIAL.sweep));
-  dialValue = Math.max(MISE_MIN, Math.round(t * MISE_MAX));
-  drawDial();
-}
-
-/* ===================================================================
    Actions
 =================================================================== */
 function say(sel, msg, bad){
@@ -1054,36 +984,6 @@ async function removeGame(id){
   if(error) return say("#entryLog", "Suppression refusée : " + error.message, true);
   await loadAll();
   say("#entryLog", "Ligne supprimée.");
-}
-
-async function lockBet(){
-  $("#betLock").disabled = true;
-  say("#betLog", "Vérification chez Riot…");
-  try{
-    await callRiot("open_bet", { stake: dialValue });
-    const d = $("#betDialog");
-    if(d.open) d.close();
-    await loadAll();
-    say("#entryLog", "Mise de " + dialValue + " LP verrouillée. Elle s'appliquera à ton prochain duo adverse.");
-  }catch(e){
-    say("#betLog", e.message, true);
-  }finally{
-    $("#betLock").disabled = false;
-  }
-}
-
-async function cancelBet(){
-  if(!confirm("Annuler ton pari en cours ?")) return;
-  $("#betCancel").disabled = true;
-  try{
-    await callRiot("cancel_bet");
-    await loadAll();
-    say("#entryLog", "Pari annulé.");
-  }catch(e){
-    say("#entryLog", e.message, true);
-  }finally{
-    $("#betCancel").disabled = false;
-  }
 }
 
 /* Relance un relevé si le dernier date de plus de 3 minutes. On n'attend
@@ -1138,26 +1038,6 @@ function initUI(){
   $("#rulesScrim").addEventListener("click", () => openRules(false));
   document.addEventListener("keydown", e => {
     if(e.key === "Escape" && $("#rulesDrawer").classList.contains("open")) openRules(false);
-  });
-
-  $("#betOpenBtn").addEventListener("click", openBetDialog);
-  $("#betLock").addEventListener("click", lockBet);
-  $("#betCancel").addEventListener("click", cancelBet);
-
-  const dial = $("#dial");
-  let dragging = false;
-  dial.addEventListener("pointerdown", e => {
-    dragging = true; dial.setPointerCapture(e.pointerId); setDialFromPointer(e);
-  });
-  dial.addEventListener("pointermove", e => { if(dragging) setDialFromPointer(e); });
-  dial.addEventListener("pointerup", () => { dragging = false; });
-  dial.addEventListener("pointercancel", () => { dragging = false; });
-  dial.addEventListener("keydown", e => {
-    const step = e.shiftKey ? 5 : 1;
-    if(e.key === "ArrowRight" || e.key === "ArrowUp"){   dialValue = Math.min(MISE_MAX, dialValue + step); drawDial(); e.preventDefault(); }
-    if(e.key === "ArrowLeft"  || e.key === "ArrowDown"){ dialValue = Math.max(MISE_MIN, dialValue - step);  drawDial(); e.preventDefault(); }
-    if(e.key === "Home"){ dialValue = MISE_MIN; drawDial(); e.preventDefault(); }
-    if(e.key === "End"){  dialValue = MISE_MAX; drawDial(); e.preventDefault(); }
   });
 
   setInterval(tickCountdown, 60000);

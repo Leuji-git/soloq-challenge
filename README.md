@@ -31,6 +31,8 @@ supabase/functions/riot/index.ts   la fonction serveur qui interroge Riot
 | 5 | `bet-required.sql` | Rend le pari obligatoire en duo adverse (mise ≥ 5) |
 | 6 | `riot-api.sql` | Suivi automatique : relevés, verrouillage des écritures, tâche planifiée — **après** avoir déployé la fonction |
 | 7 | `clean-riot-ids.sql` | Retire les caractères invisibles des pseudos et tags (lien dpm.lol cassé), et empêche leur retour |
+| 8 | `sync-cadence.sql` | Passe le relevé de 3 à 5 minutes |
+| 9 | `items.sql` | Les objets : catalogue, inventaire, lecture publique |
 
 ---
 

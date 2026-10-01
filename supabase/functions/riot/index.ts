@@ -11,8 +11,8 @@
 //  Actions (POST, corps JSON) :
 //    { action: "sync" }                 relevé de tous les joueurs (étranglé)
 //    { action: "register", riotId }     inscription, compte vérifié chez Riot
-//    { action: "open_bet", stake }      ouvrir un pari avant la partie
-//    { action: "cancel_bet" }           annuler, si aucune partie n'a commencé
+//
+//  Gagner une partie en duo avec un coéquipier fait tomber un objet.
 //
 //  Secret requis : RIOT_API_KEY  (Edge Functions > Secrets)
 // =====================================================================
@@ -27,7 +27,8 @@ const TIER_ORDER = ["IRON","BRONZE","SILVER","GOLD","PLATINUM","EMERALD","DIAMON
 const ROMAN_TO_DIV = { I:1, II:2, III:3, IV:4 };
 const APEX_FROM = 7;          // MASTER et au-dessus : pas de division
 const QUEUE_SOLO = 420;       // Classée Solo/Duo
-const BET_TTL_MS = 6 * 3600 * 1000;
+// Un butin tombe à chaque victoire en duo avec un coéquipier.
+const POIDS_RARETE = { commun: 60, rare: 30, legendaire: 10 };
 
 // Même barème que le site : palier x 400 + division x 100 + LP.
 function toScore(tier, division, lp){
@@ -113,10 +114,16 @@ function splitLp(delta, games){
   return { lps, approx:true };
 }
 
-// Un pari ne vaut que pour un duo adverse COMMENCÉ après son ouverture :
-// impossible de parier en cours de partie en voyant qu'on gagne.
-function betApplies(bet, reading){
-  return !!bet && reading.duo === "enemy" && reading.start > new Date(bet.opened_at).getTime();
+// Tirage pondéré par la rareté. `alea` entre 0 et 1 : fourni par les tests,
+// tiré au sort en vrai.
+function tirerObjet(items, alea){
+  const actifs = (items || []).filter(i => i && i.active !== false);
+  if(!actifs.length) return null;
+  const poids = i => POIDS_RARETE[i.rarity] || 1;
+  const total = actifs.reduce((a, i) => a + poids(i), 0);
+  let x = (alea === undefined ? Math.random() : alea) * total;
+  for(const i of actifs){ x -= poids(i); if(x < 0) return i; }
+  return actifs[actifs.length - 1];
 }
 
 function clampLp(v){ return Math.max(-200, Math.min(200, Math.round(v))); }
@@ -182,7 +189,19 @@ async function riot(url){
       if(essai === 0 && attente <= 3){ await new Promise(ok => setTimeout(ok, attente * 1000)); continue; }
       throw new RiotError(429, "Limite de requêtes Riot atteinte, nouvel essai au prochain relevé.");
     }
-    if(r.status === 401 || r.status === 403) throw new RiotError(r.status, "Clé API Riot refusée ou expirée.");
+    if(r.status === 401 || r.status === 403){
+      // 403 = clé expirée ou révoquée (le cas d'une clé de développement,
+      // qui ne vit que 24 h). 401 = en-tête absent ou clé mal formée.
+      // Jamais le moindre morceau de la clé ici : cette réponse est publique.
+      // On décrit seulement sa forme, ce qui suffit à repérer un copier-coller raté.
+      const forme = "longueur " + RIOT_KEY.length
+        + (RIOT_KEY.startsWith("RGAPI-") ? ", préfixe RGAPI- présent" : ", PRÉFIXE RGAPI- ABSENT")
+        + (RIOT_KEY !== RIOT_KEY.trim() ? ", ESPACES EN BORD" : "")
+        + (/["']/.test(RIOT_KEY) ? ", GUILLEMETS DANS LA VALEUR" : "");
+      throw new RiotError(r.status, r.status === 403
+        ? "Clé API Riot refusée (403) : expirée ou révoquée. Une clé de développement meurt toutes les 24 h — regénère-la sur developer.riotgames.com, puis remplace le secret RIOT_API_KEY. Forme de la clé lue : " + forme
+        : "Clé API Riot refusée (401) : clé mal formée. Vérifie qu'il n'y a ni espace ni guillemet autour de la valeur du secret. Forme de la clé lue : " + forme);
+    }
     if(!r.ok) throw new RiotError(r.status, "Riot a répondu " + r.status + ".");
     return r.json();
   }
@@ -222,14 +241,15 @@ async function sync(force){
   const { data: go } = await db.rpc("riot_try_start_sync", { p_force: force });
   if(!go) return { skipped: true };
 
-  const bilan = { players: 0, games: 0, adjusts: 0, bets: 0, waiting: [], errors: [] };
+  const bilan = { players: 0, games: 0, adjusts: 0, loot: 0, waiting: [], errors: [] };
   try{
-    const [ch, pl, sn, bt] = await Promise.all([
+    const [ch, pl, sn, it] = await Promise.all([
       db.from("challenge").select("*").eq("id", 1).single(),
       db.from("players").select("id,name,tag,team,puuid,claimed_by"),
       db.from("rank_snapshots").select("*"),
-      db.from("pending_bets").select("*")
+      db.from("items").select("key,rarity,active").eq("active", true)
     ]);
+    const catalogue = it.data || [];
     const winStart = parisMidnight(ch.data.start_date);
     const winEnd = winStart + ch.data.days * 86400000;
     const snapOf = Object.fromEntries((sn.data || []).map(s => [s.player_id, s]));
@@ -261,14 +281,6 @@ async function sync(force){
 
     const players = tous.filter(x => x.puuid && !x.__justLinked);
     const byPuuid = Object.fromEntries(tous.filter(x => x.puuid).map(p => [p.puuid, p]));
-    const betOf = {};
-
-    // Un pari sans duo adverse dans les 6 h s'éteint sans effet.
-    for(const b of (bt.data || [])){
-      if(Date.now() - new Date(b.opened_at).getTime() > BET_TTL_MS){
-        await db.from("pending_bets").delete().eq("player_id", b.player_id);
-      } else betOf[b.player_id] = b;
-    }
 
     for(const p of players){
       bilan.players++;
@@ -325,15 +337,8 @@ async function sync(force){
           const g = att.games[i];
           if(g.start < winStart || g.start > winEnd) continue;     // hors challenge : ignoré
 
-          let stake = 0;
-          if(betApplies(betOf[p.id], g)){
-            stake = betOf[p.id].stake;
-            await db.from("pending_bets").delete().eq("player_id", p.id);
-            delete betOf[p.id];
-            bilan.bets++;
-          }
           const { error } = await db.from("games").insert({
-            player_id: p.id, lp: clampLp(split.lps[i]), win: g.win, duo: g.duo, stake,
+            player_id: p.id, lp: clampLp(split.lps[i]), win: g.win, duo: g.duo, stake: 0,
             partner_id: g.partnerId, match_id: g.matchId, champion: g.champion,
             approx: split.approx || !!att.forced, kind: "game",
             played_on: parisDate(g.end), created_at: new Date(g.end).toISOString(),
@@ -341,6 +346,18 @@ async function sync(force){
           });
           if(error && !/duplicate/i.test(error.message)) throw error;
           if(!error) bilan.games++;
+
+          // Victoire en duo avec un coéquipier : un objet tombe.
+          // L'index unique (player_id, source_match) empêche tout doublon
+          // si un relevé repasse sur la même partie.
+          if(!error && g.duo === "team" && g.win){
+            const objet = tirerObjet(catalogue);
+            if(objet){
+              const { error: eLoot } = await db.from("player_items")
+                .insert({ player_id: p.id, item_key: objet.key, source_match: g.matchId });
+              if(!eLoot) bilan.loot++;
+            }
+          }
         }
         await saveSnap(p.id, next, now);
 
@@ -386,50 +403,6 @@ async function register(user, body){
 }
 
 
-/* ------------------------------ paris ------------------------------ */
-async function openBet(user, body){
-  const p = await playerOf(user);
-  if(!p) return json({ error: "Crée d'abord ton profil joueur." }, 403);
-  const stake = Math.round(Number(body.stake));
-  if(!(stake >= 5 && stake <= 50)) return json({ error: "La mise doit être comprise entre 5 et 50 LP." }, 400);
-
-  const { data: deja } = await db.from("pending_bets").select("player_id").eq("player_id", p.id).maybeSingle();
-  if(deja) return json({ error: "Tu as déjà un pari en cours." }, 409);
-
-  // Confort : prévenir tout de suite. La vraie garantie est ailleurs — un pari
-  // ne s'applique qu'à une partie commencée APRÈS son ouverture.
-  try{
-    if(await riot(`${PLATFORM}/lol/spectator/v5/active-games/by-summoner/${p.puuid}`)){
-      return json({ error: "Tu es déjà en partie : le pari se pose avant de lancer la file." }, 409);
-    }
-  }catch(e){ if(e instanceof RiotError && e.status === 429) throw e; }
-
-  const { error } = await db.from("pending_bets").insert({ player_id: p.id, stake, partner_id: null });
-  if(error) return json({ error: error.message }, 400);
-  return json({ ok: true, stake });
-}
-
-async function cancelBet(user){
-  const p = await playerOf(user);
-  if(!p) return json({ error: "Crée d'abord ton profil joueur." }, 403);
-  const { data: bet } = await db.from("pending_bets").select("*").eq("player_id", p.id).maybeSingle();
-  if(!bet) return json({ error: "Aucun pari en cours." }, 404);
-
-  // Ici le contrôle est bloquant : sans lui, on annulerait en voyant la défaite venir.
-  if(await riot(`${PLATFORM}/lol/spectator/v5/active-games/by-summoner/${p.puuid}`)){
-    return json({ error: "Partie en cours : le pari ne peut plus être annulé." }, 409);
-  }
-  const since = Math.floor(new Date(bet.opened_at).getTime() / 1000);
-  const recentes = await riot(`${REGION}/lol/match/v5/matches/by-puuid/${p.puuid}/ids?queue=${QUEUE_SOLO}&startTime=${since}&start=0&count=1`) || [];
-  if(recentes.length){
-    return json({ error: "Une partie a déjà été jouée depuis ton pari : il ne peut plus être annulé." }, 409);
-  }
-
-  await db.from("pending_bets").delete().eq("player_id", p.id);
-  return json({ ok: true });
-}
-
-
 /* ------------------------------ entrée ----------------------------- */
 Deno.serve(async (req) => {
   if(req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -444,8 +417,6 @@ Deno.serve(async (req) => {
     switch(body.action){
       case "sync":       return json(await sync(!!(body.force && user && await isAdmin(user.id))));
       case "register":   return await register(user, body);
-      case "open_bet":   return await openBet(user, body);
-      case "cancel_bet": return await cancelBet(user);
       default:           return json({ error: "Action inconnue." }, 400);
     }
   }catch(e){
