@@ -244,6 +244,7 @@ async function simGame(){
       action: "sim", player: p, lp,
       win: $("#bWin").value === "1", duo: $("#bDuo").value,
       partner: $("#bDuo").value === "solo" ? undefined : ($("#bPartner").value || undefined),
+      lpPartner: $("#bLpPartner").value === "" ? undefined : Number($("#bLpPartner").value),
       champion: $("#bChamp").value.trim() || undefined,
       dureeMin: Number($("#bDur").value) || undefined,
       deaths: $("#bDeaths").value === "" ? undefined : Number($("#bDeaths").value),

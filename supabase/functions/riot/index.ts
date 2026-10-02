@@ -715,7 +715,12 @@ async function simuler(user, body){
   let cote = null;
   if(compagnon){
     const winC = duo === "team" ? win : !win;
-    const lpC  = clampLp(duo === "team" ? lp : -lp);
+    // Par défaut l'allié recopie le résultat et l'adversaire l'inverse,
+    // mais deux joueurs d'un même duo gagnent rarement le même nombre de
+    // LP : on accepte une valeur explicite pour corriger une vraie partie.
+    const lpC = body.lpPartner === undefined || body.lpPartner === null || body.lpPartner === ""
+      ? clampLp(duo === "team" ? lp : -lp)
+      : clampLp(Number(body.lpPartner) || 0);
     const gC = Object.assign({}, g, { win: winC, partnerId: joueur.id });
 
     const { error: eC } = await db.from("games").insert({
