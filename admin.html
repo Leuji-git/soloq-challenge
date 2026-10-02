@@ -106,6 +106,18 @@
             <span class="wr" id="sDetail">—</span>
             <button type="button" class="btn ghost sm" id="sForce">Forcer un relevé</button>
           </div>
+          <div class="keyfix" id="sKey" hidden>
+            <b id="sKeyTitle">La clé API Riot est refusée</b>
+            <p id="sKeyWhen">Le suivi est à l'arrêt.</p>
+            <p>Les parties jouées pendant la panne ne sont pas perdues : elles remontent
+               au premier relevé qui refonctionne. Le total de LP est exact, la répartition
+               partie par partie est marquée « ≈ ».</p>
+            <div class="keysteps">
+              <a class="btn sm" id="sKeyRiot" target="_blank" rel="noopener noreferrer">1. Nouvelle clé chez Riot</a>
+              <a class="btn sm" id="sKeySb" target="_blank" rel="noopener noreferrer">2. Remplacer le secret</a>
+              <button type="button" class="btn ghost sm" id="sKeyTest">3. Vérifier</button>
+            </div>
+          </div>
           <div class="log" id="gLog"></div>
         </div>
         <div class="feed" id="gFeed" style="max-height:420px"></div>
@@ -122,6 +134,47 @@
         </table>
       </div>
       <div class="body"><div class="log" id="aLog"></div></div>
+    </section>
+
+    <!-- ---------- bac a sable ---------- -->
+    <section class="block sandbox">
+      <header><h2>Bac à sable</h2></header>
+      <div class="body">
+        <p class="hint">Pour essayer les objets sans attendre une vraie partie classée.
+          Tout ce qui sort d'ici est marqué comme simulé et s'efface d'un seul bouton,
+          sans toucher aux vraies parties.</p>
+
+        <div class="form">
+          <div class="field"><label for="bPlayer">Joueur</label><select id="bPlayer"></select></div>
+        </div>
+
+        <h4>Donner un objet</h4>
+        <div class="form">
+          <div class="field"><label for="bItem">Objet</label><select id="bItem"></select></div>
+          <div class="field"><label>&nbsp;</label><button type="button" class="btn" id="bGive">Donner</button></div>
+        </div>
+
+        <h4>Simuler une partie</h4>
+        <div class="form">
+          <div class="field"><label for="bLp">LP</label><input type="number" id="bLp" min="-200" max="200" value="22"></div>
+          <div class="field"><label for="bWin">Résultat</label>
+            <select id="bWin"><option value="1">Victoire</option><option value="0">Défaite</option></select></div>
+          <div class="field"><label for="bDuo">Duo</label>
+            <select id="bDuo">
+              <option value="solo">Seul</option>
+              <option value="team">Avec un coéquipier</option>
+              <option value="enemy">Contre un adversaire</option>
+            </select></div>
+          <div class="field"><label>&nbsp;</label><button type="button" class="btn" id="bPlay">Simuler</button></div>
+        </div>
+        <p class="hint">Une victoire <b>avec un coéquipier</b> fait tomber un objet, exactement
+          comme le relèvement réel. Le LP négatif est accepté pour une défaite.</p>
+
+        <div class="btnrow">
+          <button type="button" class="btn ghost" id="bClear">Effacer tout le simulé</button>
+        </div>
+        <div class="log" id="bLog"></div>
+      </div>
     </section>
 
     <!-- ---------- zone rouge ---------- -->

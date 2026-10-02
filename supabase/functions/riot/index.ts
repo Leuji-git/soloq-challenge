@@ -162,6 +162,12 @@ function parisMidnight(dateStr){
 
 
 const RIOT_KEY = Deno.env.get("RIOT_API_KEY") ?? "";
+
+/* Secret facultatif. Sans lui, tout marche comme avant : il n'y a
+   simplement personne pour prévenir que la clé est morte.
+   Discord > réglages du salon > Intégrations > Webhooks. */
+const WEBHOOK = Deno.env.get("DISCORD_WEBHOOK") ?? "";
+const PORTAIL = "https://developer.riotgames.com/";
 const PLATFORM = "https://euw1.api.riotgames.com";
 const REGION   = "https://europe.api.riotgames.com";
 
@@ -236,12 +242,47 @@ async function saveSnap(playerId, s, now){
 }
 
 
+/* --------------------------- alerte clé ---------------------------
+   La fonction est le seul endroit qui apprenne la mort de la clé au
+   moment où elle arrive : le cron l'appelle toutes les 5 minutes, même
+   quand personne n'a le site ouvert. Elle le dit donc au salon.
+
+   Jamais le moindre morceau de la clé dans ce message : il est lu par
+   tout le Discord. On ne dit que l'état, pas la valeur.               */
+async function alerteCle(enPanne){
+  if(!WEBHOOK) return;
+  // Rien ici ne doit pouvoir faire échouer un relevé : ni un alerte-cle.sql
+  // pas encore lancé, ni un webhook supprimé côté Discord.
+  try{
+    const { data: quoi } = await db.rpc("riot_claim_key_alert", { p_down: enPanne });
+    if(!quoi) return;                  // déjà annoncé, ou fonction SQL absente
+
+    const texte = quoi === "panne"
+      ? "⚠️ **Le suivi des LP est à l'arrêt.** La clé de l'API Riot a expiré"
+        + " (une clé de développement ne vit que 24 h).\n"
+        + "Les parties jouées pendant la panne ne sont pas perdues : elles remonteront"
+        + " au premier relevé qui refonctionne, avec un total de LP exact"
+        + " (la répartition partie par partie sera marquée « ≈ »).\n"
+        + "Pour relancer le suivi : nouvelle clé sur <" + PORTAIL + "> puis remplacement"
+        + " du secret `RIOT_API_KEY` dans Supabase."
+      : "✅ **Le suivi des LP a repris.** Les parties en attente remontent au prochain relevé.";
+
+    await fetch(WEBHOOK, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: texte, allowed_mentions: { parse: [] } })
+    });
+  }catch(_){}
+}
+
+
 /* ----------------------------- relevé ----------------------------- */
 async function sync(force){
   const { data: go } = await db.rpc("riot_try_start_sync", { p_force: force });
   if(!go) return { skipped: true };
 
   const bilan = { players: 0, games: 0, adjusts: 0, loot: 0, waiting: [], errors: [] };
+  let cleRefusee = false, lus = 0;
   try{
     const [ch, pl, sn, it] = await Promise.all([
       db.from("challenge").select("*").eq("id", 1).single(),
@@ -286,6 +327,7 @@ async function sync(force){
       bilan.players++;
       try{
         const next = snapshotFromEntries(await riot(`${PLATFORM}/lol/league/v4/entries/by-puuid/${p.puuid}`));
+        lus++;                                 // Riot a répondu : la clé vit
         const prev = snapOf[p.id] ? rowToSnap(snapOf[p.id]) : null;
         const cmp = compareSnapshots(prev, next);
         const now = Date.now();
@@ -363,6 +405,7 @@ async function sync(force){
 
       }catch(e){
         bilan.errors.push(p.name + " : " + (e.message || e));
+        if(e instanceof RiotError && (e.status === 401 || e.status === 403)) cleRefusee = true;
         if(e instanceof RiotError && (e.status === 429 || e.status === 401 || e.status === 403)) break;
       }
     }
@@ -370,6 +413,11 @@ async function sync(force){
     await db.rpc("riot_finish_sync", {
       p_error: bilan.errors.length ? bilan.errors.join(" | ").slice(0, 600) : null
     });
+    // Après le verrou : l'alerte ne doit pas retenir le relevé.
+    // On n'annonce le retour que si ce relevé a vraiment lu des joueurs,
+    // sinon un relevé vide passerait pour une réparation.
+    if(cleRefusee)   await alerteCle(true);
+    else if(lus)     await alerteCle(false);
   }
   return bilan;
 }
@@ -407,7 +455,10 @@ async function register(user, body){
 Deno.serve(async (req) => {
   if(req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if(req.method !== "POST") return json({ error: "Méthode POST attendue." }, 405);
-  if(!RIOT_KEY) return json({ error: "Secret RIOT_API_KEY absent de la fonction." }, 500);
+  if(!RIOT_KEY){
+    await alerteCle(true);
+    return json({ error: "Secret RIOT_API_KEY absent de la fonction." }, 500);
+  }
 
   let body = {};
   try{ body = await req.json(); }catch(_){}

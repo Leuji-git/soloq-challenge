@@ -590,7 +590,7 @@ function initChartZoom(){
 function renderAccount(){
   const box = $("#whoBox");
   if(!S.session){
-    box.innerHTML = '<span class="lbl">Consultation libre — connecte-toi pour déclarer tes parties</span>';
+    box.innerHTML = '<span class="lbl">Consultation libre — connecte-toi pour rejoindre le challenge</span>';
     $("#btnLogin").hidden = false;
     $("#btnLogout").hidden = true;
     $("#lnkAdmin").hidden = true;
@@ -727,6 +727,19 @@ function renderSyncStatus(){
 ------------------------------------------------------------------ */
 const RARETES = { commun:"Commun", rare:"Rare", legendaire:"Légendaire" };
 
+/* Mêmes poids que le tirage de la fonction « riot » (POIDS_RARETE).
+   Si tu les changes là-bas, change-les ici : le site ne fait qu'afficher
+   la probabilité, c'est le serveur qui tire. */
+const POIDS_RARETE = { commun:60, rare:30, legendaire:10 };
+
+// Chance qu'un butin donné tombe sur cet objet précis.
+function tauxDrop(it, items){
+  const poids = x => POIDS_RARETE[x.rarity] || 1;
+  const total = items.reduce((a, x) => a + poids(x), 0);
+  return total ? poids(it) / total * 100 : 0;
+}
+const formatTaux = p => (p < 10 ? p.toFixed(1).replace(".", ",") : String(Math.round(p))) + " %";
+
 function renderItems(){
   const grille = $("#itemGrid");
   const mine = myPlayer();
@@ -743,18 +756,24 @@ function renderItems(){
   const enStock = {};
   aMoi.filter(r => !r.used_at).forEach(r => { enStock[r.item_key] = (enStock[r.item_key] || 0) + 1; });
 
+  // En admin, tout est révélé : c'est la vue de travail pour relire
+  // les visuels et les effets.
+  const admin = isAdmin();
   const total = aMoi.filter(r => !r.used_at).length;
   $("#itemsCount").textContent = mine
     ? decouverts.size + " / " + S.items.length + " découverts"
     : S.items.length + " objets";
-  $("#itemsHint").textContent = mine
-    ? "Un objet tombe à chaque victoire en duo avec un coéquipier. Tant que tu n'en as jamais obtenu un, tu n'en connais que la rumeur."
-      + (total ? " Tu en as " + total + " en réserve." : "")
-    : "Connecte-toi pour voir ceux que tu as découverts. Un objet tombe à chaque victoire en duo avec un coéquipier.";
+  $("#itemsHint").textContent = admin
+    ? "Vue administrateur : tous les objets sont révélés, les joueurs ne voient que ceux qu'ils ont obtenus. Le pourcentage est la chance de tomber sur cet objet à chaque butin."
+    : mine
+      ? "Un objet tombe à chaque victoire en duo avec un coéquipier. Tant que tu n'en as jamais obtenu un, tu n'en connais que la rumeur."
+        + (total ? " Tu en as " + total + " en réserve." : "")
+      : "Connecte-toi pour voir ceux que tu as découverts. Un objet tombe à chaque victoire en duo avec un coéquipier.";
 
   grille.innerHTML = S.items.map(it => {
-    const connu = decouverts.has(it.key);
+    const connu = decouverts.has(it.key) || admin;
     const n = enStock[it.key] || 0;
+    const taux = formatTaux(tauxDrop(it, S.items));
     return '<article class="item' + (connu ? "" : " locked") + ' ' + esc(it.rarity) + '">'
       + '<div class="itemhead">'
         + '<span class="itemicon">' + (connu ? esc(it.icon) : "🔒") + '</span>'
@@ -763,6 +782,7 @@ function renderItems(){
           + '<div class="itemtags">'
             + '<span class="rarity ' + esc(it.rarity) + '">' + esc(RARETES[it.rarity] || it.rarity) + '</span>'
             + '<span class="itemtarget">' + (it.target === "soi" ? "pour toi" : "sur un adversaire") + '</span>'
+            + '<span class="droprate" title="Chance de tomber sur cet objet a chaque butin">' + taux + '</span>'
           + '</div>'
         + '</div>'
         + (n > 1 ? '<span class="itemcount">×' + n + '</span>' : n === 1 ? '<span class="itemcount">×1</span>' : '')
@@ -989,6 +1009,58 @@ async function removeGame(id){
 /* Relance un relevé si le dernier date de plus de 3 minutes. On n'attend
    pas la réponse : le temps réel ramènera les nouvelles parties. C'est la
    roue de secours si la tâche planifiée tombe. */
+/* Le serveur refuse un relevé lancé moins de 90 s après le précédent
+   (riot_try_start_sync). On n'essaie donc pas de deviner autre chose :
+   on lit l'heure du dernier relevé et on dit ce qu'il reste à attendre. */
+const ATTENTE_RELEVE = 90e3;
+
+function attenteRestante(){
+  const last = S.sync && S.sync.last_run ? new Date(S.sync.last_run).getTime() : 0;
+  return Math.max(0, ATTENTE_RELEVE - (Date.now() - last));
+}
+
+// Le compte à rebours tourne chaque seconde : sans cette date, il
+// effacerait le résultat du relevé avant qu'on ait pu le lire.
+let resultatVisibleJusqua = 0;
+
+function majBoutonRefresh(){
+  const b = $("#btnRefresh");
+  if(!b || b.classList.contains("spinning")) return;
+  if(Date.now() < resultatVisibleJusqua) return;
+  const reste = attenteRestante();
+  b.disabled = reste > 0;
+  $("#refreshLbl").textContent = reste > 0
+    ? Math.ceil(reste / 1000) + " s"
+    : "Actualiser";
+  b.title = reste > 0
+    ? "Un relevé vient d'avoir lieu : encore " + Math.ceil(reste / 1000) + " s"
+    : "Relever les parties chez Riot maintenant";
+}
+
+async function refreshNow(){
+  const b = $("#btnRefresh");
+  if(b.disabled) return;
+  b.classList.add("spinning");
+  b.disabled = true;
+  $("#refreshLbl").textContent = "Relevé…";
+  try{
+    const r = await callRiot("sync");
+    // Le temps réel ramène déjà les nouvelles lignes ; loadAll rattrape le
+    // cas où la souscription n'est pas établie.
+    await loadAll();
+    if(r && r.skipped) $("#refreshLbl").textContent = "Déjà à jour";
+    else if(r && r.games)  $("#refreshLbl").textContent = r.games + " partie" + (r.games > 1 ? "s" : "");
+    else $("#refreshLbl").textContent = "À jour";
+  }catch(e){
+    $("#refreshLbl").textContent = "Échec";
+    b.title = e.message || String(e);
+  }finally{
+    b.classList.remove("spinning");
+    resultatVisibleJusqua = Date.now() + 2500;
+    setTimeout(majBoutonRefresh, 2600);
+  }
+}
+
 function nudgeSync(){
   if(!sb || !S.ready) return;
   const last = S.sync && S.sync.last_run ? new Date(S.sync.last_run).getTime() : 0;
@@ -1033,6 +1105,8 @@ function segment(aSel, bSel, onA, onB){
 
 function initUI(){
   $("#fPlayer").addEventListener("change", () => renderEntry());
+  $("#btnRefresh").addEventListener("click", refreshNow);
+  setInterval(majBoutonRefresh, 1000);
   $("#btnRules").addEventListener("click", () => openRules(true));
   $("#rulesClose").addEventListener("click", () => openRules(false));
   $("#rulesScrim").addEventListener("click", () => openRules(false));

@@ -31,8 +31,10 @@ supabase/functions/riot/index.ts   la fonction serveur qui interroge Riot
 | 5 | `bet-required.sql` | Rend le pari obligatoire en duo adverse (mise ≥ 5) |
 | 6 | `riot-api.sql` | Suivi automatique : relevés, verrouillage des écritures, tâche planifiée — **après** avoir déployé la fonction |
 | 7 | `clean-riot-ids.sql` | Retire les caractères invisibles des pseudos et tags (lien dpm.lol cassé), et empêche leur retour |
-| 8 | `sync-cadence.sql` | Passe le relevé de 3 à 5 minutes |
+| 8 | `sync-cadence.sql` | Relevé automatique toutes les 5 min, à la demande toutes les 90 s — **à relancer**, l'étranglement y était à 240 s |
 | 9 | `items.sql` | Les objets : catalogue, inventaire, lecture publique |
+| 10 | `alerte-cle.sql` | Prévient le Discord quand la clé Riot meurt, et quand elle revient |
+| 11 | `bac-a-sable.sql` | Simuler des parties et distribuer des objets depuis la console |
 
 ---
 
@@ -62,6 +64,49 @@ dit laquelle, le champion, et si un autre joueur du challenge était dans la mê
 | Personnelle | n'expire pas | pour le challenge — **environ 2 semaines d'examen** |
 
 Demande la clé personnelle sur <https://developer.riotgames.com> → **Register Product** → *Personal*.
+
+#### Pourquoi le renouvellement n'est pas automatisé
+
+Regénérer une clé de développement demande de se connecter au portail Riot avec
+le mot de passe du compte et de passer leur protection anti-robot. Un programme
+qui ferait ça irait contre les conditions d'utilisation de Riot et mettrait le
+compte en danger : le projet ne le fait pas, et ne le fera pas.
+
+Ce qui est automatisé, c'est tout le reste : **savoir** que la clé est morte à la
+minute où elle meurt (alerte Discord ci-dessous), et avoir les deux liens du
+remplacement sous la main dans la console. Le geste manuel se réduit à
+regénérer / copier / coller, une trentaine de secondes.
+
+La vraie sortie reste la **clé personnelle**, qui n'expire pas.
+
+### L'alerte Discord quand la clé meurt
+
+Sans elle, le suivi s'arrête en silence et personne ne le voit avant le soir.
+
+1. Discord → **réglages du salon** → **Intégrations** → **Webhooks** → *Nouveau webhook*,
+   choisis le salon, puis **Copier l'URL du webhook**.
+2. Supabase → **Edge Functions** → **Secrets** → nouveau secret :
+
+```
+DISCORD_WEBHOOK = https://discord.com/api/webhooks/...
+```
+
+3. Lance `supabase/alerte-cle.sql`.
+
+Le secret est **facultatif** : sans lui tout fonctionne comme avant, il n'y a
+simplement personne pour prévenir. Le message n'annonce que l'état de la clé,
+jamais sa valeur — il est lu par tout le salon. Une panne n'est annoncée qu'une
+fois par heure, et le retour une seule fois.
+
+Dans la console admin, un bloc rouge apparaît alors avec les deux liens du
+remplacement et un bouton de vérification.
+
+### Ce qui arrive aux parties jouées pendant une panne
+
+Elles ne sont pas perdues. Le relevé compare des rangs, pas des parties : au
+premier relevé qui refonctionne, l'écart complet est rattrapé. Le **total de LP
+est exact** ; la répartition partie par partie devient une estimation, marquée
+« ≈ » sur le site.
 
 ### 1. Déployer la fonction
 
@@ -116,6 +161,51 @@ Seules les parties du challenge sont relevées. Pour voir une vraie partie arriv
 avance la date de début à aujourd'hui dans la console, joue une classée, attends
 quelques minutes, puis **Zone rouge → Supprimer toutes les parties** et remets la
 vraie date.
+
+---
+
+## Le bouton « Actualiser »
+
+Dans la barre du haut du site, pour tout le monde, connecté ou non. Il demande
+un relevé immédiat au lieu d'attendre le prochain passage automatique.
+
+Deux garde-fous, et c'est le serveur qui tranche :
+
+- `riot_try_start_sync` refuse un relevé lancé moins de **90 s** après le
+  précédent. Le bouton affiche alors le temps restant et reste inactif.
+- Un seul relevé tourne à la fois (`running_until`), peu importe le nombre de
+  clics simultanés.
+
+Le quota tient largement : un relevé coûte 8 appels Riot en régime normal, une
+clé de développement en autorise 100 par 2 minutes.
+
+Si tu changes la valeur, change-la **aux deux endroits** : `interval '90 seconds'`
+dans `sync-cadence.sql` et `ATTENTE_RELEVE` dans `app.js`. Le site ne fait
+qu'afficher l'attente, c'est le serveur qui l'applique.
+
+---
+
+## Le bac à sable
+
+Console admin → **Bac à sable**. Pour essayer les objets sans attendre une vraie
+partie classée :
+
+- **Donner un objet** à n'importe quel joueur, choisi ou tiré au sort selon les
+  raretés réelles ;
+- **Simuler une partie** avec les LP, le résultat et le type de duo. Une victoire
+  *avec un coéquipier* fait tomber un objet, exactement comme le relevé réel ;
+- **Effacer tout le simulé** d'un bouton.
+
+Tout ce qui sort d'ici porte un `match_id` et un `source_match` commençant par
+`sim-`. C'est ce qui permet de tout retirer sans toucher à une seule vraie
+partie — et c'est aussi pourquoi le relevé réel ne peut jamais entrer en
+collision avec, un identifiant Riot ressemblant à `EUW1_7391...`.
+
+Les écritures passent par trois fonctions SQL `security definer` réservées à
+l'administrateur : le navigateur, lui, reste incapable d'écrire une partie.
+C'est la garantie que personne ne peut s'inventer des LP, et elle ne bouge pas.
+
+**À faire avant le vrai départ :** un passage par *Effacer tout le simulé*.
 
 ---
 

@@ -25,7 +25,7 @@ const signed = n => (n>0 ? "+" : n<0 ? "−" : "±") + Math.abs(n);
 const iso = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 const emblem = t => "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-shared-components/global/default/" + t.toLowerCase() + ".png";
 
-const S = { challenge:null, players:[], games:[], profiles:[], snaps:{}, sync:null, session:null, me:null };
+const S = { challenge:null, players:[], games:[], profiles:[], snaps:{}, sync:null, items:[], session:null, me:null };
 let gameFilter = "all";
 
 let sb = null;
@@ -50,14 +50,17 @@ const playerById = id => S.players.find(p => p.id === id);
 /* =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, pr, sn, st] = await Promise.all([
+  const [ch, pl, gm, pr, sn, st, it] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at", { ascending:false }),
     sb.from("profiles").select("id, display_name, avatar_url, is_admin"),
     sb.from("rank_snapshots").select("*"),
-    sb.from("sync_state").select("*").eq("id",1).maybeSingle()
+    sb.from("sync_state").select("*").eq("id",1).maybeSingle(),
+    sb.from("items").select("key,name,icon,rarity,target,effect,active").order("sort")
   ]);
+  // items.sql n'est peut-être pas encore lancé : son absence ne doit pas
+  // rendre toute la console inutilisable, seulement le bac à sable.
   const err = ch.error || pl.error || gm.error || pr.error || sn.error || st.error;
   if(err) return fatal("<b>Base injoignable</b><br>" + esc(err.message));
 
@@ -67,6 +70,7 @@ async function loadAll(){
   S.profiles  = pr.data || [];
   S.snaps     = Object.fromEntries((sn.data || []).map(r => [r.player_id, r]));
   S.sync      = st.data || null;
+  S.items     = it.error ? [] : (it.data || []);
   S.me = S.session ? S.profiles.find(p => p.id === S.session.user.id) || null : null;
   render();
 }
@@ -106,6 +110,86 @@ function render(){
   renderPlayers();
   renderGames();
   renderAccounts();
+  renderSandbox();
+}
+
+
+/* --------------------------- bac à sable ---------------------------
+   riot-api.sql a fermé l'écriture des parties au navigateur, et items.sql
+   celle des objets : c'est voulu, personne ne doit pouvoir s'inventer des
+   LP. Ces trois boutons passent donc par des fonctions SQL réservées à
+   l'admin, qui marquent « sim- » tout ce qu'elles écrivent.           */
+const RARETE_FR = { commun:"Commun", rare:"Rare", legendaire:"Légendaire" };
+
+function renderSandbox(){
+  // On ne rebat pas les menus pendant que l'admin est dedans.
+  if(document.activeElement && document.activeElement.closest(".sandbox")) return;
+
+  const joueurs = $("#bPlayer"), choisiJ = joueurs.value;
+  joueurs.innerHTML = S.players.map(p =>
+    '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join("");
+  if(choisiJ) joueurs.value = choisiJ;
+
+  const objets = $("#bItem"), choisiO = objets.value;
+  objets.innerHTML = '<option value="">Au hasard (selon la rareté)</option>'
+    + S.items.filter(i => i.active !== false).map(i =>
+        '<option value="' + esc(i.key) + '">'
+        + esc((i.icon ? i.icon + " " : "") + i.name + " — " + (RARETE_FR[i.rarity] || i.rarity))
+        + '</option>').join("");
+  if(choisiO) objets.value = choisiO;
+
+  if(!S.items.length) say("#bLog", "Catalogue vide : lance supabase/items.sql.", true);
+}
+
+// Les fonctions SQL renvoient une erreur parlante : on la montre telle
+// quelle plutôt que de la traduire à moitié.
+async function sandbox(fn, args, btnSel, raconter){
+  const btn = $(btnSel);
+  btn.disabled = true;
+  try{
+    const { data, error } = await sb.rpc(fn, args);
+    if(error) throw new Error(error.message);
+    say("#bLog", raconter(data));
+    await loadAll();
+  }catch(e){
+    say("#bLog", e.message || String(e), true);
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+const nomObjet = cle => {
+  const i = S.items.find(x => x.key === cle);
+  return i ? (i.icon ? i.icon + " " : "") + i.name : cle;
+};
+
+function giveItem(){
+  const p = $("#bPlayer").value;
+  if(!p) return say("#bLog", "Choisis un joueur.", true);
+  sandbox("admin_grant_item", { p_player: p, p_item: $("#bItem").value || null },
+    "#bGive", cle => "Objet donné : " + nomObjet(cle) + ".");
+}
+
+function simGame(){
+  const p = $("#bPlayer").value;
+  if(!p) return say("#bLog", "Choisis un joueur.", true);
+  const lp = Number($("#bLp").value);
+  if(!Number.isInteger(lp) || lp < -200 || lp > 200)
+    return say("#bLog", "Les LP doivent être un entier entre -200 et 200.", true);
+  const win = $("#bWin").value === "1", duo = $("#bDuo").value;
+  sandbox("admin_sim_game", { p_player: p, p_lp: lp, p_win: win, p_duo: duo },
+    "#bPlay", r => "Partie simulée : " + (lp > 0 ? "+" : "") + lp + " LP, "
+      + (win ? "victoire" : "défaite")
+      + (r && r.item ? " — objet tombé : " + nomObjet(r.item)
+         : duo === "team" && win ? " — aucun objet actif dans le catalogue" : "")
+      + ".");
+}
+
+function clearSim(){
+  if(!confirm("Effacer toutes les parties et tous les objets simulés ?\nLes vraies parties ne sont pas touchées.")) return;
+  sandbox("admin_clear_sim", {}, "#bClear",
+    r => "Effacé : " + (r && r.parties || 0) + " partie(s) simulée(s), "
+       + (r && r.objets || 0) + " objet(s).");
 }
 
 function renderChallenge(){
@@ -131,6 +215,35 @@ function renderSync(){
   pill.textContent = st.last_error ? "Perturbé" : retard ? "En retard" : "Opérationnel";
   det.textContent = "Dernier relevé réussi : " + (st.last_ok ? depuis(st.last_ok) : "jamais")
     + (st.last_error ? " · " + st.last_error : "");
+  renderKey(st);
+}
+
+/* La panne la plus fréquente du challenge : une clé de développement
+   meurt toutes les 24 h. Quand elle est refusée, on met les deux liens
+   du remplacement sous la main plutôt qu'un message d'erreur à décoder. */
+function renderKey(st){
+  const box = $("#sKey");
+  const hs = st.key_down_since
+    ? Math.floor((Date.now() - new Date(st.key_down_since).getTime()) / 3600000) : 0;
+  // key_down_since est posé par la fonction ; last_error couvre le cas
+  // où le script SQL de l'alerte n'a pas encore été lancé.
+  const cassee = !!st.key_down_since || /Clé API Riot refusée|RIOT_API_KEY absent/.test(st.last_error || "");
+  box.hidden = !cassee;
+  if(!cassee) return;
+
+  // Deux pannes très différentes à réparer : une clé morte se regénère,
+  // un secret absent se repose.
+  const absent = /RIOT_API_KEY absent/.test(st.last_error || "");
+  $("#sKeyTitle").textContent = absent
+    ? "Le secret RIOT_API_KEY est absent de la fonction"
+    : "La clé API Riot est refusée";
+  $("#sKeyWhen").textContent = st.key_down_since
+    ? "Le suivi est à l'arrêt depuis " + (hs < 1 ? "moins d'une heure" : hs + " h") + "."
+    : "Le suivi est à l'arrêt.";
+  $("#sKeyRiot").href = "https://developer.riotgames.com/";
+  // Le ref du projet se lit dans l'URL Supabase : pas de valeur à recopier.
+  const ref = new URL(SUPABASE_URL).hostname.split(".")[0];
+  $("#sKeySb").href = "https://supabase.com/dashboard/project/" + ref + "/settings/functions";
 }
 
 function tierSelect(cls, sel){
@@ -350,6 +463,10 @@ function initUI(){
   $("#pSave").addEventListener("click", savePlayers);
   $("#nAdd").addEventListener("click", addPlayer);
   $("#sForce").addEventListener("click", forceSync);
+  $("#sKeyTest").addEventListener("click", forceSync);
+  $("#bGive").addEventListener("click", giveItem);
+  $("#bPlay").addEventListener("click", simGame);
+  $("#bClear").addEventListener("click", clearSim);
   $("#wipe").addEventListener("click", wipeGames);
   $("#gFilter").addEventListener("change", e => { gameFilter = e.target.value; renderGames(); });
   $("#btnLogin").addEventListener("click", async () => {

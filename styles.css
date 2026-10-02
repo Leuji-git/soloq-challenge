@@ -770,6 +770,47 @@ dialog.modal .form{margin-bottom:12px}
 .syncpill.wait{color:var(--accent);background:color-mix(in srgb, var(--accent) 13%, transparent)}
 .syncpill.err{color:var(--down);background:color-mix(in srgb, var(--down) 13%, transparent)}
 
+/* Bouton « Actualiser » de la barre du haut. L'icône tourne tant que le
+   relevé court : c'est le seul signe que quelque chose se passe, puisque
+   les résultats arrivent ensuite tout seuls par le temps réel. */
+.iconbtn{display:inline-flex;align-items:center;gap:7px}
+.iconbtn .ico{flex:none;transition:transform .2s}
+.iconbtn:disabled{opacity:.65;cursor:default}
+.iconbtn.spinning .ico{animation:tourne .9s linear infinite}
+@keyframes tourne{ to{ transform:rotate(360deg) } }
+@media (prefers-reduced-motion:reduce){
+  .iconbtn.spinning .ico{animation-duration:2.4s}
+}
+@media (max-width:640px){
+  /* Sur téléphone la barre est serrée : l'icône suffit à se faire comprendre. */
+  .iconbtn #refreshLbl{display:none}
+}
+
+/* Remplacement de la clé Riot : visible seulement quand elle est refusée. */
+.keyfix{
+  margin-top:12px;padding:14px 16px;border-radius:12px;
+  border:1px solid color-mix(in srgb, var(--down) 38%, transparent);
+  background:color-mix(in srgb, var(--down) 8%, transparent);
+}
+.keyfix b{
+  display:block;font-family:"Barlow Semi Condensed",sans-serif;
+  font-size:15px;letter-spacing:.02em;color:var(--down);
+}
+.keyfix p{margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--muted)}
+.keysteps{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.keysteps .btn{text-decoration:none}
+
+/* Bac à sable : ce qui s'y écrit est faux, ça doit se voir au premier
+   coup d'œil sans pour autant hurler comme la zone rouge. */
+.block.sandbox{border-color:color-mix(in srgb, var(--accent) 30%, var(--line))}
+.block.sandbox > header{background:color-mix(in srgb, var(--accent) 7%, transparent)}
+.block.sandbox h4{
+  margin:18px 0 8px;font-family:"Barlow Semi Condensed",sans-serif;
+  font-size:12px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--muted);
+}
+.block.sandbox h4:first-of-type{margin-top:10px}
+
 .wheelrank{
   display:block;margin-top:6px;
   font-family:"Barlow Semi Condensed",sans-serif;font-size:13px;font-weight:600;
@@ -816,3 +857,10 @@ dialog.modal .form{margin-bottom:12px}
 .item.locked .itemname{color:var(--muted)}
 .item.locked .itemicon{filter:none;opacity:.55}
 .item.locked::before{opacity:.35}
+.droprate{
+  font-family:"Barlow Semi Condensed",sans-serif;font-weight:700;font-size:10px;
+  letter-spacing:.07em;padding:2px 7px;border-radius:var(--pill);
+  background:var(--surface);color:var(--ink-2);font-variant-numeric:tabular-nums;
+  margin-left:auto;
+}
+.itemtags{align-items:center}

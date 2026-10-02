@@ -1,14 +1,20 @@
 -- =====================================================================
---  CADENCE DU RELEVÉ : TOUTES LES 5 MINUTES
+--  CADENCE DU RELEVÉ : AUTOMATIQUE TOUTES LES 5 MINUTES,
+--  À LA DEMANDE AU PLUS UNE FOIS PAR 90 SECONDES
 --  À coller dans Supabase > SQL Editor > Run. Idempotent.
 --
---  À lancer si `riot-api.sql` a déjà été passé : il avait programmé le
---  relevé toutes les 3 minutes. Ce script le repasse à 5 minutes et
---  desserre l'étranglement en conséquence.
+--  À relancer si tu l'avais déjà passé : l'étranglement y était à 240 s,
+--  ce qui rendait inutile le bouton « Actualiser » du site.
 -- =====================================================================
 
--- L'étranglement doit rester SOUS la période du cron, sinon un relevé
--- sur deux serait refusé. 4 min pour un cron de 5 min.
+-- Deux choses différentes :
+--   * le cron, toutes les 5 min, qui fait tourner le challenge tout seul ;
+--   * l'étranglement, qui plafonne ce qu'un clic peut déclencher.
+--
+-- 90 s laisse le bouton réactif sans menacer le quota Riot. Un relevé
+-- coûte 8 appels en régime normal (un par joueur), et jusqu'à ~80 juste
+-- après une longue panne ; une clé de développement en autorise 100 par
+-- 2 minutes. Même au pire, un relevé par 90 s reste sous le plafond.
 create or replace function public.riot_try_start_sync(p_force boolean default false)
 returns boolean language plpgsql security definer set search_path = public as $$
 declare ok boolean;
@@ -18,7 +24,7 @@ begin
      set running_until = now() + interval '100 seconds', last_run = now()
    where id = 1
      and (running_until is null or running_until < now())
-     and (p_force or last_run is null or last_run < now() - interval '240 seconds')
+     and (p_force or last_run is null or last_run < now() - interval '90 seconds')
   returning true into ok;
   return coalesce(ok, false);
 end $$;
