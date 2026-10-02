@@ -141,6 +141,21 @@ function renderSandbox(force){
         + '</option>').join("");
   if(choisiO) objets.value = choisiO;
 
+  // Partenaires possibles : la fonction refuse un allié de l'autre
+  // équipe et un adversaire de la sienne, autant ne pas les proposer.
+  const moi = S.players.find(p => p.id === joueurs.value);
+  const duo = $("#bDuo").value;
+  const part = $("#bPartner"), choisiP = part.value;
+  const possibles = !moi || duo === "solo" ? []
+    : S.players.filter(p => p.id !== moi.id
+        && (duo === "team" ? p.team === moi.team : p.team !== moi.team));
+  part.disabled = duo === "solo";
+  part.innerHTML = duo === "solo"
+    ? '<option value="">— partie solo —</option>'
+    : (possibles.map(p => '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join("")
+       || '<option value="">— personne dans ce cas —</option>');
+  if(choisiP && possibles.some(p => p.id === choisiP)) part.value = choisiP;
+
   // Objets libres du joueur choisi : ni consommés, ni déjà armés.
   const qui = joueurs.value;
   const libres = S.inventory.filter(r => r.player_id === qui && !r.used_at && !r.locked_at);
@@ -228,6 +243,7 @@ async function simGame(){
     const { data, error } = await sb.functions.invoke("riot", { body: {
       action: "sim", player: p, lp,
       win: $("#bWin").value === "1", duo: $("#bDuo").value,
+      partner: $("#bDuo").value === "solo" ? undefined : ($("#bPartner").value || undefined),
       champion: $("#bChamp").value.trim() || undefined,
       dureeMin: Number($("#bDur").value) || undefined,
       deaths: $("#bDeaths").value === "" ? undefined : Number($("#bDeaths").value),
@@ -248,7 +264,18 @@ async function simGame(){
       bouts.push("total ressenti " + signed(data.total));
     }
     if(data.butin) bouts.push("butin : " + nomObjet(data.butin));
-    say("#bLog", "Partie simulée — " + bouts.join(" · ") + ".");
+    let txt = "Partie simulée — " + bouts.join(" · ") + ".";
+
+    const c = data.partenaire;
+    if(c && c.erreur){
+      txt += " Côté partenaire : " + c.erreur;
+    }else if(c){
+      const b2 = [signed(c.lp) + " LP nets", c.win ? "victoire" : "défaite"];
+      if(c.objets && c.objets.length) b2.push("objets " + signed(c.lp_items));
+      if(c.butin) b2.push("butin : " + nomObjet(c.butin));
+      txt += " " + c.name + " — " + b2.join(" · ") + ".";
+    }
+    say("#bLog", txt);
     await loadAll();
   }catch(e){
     say("#bLog", e.message || String(e), true);
@@ -553,6 +580,7 @@ function initUI(){
   $("#bClear").addEventListener("click", clearSim);
   $("#bLock").addEventListener("click", lockItem);
   $("#bPlayer").addEventListener("change", () => renderSandbox(true));
+  $("#bDuo").addEventListener("change", () => renderSandbox(true));
   $("#wipe").addEventListener("click", wipeGames);
   $("#gFilter").addEventListener("change", e => { gameFilter = e.target.value; renderGames(); });
   $("#btnLogin").addEventListener("click", async () => {

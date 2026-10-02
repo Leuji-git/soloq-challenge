@@ -623,6 +623,22 @@ async function simuler(user, body){
   const win = !!body.win;
   const now = Date.now();
 
+  // Le partenaire du duo. En vrai, le relèvement le reconnaît tout seul
+  // dans la partie Riot ; ici c'est l'admin qui le désigne.
+  let compagnon = null;
+  if(duo !== "solo"){
+    if(!body.partner) return json({ error: "Choisis le joueur avec qui la partie se joue." }, 400);
+    const { data: c } = await db.from("players")
+      .select("id,name,team,claimed_by").eq("id", body.partner).maybeSingle();
+    if(!c) return json({ error: "Partenaire inconnu." }, 400);
+    if(c.id === joueur.id) return json({ error: "Un duo se joue à deux joueurs différents." }, 400);
+    if(duo === "team" && c.team !== joueur.team)
+      return json({ error: "Un duo allié se joue avec quelqu'un de la même équipe." }, 400);
+    if(duo === "enemy" && c.team === joueur.team)
+      return json({ error: "Un duo adverse se joue contre quelqu'un de l'autre équipe." }, 400);
+    compagnon = c;
+  }
+
   // Une partie plausible : on fait commencer la simulation dans le passé
   // pour que les objets verrouillés à l'instant soient bien pris.
   const dureeMin = Number(body.dureeMin) > 0 ? Number(body.dureeMin) : 28;
@@ -634,7 +650,7 @@ async function simuler(user, body){
     champion: body.champion || "Simulé",
     deaths: body.deaths === undefined || body.deaths === null ? undefined : Number(body.deaths),
     vision: body.vision === undefined || body.vision === null ? undefined : Number(body.vision),
-    partnerId: null
+    partnerId: compagnon ? compagnon.id : null
   };
 
   const { data: cat } = await db.from("items").select("key,rarity,target,active");
@@ -643,6 +659,7 @@ async function simuler(user, body){
 
   const { error } = await db.from("games").insert({
     player_id: joueur.id, lp, win, duo, stake: 0,
+    partner_id: compagnon ? compagnon.id : null,
     match_id: g.matchId, champion: g.champion, kind: "game",
     played_on: parisDate(g.end), created_at: new Date(g.end).toISOString(),
     created_by: joueur.claimed_by
@@ -666,9 +683,50 @@ async function simuler(user, body){
     }
   }
 
+  /* L'autre côté du duo. Une vraie partie en duo produit DEUX lignes,
+     une par joueur, qui se désignent mutuellement : sans ça le
+     coéquipier n'a aucune partie et le butin ne tombe que d'un côté.
+     Un allié partage le résultat, un adversaire subit l'inverse —
+     c'est la même partie Riot vue d'en face. */
+  let cote = null;
+  if(compagnon){
+    const winC = duo === "team" ? win : !win;
+    const lpC  = clampLp(duo === "team" ? lp : -lp);
+    const gC = Object.assign({}, g, { win: winC, partnerId: joueur.id });
+
+    const { error: eC } = await db.from("games").insert({
+      player_id: compagnon.id, lp: lpC, win: winC, duo, stake: 0,
+      partner_id: joueur.id,
+      match_id: g.matchId, champion: g.champion, kind: "game",
+      played_on: parisDate(g.end), created_at: new Date(g.end).toISOString(),
+      created_by: compagnon.claimed_by
+    });
+
+    if(eC){
+      cote = { erreur: eC.message };
+    }else{
+      const objC = await appliquerObjets(compagnon, gC, lpC, parCle);
+      if(objC.detail.length){
+        await db.from("games").update({ lp_items: objC.lp })
+          .eq("player_id", compagnon.id).eq("match_id", g.matchId);
+      }
+      let butinC = null;
+      if(duo === "team" && winC){
+        const tire = tirerObjet(tous_objets.filter(i => i.active));
+        if(tire){
+          const { error: eL2 } = await db.from("player_items")
+            .insert({ player_id: compagnon.id, item_key: tire.key, source_match: g.matchId });
+          if(!eL2) butinC = tire.key;
+        }
+      }
+      cote = { player: compagnon.id, name: compagnon.name, lp: lpC, win: winC,
+               lp_items: objC.lp, objets: objC.detail, butin: butinC };
+    }
+  }
+
   return json({
     match_id: g.matchId, lp, lp_items: obj.lp, total: lp + obj.lp,
-    objets: obj.detail, butin
+    objets: obj.detail, butin, partenaire: cote
   });
 }
 

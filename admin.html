@@ -165,14 +165,17 @@
               <option value="team">Avec un coéquipier</option>
               <option value="enemy">Contre un adversaire</option>
             </select></div>
+          <div class="field"><label for="bPartner">Avec / contre qui</label><select id="bPartner"></select></div>
           <div class="field"><label for="bChamp">Champion</label><input type="text" id="bChamp" placeholder="Lux"></div>
           <div class="field"><label for="bDur">Durée (min)</label><input type="number" id="bDur" min="1" max="90" value="28"></div>
           <div class="field"><label for="bDeaths">Morts</label><input type="number" id="bDeaths" min="0" max="40" value="3"></div>
           <div class="field"><label for="bVision">Vision</label><input type="number" id="bVision" min="0" max="200" value="25"></div>
           <div class="field"><label>&nbsp;</label><button type="button" class="btn" id="bPlay">Simuler</button></div>
         </div>
-        <p class="hint">Une victoire <b>avec un coéquipier</b> fait tomber un objet, exactement
-          comme le relèvement réel. Le LP négatif est accepté pour une défaite.</p>
+        <p class="hint">Un duo crée <b>deux parties</b>, une par joueur, comme en vrai :
+          l'allié partage le résultat, l'adversaire subit l'inverse. Une victoire
+          <b>avec un coéquipier</b> fait tomber un objet de chaque côté. Le LP négatif
+          est accepté pour une défaite.</p>
 
         <h4>Verrouiller un objet avant la partie</h4>
         <div class="form">

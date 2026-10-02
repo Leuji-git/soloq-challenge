@@ -121,7 +121,7 @@ a{color:inherit}
 .roster.a>header{box-shadow:inset 0 3px 0 var(--team-a)}
 .roster.b>header{box-shadow:inset 0 3px 0 var(--team-b)}
 .roster ul{list-style:none;margin:0;padding:0 10px 10px}
-.roster li{display:grid;grid-template-columns:auto 1fr auto;gap:13px;align-items:center;padding:10px 12px;border-radius:var(--r-md)}
+.roster li{display:grid;grid-template-columns:auto auto 1fr auto;gap:11px;align-items:center;padding:10px 12px;border-radius:var(--r-md)}
 .roster li+li{margin-top:2px}
 .roster li.me{background:color-mix(in srgb, var(--accent) 9%, transparent)}
 .pright{text-align:right;display:flex;flex-direction:column;gap:2px}
@@ -178,7 +178,7 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
    ou rappel de qui est « toi » dans un winrate commun. */
 .pav.sm{width:20px;height:20px;border-width:1.5px;flex:none}
 .pav.sm i{font-size:9px}
-.roster li .pav.sm{margin-right:-2px}
+.roster li .pav.sm{margin-right:-4px}
 .duowr .pav.sm{width:15px;height:15px;border-width:1px;vertical-align:-3px;margin-right:4px}
 
 /* Un objet qu'on ne peut plus reprendre. */
