@@ -273,15 +273,39 @@ function renderHeader(){
 
 function renderCountdown(){ tickCountdown(); }
 
-/* Avant le jour J : jours en gros, heures en petit juste à côté. */
+/* « 2 j 04:17:09 » : les jours en clair, le reste en horloge. On ne
+   montre les jours que s'il y en a, et les heures que si la journée
+   compte — sinon on lit « 0 j 00:00:42 » pour quarante secondes. */
+function dureeTexte(ms){
+  if(ms < 0) ms = 0;
+  const t = Math.floor(ms / 1000);
+  const j = Math.floor(t / 86400), h = Math.floor(t / 3600) % 24;
+  const m = Math.floor(t / 60) % 60, sec = t % 60;
+  const d2 = n => String(n).padStart(2, "0");
+  if(j) return j + " j " + d2(h) + ":" + d2(m) + ":" + d2(sec);
+  if(h) return d2(h) + ":" + d2(m) + ":" + d2(sec);
+  return d2(m) + ":" + d2(sec);
+}
+
+/* Avant le jour J, le compte à rebours jusqu'au départ ; pendant le
+   challenge, celui qui reste à courir. Dans les deux cas à la seconde,
+   parce que c'est ce qu'on regarde quand on attend. */
 function tickCountdown(){
   if(!S.challenge) return;
-  const small = $("#clocksmall");
-  if(started()){ small.textContent = ""; return; }
-  let ms = startDate() - new Date();
-  if(ms < 0) ms = 0;
-  $("#clockbig").firstChild.nodeValue = Math.floor(ms / 86400000) + " j";
-  small.textContent = (Math.floor(ms / 3600000) % 24) + " h";
+  const small = $("#clocksmall"), big = $("#clockbig");
+  const debut = startDate().getTime();
+  const fin = debut + S.challenge.days * 86400000;
+  const now = Date.now();
+
+  if(now < debut){
+    big.firstChild.nodeValue = Math.floor((debut - now) / 86400000) + " j";
+    small.textContent = dureeTexte(debut - now).replace(/^\d+ j /, "");
+    return;
+  }
+  if(now >= fin){ small.textContent = ""; return; }
+  // Pendant le challenge, le gros chiffre reste « Jour 3 / 21 » : c'est
+  // renderHeader qui le pose. Ici on n'ajoute que le temps restant.
+  small.textContent = dureeTexte(fin - now);
 }
 
 function renderBalance(states){
@@ -1298,7 +1322,7 @@ function initUI(){
     if(e.key === "Escape" && $("#rulesDrawer").classList.contains("open")) openRules(false);
   });
 
-  setInterval(tickCountdown, 60000);
+  setInterval(tickCountdown, 1000);        // à la seconde : c'est tout l'intérêt
   setInterval(() => { if(S.ready){ renderSyncStatus(); nudgeSync(); } }, 60000);
   $("#aSaveChallenge").addEventListener("click", saveChallenge);
   $("#aSavePlayers").addEventListener("click", savePlayers);
