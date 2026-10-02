@@ -53,7 +53,11 @@ dit laquelle, le champion, et si un autre joueur du challenge était dans la mê
 - **Deux parties entre deux relevés** : total exact, répartition estimée (« ≈ »).
 - **Esquive / décroissance** : enregistrée comme *ajustement*, compte dans le net.
 - **Remakes, Flex, ARAM, placements** : ignorés.
-- **Hors des dates du challenge** : ignoré.
+- **Fenêtre du challenge** : une partie compte si elle se **termine** dedans. Les LP
+  sont déduits de l'écart entre deux relevés de rang, et le rang bouge à la fin de la
+  partie : une partie lancée à 23h58 la veille et finie à 00h02 a donc bien fait
+  bouger les LP pendant le challenge. Revers assumé et symétrique : une partie lancée
+  avant la fin mais terminée après ne compte pas.
 - **Pari** : ne s'applique qu'à un duo adverse *lancé après* son ouverture ;
   s'éteint sans effet au bout de 6 h.
 

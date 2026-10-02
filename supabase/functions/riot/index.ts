@@ -540,7 +540,16 @@ async function sync(force){
         const split = splitLp(cmp.delta, att.games);
         for(let i = 0; i < att.games.length; i++){
           const g = att.games[i];
-          if(g.start < winStart || g.start > winEnd) continue;     // hors challenge : ignoré
+          /* La partie compte si elle se TERMINE pendant le challenge,
+             pas si elle est lancée pendant. Les LP sont déduits de
+             l'écart entre deux relevés de rang, et le rang bouge à la
+             fin de la partie : une partie lancée à 23h58 et finie à
+             00h02 a bien fait bouger les LP pendant le challenge.
+
+             Le revers, assumé : une partie lancée avant la fin du
+             challenge mais terminée après ne compte pas. La même règle
+             des deux côtés, personne ne peut la jouer. */
+          if(g.end < winStart || g.end > winEnd) continue;
 
           const { error } = await db.from("games").insert({
             player_id: p.id, lp: clampLp(split.lps[i]), win: g.win, duo: g.duo, stake: 0,

@@ -1165,7 +1165,7 @@ const RULES = [
 
   { t:"Ce qui compte", h:
     "<p>File <strong>Solo/Duo classée</strong> uniquement — ni Flex, ni ARAM. Les remakes sont ignorés, les placements ne rapportent rien tant que le rang n'est pas attribué.</p>"
-  + "<p>Seules les parties lancées pendant le challenge comptent.</p>" },
+  + "<p>Une partie compte si elle se <strong>termine</strong> pendant le challenge. Lancée à 23h58 la veille et finie à 00h02, elle compte — les LP ont bien bougé pendant. Lancée avant la fin et finie après, elle ne compte pas : la même règle des deux côtés.</p>" },
 
   { t:"Durée", h:
     "<p>21 jours pleins. Le relevé qui compte est celui du dernier soir : le classement au coup de sifflet, pas le pic de la semaine 2.</p>" }
