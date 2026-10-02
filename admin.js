@@ -170,12 +170,26 @@ function renderSandbox(force){
 
 // Les fonctions SQL renvoient une erreur parlante : on la montre telle
 // quelle plutôt que de la traduire à moitié.
+/* Une fonction absente veut dire « script SQL pas encore passé », et
+   le message brut de PostgREST ne le dit pas. */
+function expliquerRpc(error, fichier){
+  const m = error && error.message || "";
+  return /schema cache|does not exist|42883/i.test(m)
+    ? "Fonction absente : lance supabase/" + fichier + " dans le SQL Editor."
+    : (m || "Erreur inconnue.");
+}
+
+const FICHIER_DE = {
+  lock_item: "objets-effets.sql", unlock_item: "objets-effets.sql",
+  admin_grant_item: "bac-a-sable.sql", admin_clear_sim: "bac-a-sable.sql"
+};
+
 async function sandbox(fn, args, btnSel, raconter){
   const btn = $(btnSel);
   btn.disabled = true;
   try{
     const { data, error } = await sb.rpc(fn, args);
-    if(error) throw new Error(error.message);
+    if(error) throw new Error(expliquerRpc(error, FICHIER_DE[fn] || "le script correspondant"));
     say("#bLog", raconter(data));
     await loadAll();
   }catch(e){

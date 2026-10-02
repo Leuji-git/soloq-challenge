@@ -174,4 +174,9 @@ revoke all     on function public.admin_clear_sim() from public, anon;
 grant  execute on function public.admin_clear_sim() to authenticated, service_role;
 
 
+-- PostgREST garde un cache des fonctions exposées. Sans ce signal, un
+-- appel à lock_item peut encore répondre « Could not find the function
+-- … in the schema cache » pendant une minute après ce script.
+notify pgrst, 'reload schema';
+
 select key, target, effect from public.items order by target, sort;

@@ -856,11 +856,24 @@ function ouvrirCible(rowId){
   $("#targetDialog").showModal();
 }
 
+/* PostgREST répond « Could not find the function … in the schema cache »
+   quand la fonction n'existe pas — presque toujours un script SQL pas
+   encore passé. Personne ne peut deviner ça : on le dit en français. */
+function expliquerRpc(error){
+  const m = error && error.message || "";
+  if(/schema cache|does not exist|42883/i.test(m)){
+    return isAdmin()
+      ? "Les objets ne sont pas installés : lance supabase/objets-effets.sql dans le SQL Editor."
+      : "Les objets ne sont pas encore activés sur le site. Préviens l'organisateur.";
+  }
+  return m || "Erreur inconnue.";
+}
+
 async function verrouiller(targetId){
   if(!objetAPoser) return;
   say("#tgLog", "Verrouillage…");
   const { error } = await sb.rpc("lock_item", { p_item: objetAPoser, p_target: targetId });
-  if(error) return say("#tgLog", error.message, true);
+  if(error) return say("#tgLog", expliquerRpc(error), true);
   objetAPoser = null;
   $("#targetDialog").close();
   await loadAll();
@@ -868,7 +881,7 @@ async function verrouiller(targetId){
 
 async function deverrouiller(rowId){
   const { error } = await sb.rpc("unlock_item", { p_item: rowId });
-  if(error) return alert(error.message);
+  if(error) return alert(expliquerRpc(error));
   await loadAll();
 }
 
