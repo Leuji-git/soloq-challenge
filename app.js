@@ -794,9 +794,9 @@ function renderItems(){
   $("#itemsHint").textContent = admin
     ? "Vue administrateur : tous les objets sont révélés, les joueurs ne voient que ceux qu'ils ont obtenus. Le pourcentage est la chance de tomber sur cet objet à chaque butin."
     : mine
-      ? "Un objet tombe à chaque victoire en duo avec un coéquipier. Tant que tu n'en as jamais obtenu un, tu n'en connais que la rumeur."
+      ? "Un objet tombe à chaque victoire, en solo comme en duo avec un allié — jamais en duo avec un adversaire. Tant que tu n'en as jamais obtenu un, tu n'en connais que la rumeur."
         + (total ? " Tu en as " + total + " en réserve." : "")
-      : "Connecte-toi pour voir ceux que tu as découverts. Un objet tombe à chaque victoire en duo avec un coéquipier.";
+      : "Connecte-toi pour voir ceux que tu as découverts. Un objet tombe à chaque victoire, en solo comme en duo avec un allié.";
 
   // Les exemplaires en main, par objet : libres d'un côté, armés de l'autre.
   const libres = {}, armes = {};
@@ -1065,9 +1065,13 @@ function renderFeed(t){
     if(x.duo === "enemy") chip = '<span class="tagchip enemy">duo adverse</span>';
 
     let meta;
-    if(x.duo === "team") meta = "Avec " + (partner ? partner.name : "un coéquipier") + (x.win ? " · un objet est tombé" : "");
-    else if(partner)     meta = "Avec " + partner.name;
-    else                 meta = "Partie solo";
+    // Le butin suit peutLooter() dans la fonction serveur : victoire en
+    // solo ou en duo allié. Un duo adverse n'en donne jamais.
+    const aLoote = x.win && x.duo !== "enemy";
+    if(x.duo === "team")      meta = "Avec " + (partner ? partner.name : "un coéquipier");
+    else if(x.duo === "enemy") meta = "Contre " + (partner ? partner.name : "un adversaire");
+    else                       meta = "Partie solo";
+    if(aLoote) meta += " · un objet est tombé";
     if(x.champion) meta = x.champion + " · " + meta;
     if(x.approx) meta += " · LP estimés (plusieurs parties entre deux relevés)";
 
@@ -1149,7 +1153,8 @@ const RULES = [
   + "<p>Une seule mauvaise soirée peut faire basculer la balance : personne n'est jamais à l'abri.</p>" },
 
   { t:"Les objets", h:
-    "<p><strong>Gagne une partie en duo avec un coéquipier</strong> : un objet tombe. C'est la seule façon d'en obtenir.</p>"
+    "<p><strong>Gagne une partie</strong> : un objet tombe. En solo comme en duo avec un allié — mais <strong>jamais en duo avec un adversaire</strong>, sinon deux joueurs d'équipes opposées pourraient se donner rendez-vous en file et se fabriquer des objets à volonté.</p>"
+  + "<p>Croiser un adversaire <em>en face</em> de toi ne change rien : tu n'as pas choisi l'adversaire que le matchmaking t'a donné.</p>"
   + "<p>Un objet est un <strong>bonus</strong> que tu poses sur toi, ou un <strong>malus</strong> que tu poses sur un adversaire.</p>"
   + "<p><strong>Il faut le verrouiller avant de jouer.</strong> Tu choisis l'objet, tu choisis la cible, et il agira sur la prochaine partie de cette personne — que sa condition soit remplie ou non. Tant que la partie n'a pas eu lieu, tu peux encore annuler.</p>"
   + "<p>Sur une même partie, au plus <strong>un bonus et trois malus</strong> font effet. Les objets verrouillés en trop restent en réserve, intacts.</p>"

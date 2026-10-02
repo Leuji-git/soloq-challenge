@@ -190,8 +190,25 @@ qu'afficher l'attente, c'est le serveur qui l'applique.
 
 ### Le cycle
 
-1. **Looter** — gagner une partie en duo avec un coéquipier fait tomber un objet.
-   C'est la seule source.
+1. **Looter** — gagner une partie fait tomber un objet, **en solo comme en duo avec
+   un allié**. C'est la seule source.
+
+   | La partie | Butin ? |
+   |---|---|
+   | Victoire en solo | oui |
+   | Victoire en duo avec un allié | oui |
+   | Victoire en duo avec un **adversaire** | **non** |
+   | Défaite, quelle qu'elle soit | non |
+
+   Le duo adverse est exclu pour une raison précise : sans ça, deux joueurs
+   d'équipes opposées pourraient se donner rendez-vous en file et se fabriquer des
+   objets à volonté. Croiser un adversaire **en face** ne change rien — personne ne
+   choisit son matchmaking.
+
+   La règle vit dans `peutLooter()`, dans la fonction « riot ». La reconnaissance du
+   duo regarde **tous** les joueurs du challenge présents dans ton équipe LoL : s'il
+   y a un adversaire parmi eux, c'est lui qui compte, même si un allié apparaît
+   avant dans la réponse de Riot.
 2. **Verrouiller** — sur le site, onglet des objets : *Verrouiller*, puis choisir la
    cible. Un **bonus** ne se pose que sur soi, un **malus** que sur un adversaire.
    La base refuse le reste, pas seulement la page.
@@ -281,7 +298,7 @@ partie classée :
   raretés réelles ;
 - **Simuler une partie** avec les LP, le résultat, le type de duo, et de quoi
   déclencher les conditions : champion, durée, morts, score de vision. Une victoire
-  *avec un coéquipier* fait tomber un objet, exactement comme le relevé réel ;
+  (solo ou duo allié) fait tomber un objet, exactement comme le relevé réel ;
 - **Verrouiller un objet** à la place d'un joueur, pour essayer un effet sans avoir
   à se connecter avec son compte ;
 - **Effacer tout le simulé** d'un bouton.

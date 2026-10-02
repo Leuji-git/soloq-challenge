@@ -71,12 +71,18 @@ function readMatch(match, puuid, byPuuid, myTeam){
   const start = info.gameStartTimestamp || info.gameCreation;
   const end = info.gameEndTimestamp || (start + (info.gameDuration || 0) * 1000);
 
-  // Un joueur du challenge dans la MÊME équipe LoL = duo.
-  let partner = null;
+  // Les joueurs du challenge dans la MÊME équipe LoL que moi = duo.
+  // On les regarde TOUS : s'il y a un adversaire parmi eux, c'est lui
+  // qui compte, même si un allié vient avant dans la liste de Riot.
+  let allie = null, adverse = null;
   for(const p of info.participants){
     if(p.puuid === puuid || p.teamId !== me.teamId) continue;
-    if(byPuuid[p.puuid]){ partner = byPuuid[p.puuid]; break; }
+    const j = byPuuid[p.puuid];
+    if(!j) continue;
+    if(j.team === myTeam){ if(!allie) allie = j; }
+    else if(!adverse) adverse = j;
   }
+  const partner = adverse || allie;
   return {
     matchId: match.metadata.matchId,
     start, end,
@@ -84,7 +90,7 @@ function readMatch(match, puuid, byPuuid, myTeam){
     remake: !!me.gameEndedInEarlySurrender,
     champion: me.championName || null,
     partnerId: partner ? partner.id : null,
-    duo: !partner ? "solo" : (partner.team === myTeam ? "team" : "enemy"),
+    duo: !partner ? "solo" : (adverse ? "enemy" : "team"),
     // Lus pour les objets. Absents des vieilles parties : les effets qui
     // s'en servent ne se déclenchent alors pas, ils ne punissent jamais
     // sur une donnée manquante.
@@ -212,6 +218,15 @@ function resoudreObjets(armes, ctx){
     reportes: tri.filter(o => gardes.indexOf(o) < 0).map(o => o.id),
     total: appliques.reduce((a, o) => a + o.lp, 0)
   };
+}
+
+/* Qui a droit à un butin ?
+   Une victoire en solo ou en duo avec un allié. Jamais quand un
+   adversaire était dans l'équipe : deux joueurs d'équipes opposées qui
+   se donnent rendez-vous en file pourraient sinon se fabriquer des
+   objets à volonté. */
+function peutLooter(duo, win){
+  return !!win && duo !== "enemy";
 }
 
 // Tirage pondéré par la rareté. `alea` entre 0 et 1 : fourni par les tests,
@@ -545,10 +560,10 @@ async function sync(force){
             }
           }
 
-          // Victoire en duo avec un coéquipier : un objet tombe.
+          // Victoire en solo ou en duo allié : un objet tombe.
           // L'index unique (player_id, source_match) empêche tout doublon
           // si un relevé repasse sur la même partie.
-          if(!error && g.duo === "team" && g.win){
+          if(!error && peutLooter(g.duo, g.win)){
             const objet = tirerObjet(catalogue);
             if(objet){
               const { error: eLoot } = await db.from("player_items")
@@ -672,9 +687,9 @@ async function simuler(user, body){
       .eq("player_id", joueur.id).eq("match_id", g.matchId);
   }
 
-  // Le butin obéit à la même règle qu'en vrai : victoire en duo allié.
+  // Le butin obéit à la même règle qu'en vrai (peutLooter).
   let butin = null;
-  if(duo === "team" && win){
+  if(peutLooter(duo, win)){
     const tire = tirerObjet(tous_objets.filter(i => i.active));
     if(tire){
       const { error: eL } = await db.from("player_items")
@@ -711,7 +726,7 @@ async function simuler(user, body){
           .eq("player_id", compagnon.id).eq("match_id", g.matchId);
       }
       let butinC = null;
-      if(duo === "team" && winC){
+      if(peutLooter(duo, winC)){
         const tire = tirerObjet(tous_objets.filter(i => i.active));
         if(tire){
           const { error: eL2 } = await db.from("player_items")
