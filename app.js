@@ -770,10 +770,19 @@ function renderItems(){
         + (total ? " Tu en as " + total + " en réserve." : "")
       : "Connecte-toi pour voir ceux que tu as découverts. Un objet tombe à chaque victoire en duo avec un coéquipier.";
 
+  // Les exemplaires en main, par objet : libres d'un côté, armés de l'autre.
+  const libres = {}, armes = {};
+  aMoi.filter(r => !r.used_at).forEach(r => {
+    const d = r.locked_at ? armes : libres;
+    (d[r.item_key] = d[r.item_key] || []).push(r);
+  });
+
   grille.innerHTML = S.items.map(it => {
     const connu = decouverts.has(it.key) || admin;
     const n = enStock[it.key] || 0;
     const taux = formatTaux(tauxDrop(it, S.items));
+    const libre = (libres[it.key] || [])[0];
+    const arme  = (armes[it.key]  || [])[0];
     return '<article class="item' + (connu ? "" : " locked") + ' ' + esc(it.rarity) + '">'
       + '<div class="itemhead">'
         + '<span class="itemicon">' + (connu ? esc(it.icon) : "🔒") + '</span>'
@@ -788,8 +797,79 @@ function renderItems(){
         + (n > 1 ? '<span class="itemcount">×' + n + '</span>' : n === 1 ? '<span class="itemcount">×1</span>' : '')
       + '</div>'
       + '<p class="itemtext' + (connu ? "" : " teaser") + '">' + esc(connu ? it.effect : it.teaser) + '</p>'
+      + barreObjet(it, libre, arme)
       + '</article>';
   }).join("");
+
+  grille.querySelectorAll("[data-lock]").forEach(b =>
+    b.addEventListener("click", () => ouvrirCible(b.dataset.lock)));
+  grille.querySelectorAll("[data-unlock]").forEach(b =>
+    b.addEventListener("click", () => deverrouiller(b.dataset.unlock)));
+}
+
+/* Un objet en main se verrouille sur une cible AVANT la partie. Tant
+   qu'aucune partie n'a eu lieu, on peut encore l'annuler. */
+function barreObjet(it, libre, arme){
+  if(arme){
+    const cible = S.players.find(p => p.id === arme.target_id);
+    return '<div class="itemact armed">'
+      + '<span class="armedon">Armé sur <b>' + esc(cible ? cible.name : "?") + '</b></span>'
+      + '<button type="button" class="btn ghost sm" data-unlock="' + esc(arme.id) + '">Annuler</button>'
+      + '</div>';
+  }
+  if(libre){
+    return '<div class="itemact">'
+      + '<button type="button" class="btn sm" data-lock="' + esc(libre.id) + '">Verrouiller</button>'
+      + '</div>';
+  }
+  return "";
+}
+
+/* ---------- choix de la cible ---------- */
+let objetAPoser = null;
+
+function ouvrirCible(rowId){
+  const moi = myPlayer();
+  const ligne = S.inventory.find(r => r.id === rowId);
+  if(!moi || !ligne) return;
+  const it = S.items.find(x => x.key === ligne.item_key);
+  if(!it) return;
+
+  objetAPoser = rowId;
+  // Un bonus ne se pose que sur soi, un malus que sur un adversaire :
+  // la base refuse le reste, autant ne pas le proposer.
+  const cibles = it.target === "soi"
+    ? S.players.filter(p => p.id === moi.id)
+    : S.players.filter(p => p.team !== moi.team);
+
+  $("#tgTitle").textContent = (it.icon ? it.icon + " " : "") + it.name;
+  $("#tgHint").textContent = it.effect + (it.target === "soi"
+    ? " — il s'applique à ta prochaine partie."
+    : " — il s'applique à la prochaine partie de la personne visée.");
+  $("#tgLog").textContent = "";
+  $("#tgList").innerHTML = cibles.map(p =>
+    '<button type="button" class="tgpick" data-p="' + esc(p.id) + '">'
+      + avatarRing(p) + '<span>' + esc(p.name) + '</span></button>').join("")
+    || '<div class="empty">Aucune cible possible.</div>';
+  $("#tgList").querySelectorAll("[data-p]").forEach(b =>
+    b.addEventListener("click", () => verrouiller(b.dataset.p)));
+  $("#targetDialog").showModal();
+}
+
+async function verrouiller(targetId){
+  if(!objetAPoser) return;
+  say("#tgLog", "Verrouillage…");
+  const { error } = await sb.rpc("lock_item", { p_item: objetAPoser, p_target: targetId });
+  if(error) return say("#tgLog", error.message, true);
+  objetAPoser = null;
+  $("#targetDialog").close();
+  await loadAll();
+}
+
+async function deverrouiller(rowId){
+  const { error } = await sb.rpc("unlock_item", { p_item: rowId });
+  if(error) return alert(error.message);
+  await loadAll();
 }
 
 function renderEntry(){
@@ -830,6 +910,39 @@ function avatarRing(p, opts){
 const heureDe = g => new Date(g.created_at).toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" });
 const jourDe  = g => new Date(g.created_at).toLocaleDateString("fr-FR", { day:"numeric", month:"short" });
 
+/* Le classement général se fait au LP NET : c'est lui la vérité du
+   challenge. La partie, elle, s'affiche au total objets compris, parce
+   que c'est ce que le joueur a vraiment vécu. Les deux sont montrés. */
+function celluleLp(x){
+  const net = x.lp, obj = x.lp_items || 0, tot = net + obj;
+  const signe = v => (v >= 0 ? "up" : "down");
+  if(!obj){
+    return '<span class="delta ' + signe(net) + '"' + (x.approx ? ' title="Valeur estimée"' : '') + '>'
+      + (x.approx ? "≈" : "") + signed(net) + '</span>';
+  }
+  return '<span class="deltabox">'
+    + '<b class="delta big ' + signe(tot) + '" title="Total ressenti, objets compris">'
+      + (x.approx ? "≈" : "") + signed(tot) + '</b>'
+    + '<i class="deltanet" title="LP nets rendus par Riot : ce qui compte au classement">'
+      + signed(net) + ' net</i>'
+    + '</span>';
+}
+
+/* Les objets qui ont pesé sur cette partie, avec ce qu'ils ont fait. */
+function chipsObjets(x, decouverts){
+  const rows = S.inventory.filter(r => r.applied_match && r.applied_match === x.match_id);
+  if(!rows.length) return "";
+  return '<div class="rowitems">' + rows.map(r => {
+    const it = S.items.find(i => i.key === r.item_key);
+    const vu = decouverts.has(r.item_key);
+    const lp = r.lp_effect || 0;
+    const titre = (vu && it ? it.name : "Objet inconnu") + (r.note ? " — " + r.note : "");
+    return '<span class="objchip ' + (lp > 0 ? "up" : lp < 0 ? "down" : "flat") + '" title="' + esc(titre) + '">'
+      + '<span class="objico">' + (vu && it ? esc(it.icon) : "🔒") + '</span>'
+      + signed(lp) + '</span>';
+  }).join("") + '</div>';
+}
+
 function renderFeed(t){
   const box = $("#feed");
   const head = $("#feedTitle");
@@ -851,6 +964,13 @@ function renderFeed(t){
   }
 
   const admin = isAdmin();
+  // Ce que CE visiteur a déjà découvert : un objet jamais obtenu reste
+  // une icône cadenassée, même quand il vient de le prendre en pleine figure.
+  const moi = myPlayer();
+  const decouvertsParMoi = new Set(
+    admin ? S.items.map(i => i.key)
+          : (moi ? S.inventory.filter(r => r.player_id === moi.id).map(r => r.item_key) : []));
+
   box.innerHTML = g.slice(0, 80).map(x => {
     const del = admin
       ? '<button type="button" class="x" data-id="' + esc(x.id) + '" aria-label="Supprimer cette ligne">✕</button>' : '';
@@ -879,12 +999,12 @@ function renderFeed(t){
     if(x.approx) meta += " · LP estimés (plusieurs parties entre deux relevés)";
 
     return '<div class="row">'
-      + '<span class="delta ' + (x.lp >= 0 ? "up" : "down") + '"' + (x.approx ? ' title="Valeur estimée"' : '') + '>'
-        + (x.approx ? "≈" : "") + signed(x.lp) + '</span>'
+      + celluleLp(x)
       + '<span class="pavpair">' + avatarRing(t) + (partner ? avatarRing(partner) : "") + '</span>'
       + '<div class="rowmain">'
         + '<div class="rowtitle">' + (x.win ? "Victoire" : "Défaite") + chip + '</div>'
         + '<div class="rowmeta">' + esc(meta) + '</div>'
+        + chipsObjets(x, decouvertsParMoi)
       + '</div>'
       + time + del + '</div>';
   }).join("");
@@ -956,8 +1076,12 @@ const RULES = [
 
   { t:"Les objets", h:
     "<p><strong>Gagne une partie en duo avec un coéquipier</strong> : un objet tombe. C'est la seule façon d'en obtenir.</p>"
-  + "<p>Un objet est un <strong>bonus</strong> que tu gardes pour toi, ou un <strong>malus</strong> que tu lances sur un adversaire. Il s'applique à la partie suivante.</p>"
-  + "<p>Tant que tu n'as jamais obtenu un objet, l'onglet n'en montre qu'une <em>rumeur</em> : tu sais qu'il existe, pas ce qu'il fait. Dès que tu en décroches un, son effet t'est révélé pour de bon.</p>"
+  + "<p>Un objet est un <strong>bonus</strong> que tu poses sur toi, ou un <strong>malus</strong> que tu poses sur un adversaire.</p>"
+  + "<p><strong>Il faut le verrouiller avant de jouer.</strong> Tu choisis l'objet, tu choisis la cible, et il agira sur la prochaine partie de cette personne — que sa condition soit remplie ou non. Tant que la partie n'a pas eu lieu, tu peux encore annuler.</p>"
+  + "<p>Sur une même partie, au plus <strong>un bonus et trois malus</strong> font effet. Les objets verrouillés en trop restent en réserve, intacts.</p>"
+  + "<p>Le récap d'une partie montre en gros ce que tu as <em>ressenti</em>, objets compris, et en petit tes <em>LP nets</em>. "
+  + "Attention : <strong>le classement se fait sur les LP nets</strong>, ceux que Riot a vraiment donnés. Les objets ne décident pas du vainqueur du challenge — ils décident de l'ambiance.</p>"
+  + "<p>Tant que tu n'as jamais obtenu un objet, l'onglet n'en montre qu'une <em>rumeur</em> : tu sais qu'il existe, pas ce qu'il fait. Dès que tu en décroches un, son effet t'est révélé pour de bon — y compris dans le récap des parties.</p>"
   + "<p>Plus un objet est rare, plus il est puissant — et plus il se fait attendre.</p>" },
 
   { t:"Ce qui compte", h:
@@ -1105,6 +1229,7 @@ function segment(aSel, bSel, onA, onB){
 
 function initUI(){
   $("#fPlayer").addEventListener("change", () => renderEntry());
+  $("#tgClose").addEventListener("click", () => { objetAPoser = null; $("#targetDialog").close(); });
   $("#btnRefresh").addEventListener("click", refreshNow);
   setInterval(majBoutonRefresh, 1000);
   $("#btnRules").addEventListener("click", () => openRules(true));

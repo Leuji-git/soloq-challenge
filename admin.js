@@ -25,7 +25,7 @@ const signed = n => (n>0 ? "+" : n<0 ? "−" : "±") + Math.abs(n);
 const iso = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 const emblem = t => "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-shared-components/global/default/" + t.toLowerCase() + ".png";
 
-const S = { challenge:null, players:[], games:[], profiles:[], snaps:{}, sync:null, items:[], session:null, me:null };
+const S = { challenge:null, players:[], games:[], profiles:[], snaps:{}, sync:null, items:[], inventory:[], session:null, me:null };
 let gameFilter = "all";
 
 let sb = null;
@@ -50,14 +50,15 @@ const playerById = id => S.players.find(p => p.id === id);
 /* =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, pr, sn, st, it] = await Promise.all([
+  const [ch, pl, gm, pr, sn, st, it, pi] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at", { ascending:false }),
     sb.from("profiles").select("id, display_name, avatar_url, is_admin"),
     sb.from("rank_snapshots").select("*"),
     sb.from("sync_state").select("*").eq("id",1).maybeSingle(),
-    sb.from("items").select("key,name,icon,rarity,target,effect,active").order("sort")
+    sb.from("items").select("key,name,icon,rarity,target,effect,active").order("sort"),
+    sb.from("player_items").select("*").order("obtained_at")
   ]);
   // items.sql n'est peut-être pas encore lancé : son absence ne doit pas
   // rendre toute la console inutilisable, seulement le bac à sable.
@@ -71,6 +72,7 @@ async function loadAll(){
   S.snaps     = Object.fromEntries((sn.data || []).map(r => [r.player_id, r]));
   S.sync      = st.data || null;
   S.items     = it.error ? [] : (it.data || []);
+  S.inventory = pi.error ? [] : (pi.data || []);
   S.me = S.session ? S.profiles.find(p => p.id === S.session.user.id) || null : null;
   render();
 }
@@ -121,9 +123,10 @@ function render(){
    l'admin, qui marquent « sim- » tout ce qu'elles écrivent.           */
 const RARETE_FR = { commun:"Commun", rare:"Rare", legendaire:"Légendaire" };
 
-function renderSandbox(){
-  // On ne rebat pas les menus pendant que l'admin est dedans.
-  if(document.activeElement && document.activeElement.closest(".sandbox")) return;
+function renderSandbox(force){
+  // On ne rebat pas les menus pendant que l'admin est dedans — sauf
+  // quand il vient lui-même de changer de joueur.
+  if(!force && document.activeElement && document.activeElement.closest(".sandbox")) return;
 
   const joueurs = $("#bPlayer"), choisiJ = joueurs.value;
   joueurs.innerHTML = S.players.map(p =>
@@ -137,6 +140,30 @@ function renderSandbox(){
         + esc((i.icon ? i.icon + " " : "") + i.name + " — " + (RARETE_FR[i.rarity] || i.rarity))
         + '</option>').join("");
   if(choisiO) objets.value = choisiO;
+
+  // Objets libres du joueur choisi : ni consommés, ni déjà armés.
+  const qui = joueurs.value;
+  const libres = S.inventory.filter(r => r.player_id === qui && !r.used_at && !r.locked_at);
+  const owned = $("#bOwned"), choisiL = owned.value;
+  owned.innerHTML = libres.map(r =>
+    '<option value="' + esc(r.id) + '">' + esc(nomObjet(r.item_key)) + '</option>').join("")
+    || '<option value="">— aucun objet libre —</option>';
+  if(choisiL) owned.value = choisiL;
+
+  const cibles = $("#bTarget"), choisiC = cibles.value;
+  cibles.innerHTML = S.players.map(p =>
+    '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join("");
+  if(choisiC) cibles.value = choisiC;
+
+  // Ce qui est déjà armé, pour ne pas chercher pourquoi un effet retombe.
+  const arms = S.inventory.filter(r => !r.used_at && r.locked_at);
+  const info = $("#bArmed");
+  if(info){
+    info.textContent = arms.length
+      ? "Armé en ce moment : " + arms.map(r => nomObjet(r.item_key) + " → "
+          + ((S.players.find(x => x.id === r.target_id) || {}).name || "?")).join(" · ")
+      : "Aucun objet armé pour l'instant.";
+  }
 
   if(!S.items.length) say("#bLog", "Catalogue vide : lance supabase/items.sql.", true);
 }
@@ -170,26 +197,69 @@ function giveItem(){
     "#bGive", cle => "Objet donné : " + nomObjet(cle) + ".");
 }
 
-function simGame(){
+/* La simulation passe par la fonction serveur « riot » et non par du SQL :
+   c'est elle qui porte le moteur d'effets, et on veut que le bac à sable
+   donne exactement ce que donnera le relèvement réel. */
+async function simGame(){
   const p = $("#bPlayer").value;
   if(!p) return say("#bLog", "Choisis un joueur.", true);
   const lp = Number($("#bLp").value);
   if(!Number.isInteger(lp) || lp < -200 || lp > 200)
     return say("#bLog", "Les LP doivent être un entier entre -200 et 200.", true);
-  const win = $("#bWin").value === "1", duo = $("#bDuo").value;
-  sandbox("admin_sim_game", { p_player: p, p_lp: lp, p_win: win, p_duo: duo },
-    "#bPlay", r => "Partie simulée : " + (lp > 0 ? "+" : "") + lp + " LP, "
-      + (win ? "victoire" : "défaite")
-      + (r && r.item ? " — objet tombé : " + nomObjet(r.item)
-         : duo === "team" && win ? " — aucun objet actif dans le catalogue" : "")
-      + ".");
+
+  const btn = $("#bPlay");
+  btn.disabled = true;
+  say("#bLog", "Simulation en cours…");
+  try{
+    const { data, error } = await sb.functions.invoke("riot", { body: {
+      action: "sim", player: p, lp,
+      win: $("#bWin").value === "1", duo: $("#bDuo").value,
+      champion: $("#bChamp").value.trim() || undefined,
+      dureeMin: Number($("#bDur").value) || undefined,
+      deaths: $("#bDeaths").value === "" ? undefined : Number($("#bDeaths").value),
+      vision: $("#bVision").value === "" ? undefined : Number($("#bVision").value)
+    }});
+    if(error){
+      let msg = error.message;
+      try{ const b = await error.context.json(); if(b && b.error) msg = b.error; }catch(_){}
+      throw new Error(msg);
+    }
+    if(data && data.error) throw new Error(data.error);
+
+    const bouts = [signed(data.lp) + " LP nets"];
+    if(data.objets && data.objets.length){
+      bouts.push("objets " + signed(data.lp_items)
+        + " (" + data.objets.map(o => nomObjet(o.itemKey) + " " + signed(o.lp)
+            + (o.note ? ", " + o.note : "")).join(" · ") + ")");
+      bouts.push("total ressenti " + signed(data.total));
+    }
+    if(data.butin) bouts.push("butin : " + nomObjet(data.butin));
+    say("#bLog", "Partie simulée — " + bouts.join(" · ") + ".");
+    await loadAll();
+  }catch(e){
+    say("#bLog", e.message || String(e), true);
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+/* Verrouiller un objet à la place d'un joueur, pour pouvoir essayer les
+   effets sans devoir se connecter avec son compte. */
+function lockItem(){
+  const row = $("#bOwned").value, cible = $("#bTarget").value;
+  if(!row)   return say("#bLog", "Ce joueur n'a aucun objet libre en réserve.", true);
+  if(!cible) return say("#bLog", "Choisis une cible.", true);
+  sandbox("lock_item", { p_item: row, p_target: cible }, "#bLock",
+    r => "Objet verrouillé : " + nomObjet(r && r.item_key) + " sur "
+       + ((S.players.find(x => x.id === cible) || {}).name || cible) + ".");
 }
 
 function clearSim(){
   if(!confirm("Effacer toutes les parties et tous les objets simulés ?\nLes vraies parties ne sont pas touchées.")) return;
   sandbox("admin_clear_sim", {}, "#bClear",
     r => "Effacé : " + (r && r.parties || 0) + " partie(s) simulée(s), "
-       + (r && r.objets || 0) + " objet(s).");
+       + (r && r.objets || 0) + " objet(s)"
+       + (r && r.rendus ? ", " + r.rendus + " rendu(s) à la réserve" : "") + ".");
 }
 
 function renderChallenge(){
@@ -467,6 +537,8 @@ function initUI(){
   $("#bGive").addEventListener("click", giveItem);
   $("#bPlay").addEventListener("click", simGame);
   $("#bClear").addEventListener("click", clearSim);
+  $("#bLock").addEventListener("click", lockItem);
+  $("#bPlayer").addEventListener("change", () => renderSandbox(true));
   $("#wipe").addEventListener("click", wipeGames);
   $("#gFilter").addEventListener("change", e => { gameFilter = e.target.value; renderGames(); });
   $("#btnLogin").addEventListener("click", async () => {

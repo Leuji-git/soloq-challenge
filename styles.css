@@ -148,6 +148,52 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .delta{font-family:"Outfit",system-ui,sans-serif;font-weight:600;font-size:15px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 .delta.up{color:var(--up)} .delta.down{color:var(--down)} .delta.flat{color:var(--muted)}
 
+/* ---------- LP d'une partie, à trois étages ----------
+   En gros : ce que le joueur a ressenti, objets compris.
+   En petit : le LP net de Riot, celui qui fait le classement.
+   Sans objet, on garde la cellule simple d'avant.                  */
+.deltabox{display:flex;flex-direction:column;align-items:flex-end;gap:1px;min-width:52px}
+.deltabox .delta.big{font-size:17px;line-height:1.05}
+.deltanet{
+  font-family:"Barlow Semi Condensed",sans-serif;font-style:normal;
+  font-size:11px;letter-spacing:.05em;color:var(--muted);white-space:nowrap;
+  font-variant-numeric:tabular-nums;
+}
+
+/* Les objets qui ont pesé sur la partie. */
+.rowitems{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.objchip{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:2px 8px 2px 6px;border-radius:var(--pill);
+  background:var(--surface-2);border:1px solid var(--line);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;font-weight:600;
+  letter-spacing:.03em;font-variant-numeric:tabular-nums;color:var(--muted);
+}
+.objchip .objico{font-size:13px;line-height:1}
+.objchip.up{color:var(--up);border-color:color-mix(in srgb, var(--up) 34%, transparent)}
+.objchip.down{color:var(--down);border-color:color-mix(in srgb, var(--down) 34%, transparent)}
+
+/* ---------- verrouiller un objet ---------- */
+.itemact{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+.itemact.armed{justify-content:space-between}
+.armedon{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12.5px;
+  letter-spacing:.03em;color:var(--accent);
+}
+.armedon b{color:var(--ink);font-weight:600}
+
+/* ---------- la fenêtre de choix de cible ---------- */
+.tglist{display:flex;flex-direction:column;gap:7px;margin:14px 0 4px}
+.tgpick{
+  display:flex;align-items:center;gap:11px;width:100%;
+  padding:9px 13px;border-radius:var(--r-lg);
+  background:var(--surface-2);border:1px solid var(--line);
+  color:var(--ink);font-family:inherit;font-size:14px;font-weight:500;
+  cursor:pointer;text-align:left;transition:border-color .15s, background .15s;
+}
+.tgpick:hover{background:var(--surface-3,var(--surface-2));border-color:color-mix(in srgb, var(--accent) 45%, var(--line))}
+.tgpick span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* ---------- blocs ---------- */
 section.block{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-xl);box-shadow:var(--lift);overflow:hidden}
 .block>header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:17px 20px 13px}

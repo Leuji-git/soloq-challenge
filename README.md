@@ -35,6 +35,7 @@ supabase/functions/riot/index.ts   la fonction serveur qui interroge Riot
 | 9 | `items.sql` | Les objets : catalogue, inventaire, lecture publique |
 | 10 | `alerte-cle.sql` | Prévient le Discord quand la clé Riot meurt, et quand elle revient |
 | 11 | `bac-a-sable.sql` | Simuler des parties et distribuer des objets depuis la console |
+| 12 | `objets-effets.sql` | Verrouiller un objet sur une cible, et le faire agir |
 
 ---
 
@@ -185,6 +186,52 @@ qu'afficher l'attente, c'est le serveur qui l'applique.
 
 ---
 
+## Les objets : du butin à l'effet
+
+### Le cycle
+
+1. **Looter** — gagner une partie en duo avec un coéquipier fait tomber un objet.
+   C'est la seule source.
+2. **Verrouiller** — sur le site, onglet des objets : *Verrouiller*, puis choisir la
+   cible. Un **bonus** ne se pose que sur soi, un **malus** que sur un adversaire.
+   La base refuse le reste, pas seulement la page.
+3. **Jouer** — l'objet agit sur la **prochaine partie de la personne visée**, que sa
+   condition soit remplie ou non. Tant qu'aucune partie n'a eu lieu, on peut annuler.
+
+Seuls les objets verrouillés **avant le début** de la partie comptent : sinon on
+armerait en connaissant déjà le résultat.
+
+### Les plafonds
+
+Sur une même partie : **au plus 1 bonus et 3 malus**. Le premier verrouillé est le
+premier servi ; les objets en trop restent en réserve, non consommés.
+
+### Les deux totaux — à ne pas confondre
+
+| Colonne | Ce que c'est | À quoi ça sert |
+|---|---|---|
+| `games.lp` | le LP net rendu par Riot | **le classement général, et rien d'autre** |
+| `games.lp_items` | ce que les objets ont ajouté ou retiré | l'affichage de la partie |
+
+Le récap montre le **total** en gros (net + objets : ce que le joueur a ressenti) et
+le **net** en petit. Le classement, lui, ne bouge jamais des LP nets : c'est la règle
+d'origine du challenge, et les objets ne la touchent pas.
+
+### Où vivent les effets
+
+Les 14 effets sont des fonctions dans `EFFETS`, dans
+`supabase/functions/riot/index.ts`, à l'intérieur du bloc **LOGIQUE PURE** — donc
+testables en l'extrayant entre ses marqueurs. Le texte affiché pour chaque objet
+vit, lui, dans la colonne `items.effect`, posée par `objets-effets.sql`.
+
+**Les deux doivent dire la même chose.** Si tu changes un effet, change-le aux deux
+endroits : c'est le code qui calcule, mais c'est le texte que les joueurs lisent.
+
+Une donnée manquante ne déclenche jamais un malus : un objet qui dépend du nombre
+de morts ou du score de vision ne fait rien si Riot ne les a pas donnés.
+
+---
+
 ## Le bac à sable
 
 Console admin → **Bac à sable**. Pour essayer les objets sans attendre une vraie
@@ -192,9 +239,16 @@ partie classée :
 
 - **Donner un objet** à n'importe quel joueur, choisi ou tiré au sort selon les
   raretés réelles ;
-- **Simuler une partie** avec les LP, le résultat et le type de duo. Une victoire
+- **Simuler une partie** avec les LP, le résultat, le type de duo, et de quoi
+  déclencher les conditions : champion, durée, morts, score de vision. Une victoire
   *avec un coéquipier* fait tomber un objet, exactement comme le relevé réel ;
+- **Verrouiller un objet** à la place d'un joueur, pour essayer un effet sans avoir
+  à se connecter avec son compte ;
 - **Effacer tout le simulé** d'un bouton.
+
+La simulation passe par l'action `sim` de la fonction « riot », pas par du SQL :
+c'est elle qui porte le moteur d'effets, et on veut que le bac à sable donne
+exactement ce que donnera le relevé réel.
 
 Tout ce qui sort d'ici porte un `match_id` et un `source_match` commençant par
 `sim-`. C'est ce qui permet de tout retirer sans toucher à une seule vraie

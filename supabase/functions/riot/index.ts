@@ -84,7 +84,13 @@ function readMatch(match, puuid, byPuuid, myTeam){
     remake: !!me.gameEndedInEarlySurrender,
     champion: me.championName || null,
     partnerId: partner ? partner.id : null,
-    duo: !partner ? "solo" : (partner.team === myTeam ? "team" : "enemy")
+    duo: !partner ? "solo" : (partner.team === myTeam ? "team" : "enemy"),
+    // Lus pour les objets. Absents des vieilles parties : les effets qui
+    // s'en servent ne se déclenchent alors pas, ils ne punissent jamais
+    // sur une donnée manquante.
+    deaths: me.deaths,
+    vision: me.visionScore,
+    dureeMin: Math.round((end - start) / 60000)
   };
 }
 
@@ -112,6 +118,100 @@ function splitLp(delta, games){
     if((games[k].win && v >= 1) || (!games[k].win && v <= -1)){ lps[k] = v; rest -= s; }
   }
   return { lps, approx:true };
+}
+
+/* ---------------------- effets des objets ------------------------
+   Un objet se verrouille AVANT une partie, sur soi (bonus) ou sur un
+   adversaire (malus), et se consomme sur cette partie-là — que sa
+   condition soit remplie ou non. C'est ce qui rend le choix du moment
+   intéressant : verrouiller « Pierre de Garde » quand on se sent mal.
+
+   `c.lp` est le LP net rendu par Riot. Chaque effet renvoie ce qu'il
+   faut AJOUTER à côté, jamais un LP net modifié : le classement
+   général reste sur le net pur, les objets ne touchent que l'affichage
+   de la partie.
+
+   Une donnée manquante (vieille partie sans `deaths`) ne doit jamais
+   déclencher un malus : toutes les comparaisons échouent vers 0.     */
+const EFFETS = {
+  // ---- bonus, posés sur soi ----
+  pierre_garde: c => c.win
+    ? { lp: 0, note: "partie gagnée, rien à amortir" }
+    : { lp: -c.lp, note: "défaite amortie" },
+
+  bottes_celerite: c => (c.win && c.dureeMin < 25)
+    ? { lp: 20, note: "victoire en " + c.dureeMin + " min" }
+    : { lp: 0, note: c.win ? "victoire trop longue (" + c.dureeMin + " min)" : "partie perdue" },
+
+  larme_deesse: c => ({ lp: 5, note: "quoi qu'il arrive" }),
+
+  elixir_rage: c => c.win
+    ? { lp: c.lp, note: "gain doublé" }
+    : { lp: 0, note: "partie perdue" },
+
+  ange_gardien: c => c.win
+    ? { lp: 0, note: "partie gagnée" }
+    : { lp: Math.round(-c.lp / 2), note: "perte réduite de moitié" },
+
+  baron_nashor: c => c.win
+    ? { lp: 25, note: "victoire" }
+    : { lp: 0, note: "partie perdue" },
+
+  // ---- malus, posés sur un adversaire ----
+  marque_chasseur: c => (c.deaths >= 5)
+    ? { lp: -20, note: c.deaths + " morts" }
+    : { lp: 0, note: c.deaths === undefined ? "morts inconnues" : c.deaths + " morts, sous le seuil" },
+
+  isolement: c => (c.duo !== "solo")
+    ? { lp: -15, note: "partie jouée en duo" }
+    : { lp: 0, note: "partie jouée en solo" },
+
+  brouillard: c => (c.vision < 15)
+    ? { lp: -15, note: "vision " + c.vision }
+    : { lp: 0, note: c.vision === undefined ? "vision inconnue" : "vision " + c.vision },
+
+  poids_monde: c => c.win
+    ? { lp: -Math.round(c.lp / 2), note: "victoire amputée de moitié" }
+    : { lp: 0, note: "partie perdue" },
+
+  peage: c => c.win
+    ? { lp: -Math.min(20, Math.max(0, c.lp)), note: "péage prélevé" }
+    : { lp: 0, note: "partie perdue" },
+
+  malediction_nexus: c => c.win
+    ? { lp: 0, note: "partie gagnée" }
+    : { lp: c.lp, note: "perte doublée" },
+
+  amnesie: c => (c.championsJoues || []).indexOf(c.champion) >= 0
+    ? { lp: -25, note: (c.champion || "champion") + " déjà joué" }
+    : { lp: 0, note: (c.champion || "champion") + " inédit" },
+
+  pile_ou_face: c => c.win
+    ? { lp: 30, note: "pile" }
+    : { lp: -30, note: "face" }
+};
+
+/* Résout les objets verrouillés sur une partie.
+   Au plus UN bonus et TROIS malus : le premier verrouillé est le
+   premier servi, les autres restent en réserve sans être consommés.
+   `armes` : [{ id, itemKey, cible: "soi"|"adversaire", lockedAt }]. */
+function resoudreObjets(armes, ctx){
+  const tri = (armes || []).slice().sort((a, b) => (a.lockedAt || 0) - (b.lockedAt || 0));
+  const gardes = []
+    .concat(tri.filter(o => o.cible === "soi").slice(0, 1))
+    .concat(tri.filter(o => o.cible === "adversaire").slice(0, 3));
+
+  const appliques = tri.filter(o => gardes.indexOf(o) >= 0).map(o => {
+    const f = EFFETS[o.itemKey];
+    const r = f ? f(ctx) : { lp: 0, note: "effet inconnu" };
+    return { id: o.id, itemKey: o.itemKey, lp: Math.round(r.lp) || 0, note: r.note };
+  });
+
+  return {
+    appliques,
+    reportes: tri.filter(o => gardes.indexOf(o) < 0).map(o => o.id),
+    total: appliques.reduce((a, o) => a + o.lp, 0)
+  };
 }
 
 // Tirage pondéré par la rareté. `alea` entre 0 et 1 : fourni par les tests,
@@ -219,6 +319,50 @@ async function whoIs(req){
   const { data, error } = await db.auth.getUser(token);
   return error ? null : data.user;
 }
+/* Consomme les objets verrouillés sur une partie et renvoie les LP
+   qu'ils ajoutent. Le LP net de la partie n'est jamais touché : il
+   porte le classement général, les objets vivent à côté.
+
+   N'est appelée qu'après l'insertion réussie de la partie : si un
+   relevé repasse dessus, l'index unique (player_id, match_id) refuse
+   l'insertion et les objets ne sont pas consommés deux fois.          */
+async function appliquerObjets(joueur, g, lpNet, parCle){
+  // Seuls les objets verrouillés AVANT le début de la partie comptent :
+  // sinon on armerait en connaissant déjà le résultat.
+  const { data: armes } = await db.from("player_items")
+    .select("id,item_key,locked_at")
+    .eq("target_id", joueur.id)
+    .is("used_at", null)
+    .not("locked_at", "is", null)
+    .lt("locked_at", new Date(g.start).toISOString());
+  if(!armes || !armes.length) return { lp: 0, detail: [] };
+
+  // Les champions déjà joués pendant le challenge, pour « Amnésie ».
+  const { data: passees } = await db.from("games")
+    .select("champion").eq("player_id", joueur.id).neq("match_id", g.matchId);
+
+  const r = resoudreObjets(
+    armes.map(a => ({
+      id: a.id,
+      itemKey: a.item_key,
+      lockedAt: new Date(a.locked_at).getTime(),
+      cible: (parCle[a.item_key] || {}).target
+    })),
+    {
+      win: g.win, lp: lpNet, duo: g.duo, champion: g.champion,
+      deaths: g.deaths, vision: g.vision, dureeMin: g.dureeMin,
+      championsJoues: (passees || []).map(x => x.champion).filter(Boolean)
+    });
+
+  for(const a of r.appliques){
+    await db.from("player_items").update({
+      used_at: new Date(g.end).toISOString(),
+      applied_match: g.matchId, lp_effect: a.lp, note: a.note
+    }).eq("id", a.id);
+  }
+  return { lp: clampLp(r.total), detail: r.appliques };
+}
+
 async function isAdmin(uid){
   const { data } = await db.from("profiles").select("is_admin").eq("id", uid).maybeSingle();
   return !!(data && data.is_admin);
@@ -281,16 +425,19 @@ async function sync(force){
   const { data: go } = await db.rpc("riot_try_start_sync", { p_force: force });
   if(!go) return { skipped: true };
 
-  const bilan = { players: 0, games: 0, adjusts: 0, loot: 0, waiting: [], errors: [] };
+  const bilan = { players: 0, games: 0, adjusts: 0, loot: 0, objets: 0, waiting: [], errors: [] };
   let cleRefusee = false, lus = 0;
   try{
     const [ch, pl, sn, it] = await Promise.all([
       db.from("challenge").select("*").eq("id", 1).single(),
       db.from("players").select("id,name,tag,team,puuid,claimed_by"),
       db.from("rank_snapshots").select("*"),
-      db.from("items").select("key,rarity,active").eq("active", true)
+      db.from("items").select("key,rarity,target,active")
     ]);
-    const catalogue = it.data || [];
+    // Deux usages distincts : le tirage ne propose que les objets actifs,
+    // mais un objet désactivé déjà en main doit encore pouvoir agir.
+    const tous_objets = it.data || [];
+    const catalogue = tous_objets.filter(i => i.active);
     const winStart = parisMidnight(ch.data.start_date);
     const winEnd = winStart + ch.data.days * 86400000;
     const snapOf = Object.fromEntries((sn.data || []).map(s => [s.player_id, s]));
@@ -320,6 +467,7 @@ async function sync(force){
       }
     }
 
+    const parCle = Object.fromEntries(tous_objets.map(i => [i.key, i]));
     const players = tous.filter(x => x.puuid && !x.__justLinked);
     const byPuuid = Object.fromEntries(tous.filter(x => x.puuid).map(p => [p.puuid, p]));
 
@@ -387,7 +535,15 @@ async function sync(force){
             created_by: p.claimed_by
           });
           if(error && !/duplicate/i.test(error.message)) throw error;
-          if(!error) bilan.games++;
+          if(!error){
+            bilan.games++;
+            const obj = await appliquerObjets(p, g, clampLp(split.lps[i]), parCle);
+            if(obj.detail.length){
+              await db.from("games").update({ lp_items: obj.lp })
+                .eq("player_id", p.id).eq("match_id", g.matchId);
+              bilan.objets += obj.detail.length;
+            }
+          }
 
           // Victoire en duo avec un coéquipier : un objet tombe.
           // L'index unique (player_id, source_match) empêche tout doublon
@@ -451,6 +607,72 @@ async function register(user, body){
 }
 
 
+/* --------------------------- bac à sable --------------------------
+   Simule une partie complète : même moteur d'effets que le relèvement
+   réel, pour que ce qu'on essaie ici soit exactement ce qui se passera
+   en vrai. Tout est marqué « sim- » et s'efface d'un bouton.          */
+async function simuler(user, body){
+  if(!user || !await isAdmin(user.id)) return json({ error: "Réservé à un administrateur." }, 403);
+
+  const { data: joueur } = await db.from("players")
+    .select("id,name,team,claimed_by").eq("id", body.player).maybeSingle();
+  if(!joueur) return json({ error: "Joueur inconnu." }, 400);
+
+  const duo = ["solo", "team", "enemy"].indexOf(body.duo) >= 0 ? body.duo : "solo";
+  const lp  = clampLp(Number(body.lp) || 0);
+  const win = !!body.win;
+  const now = Date.now();
+
+  // Une partie plausible : on fait commencer la simulation dans le passé
+  // pour que les objets verrouillés à l'instant soient bien pris.
+  const dureeMin = Number(body.dureeMin) > 0 ? Number(body.dureeMin) : 28;
+  const g = {
+    matchId: "sim-" + crypto.randomUUID(),
+    start: now - dureeMin * 60000,
+    end: now,
+    win, duo, dureeMin,
+    champion: body.champion || "Simulé",
+    deaths: body.deaths === undefined || body.deaths === null ? undefined : Number(body.deaths),
+    vision: body.vision === undefined || body.vision === null ? undefined : Number(body.vision),
+    partnerId: null
+  };
+
+  const { data: cat } = await db.from("items").select("key,rarity,target,active");
+  const tous_objets = cat || [];
+  const parCle = Object.fromEntries(tous_objets.map(i => [i.key, i]));
+
+  const { error } = await db.from("games").insert({
+    player_id: joueur.id, lp, win, duo, stake: 0,
+    match_id: g.matchId, champion: g.champion, kind: "game",
+    played_on: parisDate(g.end), created_at: new Date(g.end).toISOString(),
+    created_by: joueur.claimed_by
+  });
+  if(error) return json({ error: "Insertion refusée : " + error.message }, 400);
+
+  const obj = await appliquerObjets(joueur, g, lp, parCle);
+  if(obj.detail.length){
+    await db.from("games").update({ lp_items: obj.lp })
+      .eq("player_id", joueur.id).eq("match_id", g.matchId);
+  }
+
+  // Le butin obéit à la même règle qu'en vrai : victoire en duo allié.
+  let butin = null;
+  if(duo === "team" && win){
+    const tire = tirerObjet(tous_objets.filter(i => i.active));
+    if(tire){
+      const { error: eL } = await db.from("player_items")
+        .insert({ player_id: joueur.id, item_key: tire.key, source_match: g.matchId });
+      if(!eL) butin = tire.key;
+    }
+  }
+
+  return json({
+    match_id: g.matchId, lp, lp_items: obj.lp, total: lp + obj.lp,
+    objets: obj.detail, butin
+  });
+}
+
+
 /* ------------------------------ entrée ----------------------------- */
 Deno.serve(async (req) => {
   if(req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -468,6 +690,7 @@ Deno.serve(async (req) => {
     switch(body.action){
       case "sync":       return json(await sync(!!(body.force && user && await isAdmin(user.id))));
       case "register":   return await register(user, body);
+      case "sim":        return await simuler(user, body);
       default:           return json({ error: "Action inconnue." }, 400);
     }
   }catch(e){
