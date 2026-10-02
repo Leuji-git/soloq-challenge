@@ -203,8 +203,48 @@ armerait en connaissant déjà le résultat.
 
 ### Les plafonds
 
-Sur une même partie : **au plus 1 bonus et 3 malus**. Le premier verrouillé est le
-premier servi ; les objets en trop restent en réserve, non consommés.
+Deux plafonds différents, qu'il ne faut pas confondre :
+
+- **À l'armement** : un joueur ne peut avoir que **1 bonus et 3 malus** verrouillés
+  en même temps. Au-delà, le bouton *Verrouiller* s'éteint et dit pourquoi.
+- **À la résolution** : sur une même partie, **1 bonus et 3 malus** font effet au
+  maximum. Le premier verrouillé est le premier servi ; les objets en trop restent
+  en réserve, non consommés.
+
+Le site grise les boutons, mais c'est `lock_item` qui refuse : une requête forgée
+depuis la console du navigateur se heurte au même mur.
+
+Les chiffres vivent à **deux endroits** — `PLAFOND_ARME` dans `app.js` et les tests
+de `lock_item` dans `objets-effets.sql`. Si tu en changes un, change l'autre.
+
+### Pourquoi on ne peut pas annuler quand on veut
+
+Une annulation libre serait une triche ouverte : il suffirait d'attendre la fin de
+la partie et de reprendre l'objet s'il allait être gaspillé. Un objet ne se reprend
+donc que dans les **2 minutes** qui suivent son verrouillage — le temps de corriger
+un mauvais clic. Passé ce délai, le bouton devient « Verrouillé ».
+
+L'administrateur n'est pas tenu par la fenêtre : il lui faut pouvoir défaire un
+essai dans le bac à sable.
+
+### La mémoire des choix
+
+Chaque verrouillage et chaque annulation laisse une ligne dans **`item_locks_log`** :
+qui, quel objet, sur qui, quand. La table est en lecture publique et **aucune policy
+ne permet d'y écrire ni d'en effacer** depuis le navigateur ; seules les fonctions
+`lock_item` et `unlock_item` y ajoutent.
+
+C'est ce qui rend la triche visible plutôt qu'impossible à prouver : quelqu'un qui
+armerait et désarmerait en boucle en attendant le bon moment laisse la trace de
+chacun de ses essais, datée à la seconde.
+
+```sql
+-- Qui a armé quoi, et sur qui, ces dernieres 24 h
+select at, player_id, item_key, action, target_id
+  from public.item_locks_log
+ where at > now() - interval '24 hours'
+ order by at desc;
+```
 
 ### Les deux totaux — à ne pas confondre
 

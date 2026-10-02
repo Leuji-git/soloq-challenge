@@ -311,7 +311,8 @@ function renderRosters(states){
       + '<header><span class="tname '+tk+'">'+esc(tname)+'</span><span class="lbl">'+played+' parties · '+signed(total)+' LP</span></header>'
       + '<ul>' + (ms.length ? ms.map(s => {
           const r = estRank(s.player);
-          return '<li'+(mine && mine.id === s.player.id ? ' class="me"' : '')+'>' + crest(r)
+          return '<li'+(mine && mine.id === s.player.id ? ' class="me"' : '')+'>'
+            + avatarRing(s.player, { sm:true }) + crest(r)
             + '<div style="min-width:0">' + nameLink(s.player)
             + '<div class="psub">'+esc(rankLabel(r))+(s.player.claimed_by ? "" : " · profil libre")+'</div></div>'
             + '<div class="pright">'+deltaHtml(s.net)+'<span class="plp">'+s.w+'V '+s.l+'D</span></div></li>';
@@ -345,8 +346,11 @@ function wrCell(st, mine){
   if(n) sub.push(st.w + "V " + st.l + "D");
   if(d) sub.push(d.n + " ensemble");
 
+  // La photo du visiteur à côté de « % avec toi » : on voit tout de
+  // suite de qui on parle, sans relire la phrase.
   return '<span class="wl num bigwr">' + global + '</span>'
-       + (d ? '<span class="duowr">' + d.pct + '% avec toi</span>' : '')
+       + (d ? '<span class="duowr">' + avatarRing(mine, { sm:true })
+              + d.pct + '% avec toi</span>' : '')
        + '<div class="wr">' + (sub.join(" · ") || "aucune partie") + '</div>';
 }
 
@@ -777,6 +781,13 @@ function renderItems(){
     (d[r.item_key] = d[r.item_key] || []).push(r);
   });
 
+  // Combien de bonus et de malus sont armés en ce moment. Les mêmes
+  // plafonds qu'en base (lock_item) : le site ne fait que les montrer.
+  const genreDe = cle => (S.items.find(i => i.key === cle) || {}).target;
+  const armesDu = genre => aMoi.filter(r => !r.used_at && r.locked_at && genreDe(r.item_key) === genre).length;
+  const poses = { soi: armesDu("soi"), adversaire: armesDu("adversaire") };
+  const reste = g => PLAFOND_ARME[g] - poses[g];
+
   grille.innerHTML = S.items.map(it => {
     const connu = decouverts.has(it.key) || admin;
     const n = enStock[it.key] || 0;
@@ -797,7 +808,7 @@ function renderItems(){
         + (n > 1 ? '<span class="itemcount">×' + n + '</span>' : n === 1 ? '<span class="itemcount">×1</span>' : '')
       + '</div>'
       + '<p class="itemtext' + (connu ? "" : " teaser") + '">' + esc(connu ? it.effect : it.teaser) + '</p>'
-      + barreObjet(it, libre, arme)
+      + barreObjet(it, libre, arme, reste(it.target))
       + '</article>';
   }).join("");
 
@@ -807,19 +818,43 @@ function renderItems(){
     b.addEventListener("click", () => deverrouiller(b.dataset.unlock)));
 }
 
-/* Un objet en main se verrouille sur une cible AVANT la partie. Tant
-   qu'aucune partie n'a eu lieu, on peut encore l'annuler. */
-function barreObjet(it, libre, arme){
+/* Au plus un bonus et trois malus armés en même temps. Au-delà, plus
+   rien à verrouiller tant qu'un objet n'a pas agi. Ces chiffres doivent
+   rester identiques à ceux de lock_item, dans objets-effets.sql. */
+const PLAFOND_ARME = { soi: 1, adversaire: 3 };
+
+// On ne reprend un objet que dans les 2 minutes qui suivent, pour que
+// personne ne puisse attendre le résultat d'une partie (unlock_item).
+const FENETRE_ANNULE = 120e3;
+
+/* Un objet en main se verrouille sur une cible AVANT la partie. */
+function barreObjet(it, libre, arme, reste){
   if(arme){
     const cible = S.players.find(p => p.id === arme.target_id);
+    const encore = FENETRE_ANNULE - (Date.now() - new Date(arme.locked_at).getTime());
     return '<div class="itemact armed">'
       + '<span class="armedon">Armé sur <b>' + esc(cible ? cible.name : "?") + '</b></span>'
-      + '<button type="button" class="btn ghost sm" data-unlock="' + esc(arme.id) + '">Annuler</button>'
+      + (encore > 0
+          ? '<button type="button" class="btn ghost sm" data-unlock="' + esc(arme.id) + '">'
+            + 'Annuler (' + Math.ceil(encore / 1000) + ' s)</button>'
+          : '<span class="lockedin" title="Passé ce délai, un objet ne se reprend plus : '
+            + 'sinon il suffirait d\'attendre le résultat de la partie.">Verrouillé</span>')
       + '</div>';
   }
   if(libre){
+    const bloque = reste <= 0;
+    const quoi = it.target === "soi" ? "bonus" : "malus";
+    const combien = PLAFOND_ARME[it.target];
     return '<div class="itemact">'
-      + '<button type="button" class="btn sm" data-lock="' + esc(libre.id) + '">Verrouiller</button>'
+      + '<button type="button" class="btn sm"' + (bloque ? ' disabled' : '')
+        + (bloque ? '' : ' data-lock="' + esc(libre.id) + '"')
+        + (bloque ? ' title="Tu as déjà ' + combien + ' ' + quoi
+                    + (combien > 1 ? ' armés' : ' armé') + '."' : '')
+        + '>Verrouiller</button>'
+      + (bloque
+          ? '<span class="capfull">' + combien + ' ' + quoi + (combien > 1 ? ' armés' : ' armé')
+            + ' : attends qu\'' + (combien > 1 ? 'ils agissent' : 'il agisse') + '</span>'
+          : '')
       + '</div>';
   }
   return "";
@@ -914,7 +949,8 @@ function avatarRing(p, opts){
   const prof = p.claimed_by ? S.profiles[p.claimed_by] : null;
   const url  = prof && prof.avatar_url ? prof.avatar_url : null;
   const title = p.name + " #" + p.tag;
-  return '<span class="pav ' + p.team + (opts.lg ? " lg" : "") + '" title="' + esc(title) + '">'
+  const taille = opts.lg ? " lg" : opts.sm ? " sm" : "";
+  return '<span class="pav ' + p.team + taille + '" title="' + esc(title) + '">'
     + (url ? '<img src="' + esc(url) + '" alt="' + esc(p.name) + '">'
            : '<i>' + esc(p.name.trim().charAt(0).toUpperCase() || "?") + '</i>')
     + '</span>';
@@ -1013,7 +1049,8 @@ function renderFeed(t){
 
     return '<div class="row">'
       + celluleLp(x)
-      + '<span class="pavpair">' + avatarRing(t) + (partner ? avatarRing(partner) : "") + '</span>'
+      + '<span class="pavpair">' + avatarRing(t)
+        + (partner ? avatarRing(partner, { sm:true }) : "") + '</span>'
       + '<div class="rowmain">'
         + '<div class="rowtitle">' + (x.win ? "Victoire" : "Défaite") + chip + '</div>'
         + '<div class="rowmeta">' + esc(meta) + '</div>'
@@ -1242,6 +1279,15 @@ function segment(aSel, bSel, onA, onB){
 
 function initUI(){
   $("#fPlayer").addEventListener("change", () => renderEntry());
+  // Le délai d'annulation s'écoule : on redessine la grille chaque
+  // seconde tant qu'un objet armé est encore reprenable.
+  setInterval(() => {
+    const mine = myPlayer();
+    if(!mine || !S.ready) return;
+    const chaud = S.inventory.some(r => r.player_id === mine.id && !r.used_at && r.locked_at
+      && Date.now() - new Date(r.locked_at).getTime() < FENETRE_ANNULE);
+    if(chaud) renderItems();
+  }, 1000);
   $("#tgClose").addEventListener("click", () => { objetAPoser = null; $("#targetDialog").close(); });
   $("#btnRefresh").addEventListener("click", refreshNow);
   setInterval(majBoutonRefresh, 1000);

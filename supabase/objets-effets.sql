@@ -35,13 +35,40 @@ create index if not exists player_items_armed_idx
 
 
 -- ---------------------------------------------------------------------
+--  1 bis. La mémoire des choix
+--
+--  Chaque verrouillage et chaque annulation laisse une trace que
+--  personne ne peut effacer depuis le navigateur. C'est elle qui rend
+--  la triche visible : si quelqu'un arme et désarme en boucle en
+--  attendant le bon moment, ça se lit ici, daté.
+-- ---------------------------------------------------------------------
+create table if not exists public.item_locks_log (
+  id        bigserial primary key,
+  item_row  uuid        not null,
+  player_id text        not null,
+  item_key  text        not null,
+  target_id text,
+  action    text        not null check (action in ('lock','unlock')),
+  at        timestamptz not null default now()
+);
+create index if not exists item_locks_log_item_idx on public.item_locks_log (item_row, at);
+
+alter table public.item_locks_log enable row level security;
+drop policy if exists item_locks_read on public.item_locks_log;
+-- Lecture publique : le journal n'a d'intérêt que si tout le monde peut
+-- le consulter. Aucune policy d'écriture : seules les fonctions écrivent.
+create policy item_locks_read on public.item_locks_log
+  for select to anon, authenticated using (true);
+
+
+-- ---------------------------------------------------------------------
 --  2. Verrouiller un objet
 --     Les règles sont ici et pas dans la page : une requête forgée
 --     depuis la console du navigateur se heurte aux mêmes refus.
 -- ---------------------------------------------------------------------
 create or replace function public.lock_item(p_item uuid, p_target text)
 returns public.player_items language plpgsql security definer set search_path = public as $$
-declare it public.player_items; cible public.players; moi public.players; genre text;
+declare it public.player_items; cible public.players; moi public.players; genre text; n int;
 begin
   select * into it from public.player_items where id = p_item;
   if not found then raise exception 'Objet introuvable'; end if;
@@ -69,10 +96,31 @@ begin
     raise exception 'Ce malus ne se pose que sur un adversaire';
   end if;
 
+  -- Plafonds : au plus 1 bonus et 3 malus armés en même temps.
+  -- Le site grise déjà les boutons, mais c'est ici que ça se décide :
+  -- une requête forgée depuis la console se heurte au même refus.
+  select count(*) into n
+    from public.player_items pi
+    join public.items i on i.key = pi.item_key
+   where pi.player_id = moi.id
+     and pi.used_at is null and pi.locked_at is not null
+     and i.target = genre;
+
+  if genre = 'soi' and n >= 1 then
+    raise exception 'Tu as déjà un bonus armé. Attends qu''il agisse.';
+  end if;
+  if genre = 'adversaire' and n >= 3 then
+    raise exception 'Tu as déjà trois malus armés. Attends qu''ils agissent.';
+  end if;
+
   update public.player_items
      set locked_at = now(), target_id = p_target
    where id = p_item
   returning * into it;
+
+  insert into public.item_locks_log (item_row, player_id, item_key, target_id, action)
+  values (it.id, it.player_id, it.item_key, it.target_id, 'lock');
+
   return it;
 end $$;
 
@@ -94,11 +142,25 @@ begin
     raise exception 'Cet objet ne t''appartient pas';
   end if;
   if it.used_at is not null then raise exception 'Trop tard : l''objet a déjà agi'; end if;
+  if it.locked_at is null then raise exception 'Cet objet n''est pas verrouillé'; end if;
+
+  -- Une annulation sans limite serait une triche ouverte : il suffirait
+  -- d'attendre la fin de la partie et de reprendre l'objet s'il allait
+  -- être gaspillé. Deux minutes, le temps de corriger un mauvais clic.
+  -- L'administrateur n'est pas tenu par la fenêtre : il lui faut pouvoir
+  -- défaire un test dans le bac à sable.
+  if it.locked_at < now() - interval '2 minutes' and not public.is_admin() then
+    raise exception 'Trop tard pour annuler : un objet ne se reprend que dans les 2 minutes qui suivent son verrouillage.';
+  end if;
 
   update public.player_items
      set locked_at = null, target_id = null
    where id = p_item
   returning * into it;
+
+  insert into public.item_locks_log (item_row, player_id, item_key, target_id, action)
+  values (p_item, it.player_id, it.item_key, null, 'unlock');
+
   return it;
 end $$;
 
@@ -172,6 +234,12 @@ end $$;
 
 revoke all     on function public.admin_clear_sim() from public, anon;
 grant  execute on function public.admin_clear_sim() to authenticated, service_role;
+
+
+do $$ begin
+  begin execute 'alter publication supabase_realtime add table public.item_locks_log';
+  exception when duplicate_object then null; end;
+end $$;
 
 
 -- PostgREST garde un cache des fonctions exposées. Sans ce signal, un

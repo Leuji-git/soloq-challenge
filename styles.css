@@ -174,6 +174,26 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .objchip.down{color:var(--down);border-color:color-mix(in srgb, var(--down) 34%, transparent)}
 
 /* ---------- verrouiller un objet ---------- */
+/* Photo Discord en petit : partenaire d'un duo, membre d'une équipe,
+   ou rappel de qui est « toi » dans un winrate commun. */
+.pav.sm{width:20px;height:20px;border-width:1.5px;flex:none}
+.pav.sm i{font-size:9px}
+.roster li .pav.sm{margin-right:-2px}
+.duowr .pav.sm{width:15px;height:15px;border-width:1px;vertical-align:-3px;margin-right:4px}
+
+/* Un objet qu'on ne peut plus reprendre. */
+.lockedin{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--muted);
+  padding:4px 10px;border-radius:var(--pill);background:var(--surface-2);
+}
+/* Plafond atteint : on dit pourquoi le bouton est éteint. */
+.capfull{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;
+  letter-spacing:.03em;color:var(--muted);
+}
+.itemact .btn:disabled{opacity:.42;cursor:not-allowed}
+
 .itemact{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}
 .itemact.armed{justify-content:space-between}
 .armedon{
