@@ -22,6 +22,7 @@
   --up:#57C98E;
   --down:#E0655C;
   --discord:#5865F2;
+  --gold:#D4AF37;
 
   --r-xl:22px;
   --r-lg:16px;
@@ -839,6 +840,69 @@ dialog.modal .form{margin-bottom:12px}
 .drawer.right.open{transform:translateX(0)}
 .warintro{padding:14px 22px 4px;margin:0}
 .drawerbody.warlog{padding:8px 12px 22px;max-height:none}
+
+/* ---------- boutique ----------
+   La bourse en haut du volet : c'est le chiffre qu'on vient voir. */
+.purse{
+  margin:14px 22px 2px;padding:14px 16px;border-radius:var(--r-lg);
+  background:color-mix(in srgb, var(--gold) 10%, transparent);
+  border:1px solid color-mix(in srgb, var(--gold) 32%, transparent);
+  font-family:"Barlow Semi Condensed",sans-serif;letter-spacing:.04em;
+}
+.purse b{
+  font-family:"Outfit",system-ui,sans-serif;font-size:27px;font-weight:600;
+  color:var(--gold);font-variant-numeric:tabular-nums;letter-spacing:-.01em;
+}
+.purse span{font-size:13px;color:var(--muted);margin-left:4px}
+
+#shopBody h4{
+  margin:20px 0 9px;font-family:"Barlow Semi Condensed",sans-serif;
+  font-size:12px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--muted);
+}
+#shopBody h4:first-child{margin-top:4px}
+#shopBody .hint{margin:9px 0 0;font-size:12.5px}
+
+.shoprow{
+  display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center;
+  padding:9px 11px;border-radius:var(--r-md);
+  border:1px solid var(--line);background:var(--surface-2);
+}
+.shoprow + .shoprow{margin-top:6px}
+.shoprow.court{opacity:.5}
+.shopico{font-size:21px;line-height:1;flex:none}
+.shoptext{min-width:0}
+.shopname{font-weight:600;font-size:14px;color:var(--ink)}
+.shopsub{
+  margin-top:2px;font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;
+  color:var(--muted);display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+}
+.shoprow .btn{white-space:nowrap;font-variant-numeric:tabular-nums}
+.shoprow .btn:disabled{opacity:.45;cursor:not-allowed}
+
+/* Les mouvements d'or : un relevé de compte, pas une décoration. */
+.ledger{display:flex;flex-direction:column;gap:1px}
+.ledrow{
+  display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:baseline;
+  padding:6px 10px;border-radius:var(--r-sm);
+}
+.ledrow:hover{background:var(--surface-2)}
+.ledrow .delta{min-width:56px;text-align:right;font-size:13px}
+.ledwhy{font-size:12.5px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ledwhen{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;
+  color:var(--muted);white-space:nowrap;
+}
+
+/* La pastille d'or sur le bouton de la barre. */
+.goldbadge{
+  min-width:18px;padding:1px 6px;border-radius:var(--pill);
+  background:color-mix(in srgb, var(--gold) 20%, transparent);
+  color:var(--gold);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;font-weight:700;
+  line-height:16px;text-align:center;font-variant-numeric:tabular-nums;
+}
+@media (max-width:760px){ .iconbtn#btnShop > span:not(.goldbadge){display:none} }
 
 /* Le compteur sur le bouton de la barre du haut. */
 .warbadge{

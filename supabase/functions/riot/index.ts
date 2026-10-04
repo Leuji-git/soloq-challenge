@@ -96,6 +96,17 @@ function readMatch(match, puuid, byPuuid, myTeam){
     // sur une donnée manquante.
     deaths: me.deaths,
     vision: me.visionScore,
+    // Les statistiques qui nourrissent l'économie. teamPosition plutôt
+    // qu'individualPosition : Riot le recommande, parce qu'il impose un
+    // joueur par poste et ne peut donc pas en désigner deux au même.
+    role: me.teamPosition || me.individualPosition || null,
+    kills: me.kills,
+    assists: me.assists,
+    dragons: me.dragonKills,
+    barons: me.baronKills,
+    tourelles: me.turretKills,
+    voles: me.objectivesStolen,
+    cs: (me.totalMinionsKilled || 0) + (me.neutralMinionsKilled || 0),
     /* Durée EXACTE, en minutes décimales. Surtout pas arrondie : une
        partie de 24 min 40 devenait « 25 min » et perdait le bonus de
        rapidité au moment précis où il était mérité. Le cas s'est
@@ -147,6 +158,50 @@ function splitLp(delta, games){
 function dureeMatch(min){
   const t = Math.max(0, Math.round((Number(min) || 0) * 60));
   return Math.floor(t / 60) + " min " + String(t % 60).padStart(2, "0") + " s";
+}
+
+/* ---------------------- l'or d'une partie ------------------------
+   Chaque poste est payé sur ce qu'on lui demande vraiment : le carry
+   sur ses duels, le jungler sur les objectifs, le support sur ce qu'il
+   crée pour les autres et sur sa vision.
+
+   Les coefficients sont calibrés pour qu'une partie MÉDIANE rapporte
+   environ 100 dans chaque rôle — sinon un poste deviendrait la voie
+   rapide vers la boutique et tout le monde s'y précipiterait.
+
+   Repères utilisés (partie classée moyenne, ~28 min) :
+     carry    6 kills, 6 morts, 7 assists        -> 95
+     jungle   5/6/9, 2 drakes, 0,4 nashor        -> 95
+     support  2/7/14, 45 de vision               -> 102
+
+   Ce sont des valeurs de DÉPART. Une fois les statistiques accumulées,
+   elles se recalibrent sur les vraies parties du challenge : c'est la
+   seule façon honnête de les régler.                                */
+const OR_ROLES = {
+  TOP:     { kill: 20, mort: 10, assist: 5 },
+  MIDDLE:  { kill: 20, mort: 10, assist: 5 },
+  BOTTOM:  { kill: 20, mort: 10, assist: 5 },
+  JUNGLE:  { kill: 12, mort: 10, assist: 4, drake: 20, nashor: 40, vol: 30 },
+  UTILITY: { kill: 10, mort: 10, assist: 7, vision: 1.2 }
+};
+const OR_VICTOIRE = 50;
+
+// Un poste que Riot n'a pas su nommer : barème carry, le plus neutre.
+const bareme = role => OR_ROLES[role] || OR_ROLES.MIDDLE;
+
+function orDeLaPartie(s){
+  if(!s) return 0;
+  const b = bareme(s.role);
+  let or = b.kill * (s.kills || 0)
+         - b.mort * (s.deaths || 0)
+         + b.assist * (s.assists || 0);
+  if(b.drake)  or += b.drake  * (s.dragons || 0);
+  if(b.nashor) or += b.nashor * (s.barons || 0);
+  if(b.vol)    or += b.vol    * (s.voles || 0);
+  if(b.vision) or += b.vision * (s.vision || 0);
+  if(s.win)    or += OR_VICTOIRE;
+  // Une partie catastrophique ne rapporte rien, elle ne coûte pas.
+  return Math.max(0, Math.round(or));
 }
 
 /* Une clé Riot : RGAPI- suivi d'un UUID. Quarante-deux caractères en
@@ -208,8 +263,30 @@ const EFFETS = {
 
   pile_ou_face: c => c.win
     ? { lp: 30, note: "pile" }
-    : { lp: -30, note: "face" }
+    : { lp: -30, note: "face" },
+
+  // Ces deux-là ne rendent pas de LP : leur travail est ailleurs.
+  bourse_coupee: c => c.win
+    ? { lp: 0, note: "partie gagnée, la bourse est sauve" }
+    : { lp: 0, note: "bourse coupée : " + OR_VOLE + " or" },
+
+  egide_contre: c => c.win
+    ? { lp: 0, note: "malus repoussés" }
+    : { lp: 0, note: "partie perdue, l'égide n'a rien repoussé" }
 };
+
+/* Deux objets sortent du barème en LP.
+
+   « Bourse Coupée » déplace de l'or : sur une défaite de la cible, son
+   propriétaire lui en prend. C'est le seul objet qui touche à
+   l'économie, et il ne peut pas rendre un solde négatif — credit_gold
+   plancher à zéro.
+
+   « Égide du Contre » annule les malus de la partie quand on la gagne.
+   Elle ne vaut donc rien si on perd : la poser, c'est parier sur soi. */
+const OR_VOLE = 150;
+const VOLEURS   = { bourse_coupee: c => !c.win ? OR_VOLE : 0 };
+const BOUCLIERS = { egide_contre:  c => !!c.win };
 
 /* Résout les objets verrouillés sur une partie.
    Au plus UN bonus et TROIS malus : le premier verrouillé est le
@@ -224,11 +301,36 @@ function resoudreObjets(armes, ctx){
   const appliques = tri.filter(o => gardes.indexOf(o) >= 0).map(o => {
     const f = EFFETS[o.itemKey];
     const r = f ? f(ctx) : { lp: 0, note: "effet inconnu" };
-    return { id: o.id, itemKey: o.itemKey, lp: Math.round(r.lp) || 0, note: r.note };
+    return { id: o.id, itemKey: o.itemKey, owner: o.owner, cible: o.cible,
+             lp: Math.round(r.lp) || 0, note: r.note };
+  });
+
+  // Une égide qui tient annule TOUS les malus de la partie, elle-même
+  // comprise dans le compte des trois. Elle ne touche pas aux bonus :
+  // on se protège des autres, on ne se prive pas de soi.
+  const egide = appliques.find(o => BOUCLIERS[o.itemKey] && BOUCLIERS[o.itemKey](ctx));
+  if(egide){
+    let repousses = 0;
+    appliques.forEach(o => {
+      if(o.cible === "adversaire" && o !== egide && o.lp !== 0){
+        o.lp = 0; o.note = "annulé par l'Égide du Contre"; repousses++;
+      }
+    });
+    egide.note = repousses
+      ? repousses + (repousses > 1 ? " malus repoussés" : " malus repoussé")
+      : "aucun malus à repousser";
+  }
+
+  // Les vols d'or : qui prend, à qui, combien.
+  const vols = [];
+  appliques.forEach(o => {
+    const f = VOLEURS[o.itemKey];
+    const montant = f ? f(ctx) : 0;
+    if(montant > 0) vols.push({ de: ctx.cibleId, vers: o.owner, or: montant });
   });
 
   return {
-    appliques,
+    appliques, vols,
     reportes: tri.filter(o => gardes.indexOf(o) < 0).map(o => o.id),
     total: appliques.reduce((a, o) => a + o.lp, 0)
   };
@@ -379,7 +481,7 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
   // Seuls les objets verrouillés AVANT le début de la partie comptent :
   // sinon on armerait en connaissant déjà le résultat.
   const { data: armes } = await db.from("player_items")
-    .select("id,item_key,locked_at")
+    .select("id,item_key,player_id,locked_at")
     .eq("target_id", joueur.id)
     .is("used_at", null)
     .not("locked_at", "is", null)
@@ -394,12 +496,14 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
     armes.map(a => ({
       id: a.id,
       itemKey: a.item_key,
+      owner: a.player_id,                 // qui a posé l'objet
       lockedAt: new Date(a.locked_at).getTime(),
       cible: (parCle[a.item_key] || {}).target
     })),
     {
       win: g.win, lp: lpNet, duo: g.duo, champion: g.champion,
       deaths: g.deaths, vision: g.vision, dureeMin: g.dureeMin,
+      cibleId: joueur.id,
       championsJoues: (passees || []).map(x => x.champion).filter(Boolean)
     });
 
@@ -409,7 +513,17 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
       applied_match: g.matchId, lp_effect: a.lp, note: a.note
     }).eq("id", a.id);
   }
-  return { lp: clampLp(r.total), detail: r.appliques };
+
+  // Les vols d'or. Deux écritures par vol, chacune tracée dans le
+  // journal : on doit pouvoir expliquer à la victime où est passé son or.
+  for(const v of (r.vols || [])){
+    await db.rpc("credit_gold", { p_player: v.de,   p_amount: -v.or,
+      p_raison: "bourse coupée", p_match: g.matchId + "-vol" });
+    await db.rpc("credit_gold", { p_player: v.vers, p_amount: v.or,
+      p_raison: "bourse coupée sur " + v.de, p_match: g.matchId + "-gain" });
+  }
+
+  return { lp: clampLp(r.total), detail: r.appliques, vols: r.vols || [] };
 }
 
 async function isAdmin(uid){
@@ -474,7 +588,7 @@ async function sync(force){
   const { data: go } = await db.rpc("riot_try_start_sync", { p_force: force });
   if(!go) return { skipped: true };
 
-  const bilan = { players: 0, games: 0, adjusts: 0, loot: 0, objets: 0, waiting: [], errors: [] };
+  const bilan = { players: 0, games: 0, adjusts: 0, loot: 0, objets: 0, gold: 0, waiting: [], errors: [] };
   let cleRefusee = false, lus = 0;
   try{
     const [ch, pl, sn, it] = await Promise.all([
@@ -585,16 +699,38 @@ async function sync(force){
              des deux côtés, personne ne peut la jouer. */
           if(g.end < winStart || g.end > winEnd) continue;
 
+          // L'or de la partie, calculé avant l'insertion pour être
+          // enregistré avec elle : on doit pouvoir relire plus tard
+          // pourquoi un joueur a touché ce montant.
+          const or = orDeLaPartie({
+            role: g.role, win: g.win, kills: g.kills, deaths: g.deaths,
+            assists: g.assists, vision: g.vision, dragons: g.dragons,
+            barons: g.barons, voles: g.voles
+          });
+
           const { error } = await db.from("games").insert({
             player_id: p.id, lp: clampLp(split.lps[i]), win: g.win, duo: g.duo, stake: 0,
             partner_id: g.partnerId, match_id: g.matchId, champion: g.champion,
             approx: split.approx || !!att.forced, kind: "game",
+            role: g.role, kills: g.kills, deaths: g.deaths, assists: g.assists,
+            vision: g.vision, dragons: g.dragons, barons: g.barons, cs: g.cs,
+            gold_gagne: or,
             played_on: parisDate(g.end), created_at: new Date(g.end).toISOString(),
             created_by: p.claimed_by
           });
           if(error && !/duplicate/i.test(error.message)) throw error;
           if(!error){
             bilan.games++;
+            // L'index unique (player_id, match_id) du journal d'or rend
+            // ce crédit idempotent : un relevé qui repasse ne paie pas
+            // deux fois.
+            if(or > 0){
+              const { error: eOr } = await db.rpc("credit_gold", {
+                p_player: p.id, p_amount: or,
+                p_raison: "partie " + (g.role || "poste inconnu"), p_match: g.matchId
+              });
+              if(!eOr) bilan.gold += or;
+            }
             const obj = await appliquerObjets(p, g, clampLp(split.lps[i]), parCle);
             if(obj.detail.length){
               await db.from("games").update({ lp_items: obj.lp })

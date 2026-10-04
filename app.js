@@ -61,6 +61,7 @@ const iso = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+
    État
 =================================================================== */
 const S = {
+  ledger: [],       // journal des mouvements d'or
   challenge: null,
   players: [],
   games: [],
@@ -108,7 +109,7 @@ if(!SUPABASE_URL || SUPABASE_URL.includes("xxxxxxxx") || SUPABASE_ANON_KEY.inclu
 =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, sn, pr, bt, st, pi] = await Promise.all([
+  const [ch, pl, gm, sn, pr, bt, st, pi, gl] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at"),
@@ -116,7 +117,8 @@ async function loadAll(){
     sb.from("profiles").select("id, display_name, avatar_url, is_admin"),
     sb.from("items").select("*").eq("active", true).order("sort"),
     sb.from("sync_state").select("*").eq("id",1).maybeSingle(),
-    sb.from("player_items").select("*").order("obtained_at")
+    sb.from("player_items").select("*").order("obtained_at"),
+    sb.from("gold_ledger").select("*").order("at", { ascending:false }).limit(60)
   ]);
   const err = ch.error || pl.error || gm.error || sn.error || pr.error || bt.error || st.error || pi.error;
   if(err){
@@ -133,6 +135,9 @@ async function loadAll(){
   S.profile  = S.session ? (S.profiles[S.session.user.id] || null) : null;
   S.items     = bt.data || [];
   S.inventory = pi.data || [];
+  // economie.sql n'est peut-être pas encore lancé : son absence ne doit
+  // pas empêcher le reste du site de s'afficher.
+  S.ledger    = gl.error ? [] : (gl.data || []);
   S.ready = true;
   $("#errBox").hidden = true;
   render();
@@ -1727,6 +1732,7 @@ function render(){
   renderEntry();
   renderItems();
   renderWarlog();
+  renderShop();
   renderLadder(states);
   renderChart();
   renderAdmin();
@@ -1797,8 +1803,126 @@ function renderRules(){
   $("#rulesTabs").querySelectorAll("button").forEach(b =>
     b.addEventListener("click", () => { ruleIndex = +b.dataset.i; renderRules(); }));
 }
+/* --------------------------- boutique -----------------------------
+   L'or se gagne en jouant ; il s'y dépense. Deux rayons seulement :
+   des objets qu'on a DÉJÀ décrochés en jeu — on n'achète pas une
+   surprise — et des LP fictifs hors de prix qui ne comptent que dans
+   le score d'équipe, jamais au classement individuel.
+------------------------------------------------------------------- */
+const LOTS_LP = [{ lp:10, prix:2000 }, { lp:25, prix:4500 }, { lp:50, prix:8500 }];
+const orFr = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, "\u202f");
+
+function openShop(open){
+  if(open) openWar(false);                 // un seul volet à la fois
+  $("#shopDrawer").classList.toggle("open", open);
+  $("#shopDrawer").setAttribute("aria-hidden", String(!open));
+  $("#shopScrim").hidden = !open;
+  if(open) renderShop();
+}
+
+function renderShop(){
+  const corps = $("#shopBody"), bourse = $("#purse");
+  if(!corps) return;
+  const moi = myPlayer();
+  const or = moi ? (moi.gold || 0) : 0;
+
+  const pastille = $("#goldCount");
+  if(pastille){
+    pastille.textContent = orFr(or);
+    pastille.hidden = !moi;
+  }
+
+  if(!moi){
+    bourse.textContent = "\u2014";
+    corps.innerHTML = '<div class="empty">Connecte-toi avec ton profil joueur pour gagner et dépenser de l\'or.</div>';
+    return;
+  }
+  bourse.innerHTML = '<b>' + orFr(or) + '</b> <span>or</span>';
+
+  // Les objets déjà décrochés au moins une fois : eux seuls sont en rayon.
+  const connus = new Set(S.inventory.filter(r => r.player_id === moi.id).map(r => r.item_key));
+  const rayon = S.items.filter(i => connus.has(i.key) && i.active !== false);
+
+  const ligneObjet = it => {
+    const prix = it.price || 0;
+    const possible = or >= prix;
+    return '<div class="shoprow' + (possible ? "" : " court") + '">'
+      + '<span class="shopico" data-tip="' + esc(infobulleObjet(it, true, null)) + '">' + esc(it.icon) + '</span>'
+      + '<div class="shoptext"><div class="shopname">' + esc(it.name) + '</div>'
+        + '<div class="shopsub"><span class="rarity ' + esc(it.rarity) + '">'
+        + esc(RARETES[it.rarity] || it.rarity) + '</span> · '
+        + (it.target === "soi" ? "pour toi" : "sur un adversaire") + '</div></div>'
+      + '<button type="button" class="btn sm" data-buy="' + esc(it.key) + '"'
+        + (possible ? "" : " disabled") + '>' + orFr(prix) + ' or</button>'
+      + '</div>';
+  };
+
+  const ligneLp = l => {
+    const possible = or >= l.prix;
+    return '<div class="shoprow' + (possible ? "" : " court") + '">'
+      + '<span class="shopico">\u{1F4C8}</span>'
+      + '<div class="shoptext"><div class="shopname">' + l.lp + ' LP</div>'
+        + '<div class="shopsub">pour ton équipe</div></div>'
+      + '<button type="button" class="btn sm" data-lp="' + l.lp + '"'
+        + (possible ? "" : " disabled") + '>' + orFr(l.prix) + ' or</button>'
+      + '</div>';
+  };
+
+  const mouvements = S.ledger.filter(r => r.player_id === moi.id).slice(0, 12);
+
+  corps.innerHTML =
+      '<h4>Tes objets</h4>'
+    + (rayon.length
+        ? rayon.map(ligneObjet).join("")
+        : '<div class="empty">Tu ne peux acheter qu\'un objet que tu as déjà décroché en jeu. Gagne une partie pour en découvrir un.</div>')
+    + '<h4>LP fictifs</h4>'
+    + LOTS_LP.map(ligneLp).join("")
+    + '<p class="hint">Ces LP comptent dans le <b>score de ton équipe</b>, pas dans ton classement individuel — celui-là reste du pur LP Riot.</p>'
+    + '<h4>Tes derniers mouvements</h4>'
+    + (mouvements.length
+        ? '<div class="ledger">' + mouvements.map(r =>
+            '<div class="ledrow"><span class="delta ' + (r.delta > 0 ? "up" : "down") + '">'
+            + (r.delta > 0 ? "+" : "\u2212") + orFr(Math.abs(r.delta)) + '</span>'
+            + '<span class="ledwhy">' + esc(r.raison) + '</span>'
+            + '<span class="ledwhen">' + quand(r.at) + '</span></div>').join("") + '</div>'
+        : '<div class="empty">Aucun mouvement pour l\'instant.</div>')
+    + '<div class="log" id="shopLog"></div>';
+
+  corps.querySelectorAll("[data-buy]").forEach(b =>
+    b.addEventListener("click", () => acheterObjet(b.dataset.buy, b)));
+  corps.querySelectorAll("[data-lp]").forEach(b =>
+    b.addEventListener("click", () => acheterLp(Number(b.dataset.lp), b)));
+}
+
+async function acheter(fn, args, btn, dire){
+  btn.disabled = true;
+  say("#shopLog", "Achat en cours\u2026");
+  try{
+    const { data, error } = await sb.rpc(fn, args);
+    if(error) throw new Error(expliquerRpc(error));
+    say("#shopLog", dire(data));
+    await loadAll();
+    renderShop();
+  }catch(e){
+    say("#shopLog", e.message || String(e), true);
+    btn.disabled = false;
+  }
+}
+
+function acheterObjet(cle, btn){
+  const it = S.items.find(i => i.key === cle);
+  acheter("shop_buy_item", { p_item: cle }, btn,
+    () => (it ? it.name : "Objet") + " ajouté à ta réserve.");
+}
+
+function acheterLp(lp, btn){
+  acheter("shop_buy_lp", { p_lp: lp }, btn,
+    r => lp + " LP crédités à ton équipe pour " + orFr((r && r.prix) || 0) + " or.");
+}
+
 /* Le journal s'ouvre et se ferme comme le règlement, mais par la droite. */
 function openWar(open){
+  if(open) openShop(false);                // un seul volet à la fois
   $("#warDrawer").classList.toggle("open", open);
   $("#warDrawer").setAttribute("aria-hidden", String(!open));
   $("#warScrim").hidden = !open;
@@ -1980,6 +2104,9 @@ function initUI(){
   // Plus de décompte : on repasse seulement après l'affichage du
   // résultat, d'où un intervalle large.
   setInterval(majBoutonRefresh, 3000);
+  $("#btnShop").addEventListener("click", () => openShop(true));
+  $("#shopClose").addEventListener("click", () => openShop(false));
+  $("#shopScrim").addEventListener("click", () => openShop(false));
   $("#btnWar").addEventListener("click", () => openWar(true));
   $("#warClose").addEventListener("click", () => openWar(false));
   $("#warRead").addEventListener("click", toutMarquerLu);
@@ -1989,6 +2116,7 @@ function initUI(){
   $("#rulesClose").addEventListener("click", () => openRules(false));
   $("#rulesScrim").addEventListener("click", () => openRules(false));
   document.addEventListener("keydown", e => {
+    if(e.key === "Escape" && $("#shopDrawer").classList.contains("open")) openShop(false);
     if(e.key === "Escape" && $("#warDrawer").classList.contains("open")) openWar(false);
     if(e.key === "Escape" && $("#rulesDrawer").classList.contains("open")) openRules(false);
   });
