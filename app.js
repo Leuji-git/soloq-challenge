@@ -1700,29 +1700,25 @@ async function removeGame(id){
 /* Le serveur refuse un relevé lancé moins de 90 s après le précédent
    (riot_try_start_sync). On n'essaie donc pas de deviner autre chose :
    on lit l'heure du dernier relevé et on dit ce qu'il reste à attendre. */
-const ATTENTE_RELEVE = 90e3;
+/* Le bouton est toujours cliquable : aucun compte à rebours ne le
+   bloque. C'est le serveur qui décide s'il y a lieu de relancer un
+   relevé (riot_try_start_sync, 30 s) ; quand il refuse, le bouton
+   répond « Déjà à jour » du tac au tac. Un refus instantané vaut mieux
+   qu'un bouton éteint qu'on regarde décompter.
 
-function attenteRestante(){
-  const last = S.sync && S.sync.last_run ? new Date(S.sync.last_run).getTime() : 0;
-  return Math.max(0, ATTENTE_RELEVE - (Date.now() - last));
-}
+   Le garde-fou n'a pas disparu, il a changé de place : il n'est plus
+   dans l'interface, il est là où il protège vraiment — le quota Riot. */
 
-// Le compte à rebours tourne chaque seconde : sans cette date, il
-// effacerait le résultat du relevé avant qu'on ait pu le lire.
+// On laisse le résultat lisible avant de rendre au bouton son libellé.
 let resultatVisibleJusqua = 0;
 
 function majBoutonRefresh(){
   const b = $("#btnRefresh");
   if(!b || b.classList.contains("spinning")) return;
   if(Date.now() < resultatVisibleJusqua) return;
-  const reste = attenteRestante();
-  b.disabled = reste > 0;
-  $("#refreshLbl").textContent = reste > 0
-    ? Math.ceil(reste / 1000) + " s"
-    : "Actualiser";
-  b.title = reste > 0
-    ? "Un relevé vient d'avoir lieu : encore " + Math.ceil(reste / 1000) + " s"
-    : "Relever les parties chez Riot maintenant";
+  b.disabled = false;
+  $("#refreshLbl").textContent = "Actualiser";
+  b.title = "Relever les parties chez Riot maintenant";
 }
 
 async function refreshNow(){
@@ -1744,6 +1740,10 @@ async function refreshNow(){
     b.title = e.message || String(e);
   }finally{
     b.classList.remove("spinning");
+    // Rendu cliquable des la reponse : seul le libelle attend, pour
+    // qu'on ait le temps de lire le resultat. Un deuxieme clic dans la
+    // foulee doit partir.
+    b.disabled = false;
     resultatVisibleJusqua = Date.now() + 2500;
     setTimeout(majBoutonRefresh, 2600);
   }
@@ -1813,7 +1813,9 @@ function initUI(){
   }, 1000);
   $("#tgClose").addEventListener("click", () => { objetAPoser = null; $("#targetDialog").close(); });
   $("#btnRefresh").addEventListener("click", refreshNow);
-  setInterval(majBoutonRefresh, 1000);
+  // Plus de décompte : on repasse seulement après l'affichage du
+  // résultat, d'où un intervalle large.
+  setInterval(majBoutonRefresh, 3000);
   $("#btnWar").addEventListener("click", () => openWar(true));
   $("#warClose").addEventListener("click", () => openWar(false));
   $("#warRead").addEventListener("click", toutMarquerLu);

@@ -31,7 +31,7 @@ supabase/functions/riot/index.ts   la fonction serveur qui interroge Riot
 | 5 | `bet-required.sql` | Rend le pari obligatoire en duo adverse (mise ≥ 5) |
 | 6 | `riot-api.sql` | Suivi automatique : relevés, verrouillage des écritures, tâche planifiée — **après** avoir déployé la fonction |
 | 7 | `clean-riot-ids.sql` | Retire les caractères invisibles des pseudos et tags (lien dpm.lol cassé), et empêche leur retour |
-| 8 | `sync-cadence.sql` | Relevé automatique toutes les 5 min, à la demande toutes les 90 s — **à relancer**, l'étranglement y était à 240 s |
+| 8 | `sync-cadence.sql` | Relevé automatique toutes les 5 min, à la demande toutes les 30 s — **à relancer** si tu l'avais déjà passé |
 | 9 | `items.sql` | Les objets : catalogue, inventaire, lecture publique |
 | 10 | `alerte-cle.sql` | Prévient le Discord quand la clé Riot meurt, et quand elle revient |
 | 11 | `bac-a-sable.sql` | Simuler des parties et distribuer des objets depuis la console |
@@ -174,19 +174,25 @@ vraie date.
 Dans la barre du haut du site, pour tout le monde, connecté ou non. Il demande
 un relevé immédiat au lieu d'attendre le prochain passage automatique.
 
-Deux garde-fous, et c'est le serveur qui tranche :
+**Le bouton n'est jamais bloqué** — pas de compte à rebours, pas de bouton
+éteint. Le garde-fou n'est pas dans l'interface, il est là où il protège
+vraiment : le quota Riot.
 
-- `riot_try_start_sync` refuse un relevé lancé moins de **90 s** après le
-  précédent. Le bouton affiche alors le temps restant et reste inactif.
+- `riot_try_start_sync` refuse de *relancer* un relevé lancé moins de **30 s**
+  avant. Le clic aboutit quand même, et le bouton répond « Déjà à jour »
+  instantanément. Un refus immédiat vaut mieux qu'un bouton qu'on regarde
+  décompter.
 - Un seul relevé tourne à la fois (`running_until`), peu importe le nombre de
   clics simultanés.
 
-Le quota tient largement : un relevé coûte 8 appels Riot en régime normal, une
-clé de développement en autorise 100 par 2 minutes.
+Le compte : un relevé coûte ~10 appels Riot en régime normal (un par joueur),
+jusqu'à ~80 juste après une longue panne ; une clé de développement en
+autorise 100 par 2 minutes. À un relevé par 30 s on tourne autour de 40 appels
+par 2 minutes.
 
-Si tu changes la valeur, change-la **aux deux endroits** : `interval '90 seconds'`
-dans `sync-cadence.sql` et `ATTENTE_RELEVE` dans `app.js`. Le site ne fait
-qu'afficher l'attente, c'est le serveur qui l'applique.
+La valeur ne vit plus qu'à **un seul endroit** : `interval '30 seconds'` dans
+`sync-cadence.sql`. Si tu la descends encore, refais ce calcul — c'est elle qui
+décide si le suivi tient ou se fait jeter par Riot en 429.
 
 ---
 

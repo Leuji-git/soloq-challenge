@@ -11,10 +11,19 @@
 --   * le cron, toutes les 5 min, qui fait tourner le challenge tout seul ;
 --   * l'étranglement, qui plafonne ce qu'un clic peut déclencher.
 --
--- 90 s laisse le bouton réactif sans menacer le quota Riot. Un relevé
--- coûte 8 appels en régime normal (un par joueur), et jusqu'à ~80 juste
--- après une longue panne ; une clé de développement en autorise 100 par
--- 2 minutes. Même au pire, un relevé par 90 s reste sous le plafond.
+-- 30 s : le bouton « Actualiser » du site n'est jamais bloqué, et un
+-- refus est si bref qu'il passe inaperçu. C'est ICI que se trouve le
+-- vrai garde-fou, pas dans l'interface : dix joueurs qui martellent le
+-- bouton ne déclenchent au plus qu'un relevé toutes les 30 s.
+--
+-- Le compte : un relevé coûte ~10 appels Riot en régime normal (un par
+-- joueur), jusqu'à ~80 juste après une longue panne ; une clé de
+-- développement en autorise 100 par 2 minutes. À un relevé par 30 s on
+-- reste autour de 40 appels par 2 minutes — sous le plafond, avec de la
+-- marge pour les rattrapages.
+--
+-- Si tu descends encore cette valeur, refais ce calcul : c'est elle qui
+-- décide si le suivi tient ou se fait jeter par Riot en 429.
 create or replace function public.riot_try_start_sync(p_force boolean default false)
 returns boolean language plpgsql security definer set search_path = public as $$
 declare ok boolean;
@@ -24,7 +33,7 @@ begin
      set running_until = now() + interval '100 seconds', last_run = now()
    where id = 1
      and (running_until is null or running_until < now())
-     and (p_force or last_run is null or last_run < now() - interval '90 seconds')
+     and (p_force or last_run is null or last_run < now() - interval '30 seconds')
   returning true into ok;
   return coalesce(ok, false);
 end $$;
