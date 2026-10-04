@@ -1435,7 +1435,10 @@ function initInfobulles(){
    L'effet n'apparaît que si le visiteur connaît l'objet — sinon on
    dévoilerait par l'infobulle ce que la grille garde secret. */
 function infobulleObjet(it, connu, note){
-  if(!connu || !it) return "Objet inconnu" + (note ? " — " + note : "");
+  // Sans la note : elle dit POURQUOI l'objet a agi (« 11 morts »,
+  // « vision 30 »), donc elle trahit son effet aussi sûrement que son
+  // nom. Un objet jamais obtenu ne doit rien livrer du tout.
+  if(!connu || !it) return "Un objet que tu n'as pas encore découvert";
   return it.name
     + (it.effect ? "\n" + it.effect : "")
     + (note ? "\n\n→ " + note : "");
@@ -1449,6 +1452,7 @@ function chipsObjets(x, decouverts){
     const it = S.items.find(i => i.key === r.item_key);
     const vu = decouverts.has(r.item_key);
     const lp = r.lp_effect || 0;
+    // Même règle que le journal : ni nom ni raison si l'objet est inconnu.
     const titre = infobulleObjet(it, vu && !!it, r.note);
     return '<span class="objchip ' + (lp > 0 ? "up" : lp < 0 ? "down" : "flat") + '" data-tip="' + esc(titre) + '">'
       + '<span class="objico">' + (vu && it ? esc(it.icon) : "🔒") + '</span>'
@@ -1534,32 +1538,50 @@ function renderWarlog(){
     const sur = S.players.find(p => p.id === r.target_id);
     const it = S.items.find(i => i.key === r.item_key);
     const resolu = !!r.applied_match;
-    const connu = resolu || vus.has(r.item_key);
+    /* Un objet ARMÉ ne se révèle à personne : le nommer avant la partie
+       dirait à la cible exactement ce qui l'attend, et lui laisserait le
+       temps d'adapter son jeu. On annonce la manœuvre, pas l'arme.
+
+       Un objet RÉSOLU ne se révèle qu'à qui l'a déjà obtenu. Le nommer
+       à tout le monde apprendrait son effet à ceux qui ne l'ont jamais
+       looté — et la découverte est la moitié du plaisir. */
+    const connu = resolu && vus.has(r.item_key);
     const soi = par && sur && par.id === sur.id;
-
-    const nom = connu && it ? (it.icon ? it.icon + " " : "") + it.name : "\u{1F512} un objet";
     const lp = r.lp_effect || 0;
+    const nomPar = esc(par ? par.name : "?");
+    const nomSur = esc(sur ? sur.name : "?");
 
-    const verbe = soi ? "s'est protégé avec" : "a lancé";
-    const cible = soi ? "" : ' sur <b>' + esc(sur ? sur.name : "?") + '</b>';
+    let ligne;
+    if(!resolu){
+      ligne = soi
+        ? '<b>' + nomPar + '</b> prépare quelque chose'
+        : '<b>' + nomPar + '</b> manigance une attaque sur <b>' + nomSur + '</b>';
+    }else{
+      const nom = connu && it
+        ? (it.icon ? it.icon + " " : "") + it.name
+        : "\u{1F512} un objet";
+      ligne = '<b>' + nomPar + '</b> ' + (soi ? "s'est protégé avec" : "a lancé")
+        + ' <span class="waritem" data-tip="' + esc(infobulleObjet(it, connu, r.note)) + '">'
+        + nom + '</span>'
+        + (soi ? "" : ' sur <b>' + nomSur + '</b>');
+    }
 
     const lu = journalLus.has(r.id);
     return '<div class="warrow' + (resolu ? "" : " pending") + (lu ? "" : " unread")
       + '" data-lu="' + esc(r.id) + '" title="' + (lu ? "Marquer non lu" : "Marquer lu") + '">'
       + avatarRing(par, { sm:true })
       + '<div class="wartext">'
-        + '<div class="warline"><b>' + esc(par ? par.name : "?") + '</b> ' + verbe
-          + ' <span class="waritem" data-tip="' + esc(infobulleObjet(it, connu, resolu ? r.note : null))
-          + '">' + nom + '</span>' + cible + '</div>'
+        + '<div class="warline">' + ligne + '</div>'
         + '<div class="warmeta">'
           + (resolu
-              ? esc(r.note || "effet appliqué") + " · " + quand(r.used_at || r.locked_at)
+              // La note explique l'effet : réservée à qui connaît l'objet.
+              ? (connu ? esc(r.note || "effet appliqué") + " · " : "") + quand(r.used_at || r.locked_at)
               : "en attente de sa prochaine partie · " + quand(r.locked_at))
         + '</div>'
       + '</div>'
       + (resolu
           ? '<span class="delta ' + (lp > 0 ? "up" : lp < 0 ? "down" : "flat") + '">' + signed(lp) + '</span>'
-          : '<span class="warwait">armé</span>')
+          : '<span class="warwait">en embuscade</span>')
       + '</div>';
   }).join("");
 
@@ -1746,8 +1768,8 @@ const RULES = [
 
   { t:"Le journal de guerre", h:
     "<p>Tout ce qui a été lancé, par qui et sur qui, dans l'ordre inverse.</p>"
-  + "<p>Un objet <strong>déjà résolu</strong> est nommé, avec ce qu'il a coûté ou rapporté : son effet a eu lieu, le cacher n'aurait plus de sens.</p>"
-  + "<p>Un objet <strong>encore armé</strong> reste anonyme pour qui ne l'a jamais obtenu. Savoir qu'on est visé fait partie du jeu ; savoir par quoi serait tricher.</p>" },
+  + "<p>Un objet <strong>encore armé</strong> n'est jamais nommé, pour personne : on lit « machin manigance une attaque sur bidule ». Savoir qu'on est visé fait partie du jeu ; savoir par quoi laisserait le temps d'adapter sa partie.</p>"
+  + "<p>Un objet <strong>déjà résolu</strong> n'est nommé qu'à ceux qui l'ont déjà obtenu. Pour les autres il reste un cadenas, avec les LP qu'il a coûtés : la découverte fait la moitié du plaisir, et on ne l'apprend pas en regardant les malheurs des autres.</p>" },
 
   { t:"Ce qui compte", h:
     "<p>File <strong>Solo/Duo classée</strong> uniquement — ni Flex, ni ARAM. Les remakes sont ignorés, les placements ne rapportent rien tant que le rang n'est pas attribué.</p>"
