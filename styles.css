@@ -852,6 +852,30 @@ dialog.modal .form{margin-bottom:12px}
 .warintro{padding:14px 22px 4px;margin:0}
 .drawerbody.warlog{padding:8px 12px 22px;max-height:none}
 
+/* « En direct » : point rouge qui bat, et le chrono de la partie.
+   Le battement s'arrête pour qui a demandé moins d'animation. */
+.livenow{
+  display:inline-flex;align-items:center;gap:6px;margin-top:5px;
+  padding:2px 9px 2px 7px;border-radius:var(--pill);
+  background:color-mix(in srgb, var(--down) 14%, transparent);
+  border:1px solid color-mix(in srgb, var(--down) 34%, transparent);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--down);white-space:nowrap;
+}
+.livenow i{
+  width:6px;height:6px;border-radius:var(--pill);background:var(--down);flex:none;
+  animation:battement 1.6s ease-in-out infinite;
+}
+.livenow b{font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+@keyframes battement{
+  0%,100%{ opacity:1; transform:scale(1) }
+  50%    { opacity:.35; transform:scale(.8) }
+}
+@media (prefers-reduced-motion:reduce){ .livenow i{animation:none} }
+
+/* Dans l'en-tête du suivi, la pastille vit sur la même ligne. */
+#feedTitle .livenow{margin-top:0;margin-left:10px}
+
 /* ---------- boutique ----------
    La bourse en haut du volet : c'est le chiffre qu'on vient voir. */
 .purse{

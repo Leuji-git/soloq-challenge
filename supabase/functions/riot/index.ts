@@ -549,6 +549,61 @@ async function saveSnap(playerId, s, now){
 }
 
 
+/* --------------------------- en direct ----------------------------
+   Qui est en train de jouer, d'après Spectator-V5.
+
+   Ce passage coûte un appel Riot PAR JOUEUR : il a donc son propre
+   étranglement, à deux minutes, indépendant de celui du relevé. Sans
+   ça, un bouton « Actualiser » cliqué en boucle doublerait la facture
+   et finirait par faire jeter tout le suivi en 429.
+
+   Une partie dure vingt à quarante minutes : deux minutes de retard à
+   l'affichage ne se voient pas. Le compteur, lui, est calculé par le
+   site à partir de l'heure de début, donc toujours juste.             */
+async function releverEnDirect(joueurs){
+  const { data: go } = await db.rpc("riot_try_live");
+  if(!go) return 0;
+
+  const enJeu = [];
+  for(const p of joueurs){
+    if(!p.puuid) continue;
+    try{
+      // 404 = pas en partie, et riot() le rend comme null.
+      const g = await riot(`${PLATFORM}/lol/spectator/v5/active-games/by-summoner/${p.puuid}`);
+      if(!g) continue;
+
+      // gameStartTime vaut 0 pendant la sélection des champions : on
+      // retombe alors sur maintenant moins la durée annoncée.
+      const debut = g.gameStartTime && g.gameStartTime > 0
+        ? g.gameStartTime
+        : Date.now() - (g.gameLength || 0) * 1000;
+
+      const moi = (g.participants || []).find(x => x.puuid === p.puuid);
+      enJeu.push({
+        player_id: p.id,
+        match_id: g.gameId ? String(g.gameId) : null,
+        started_at: new Date(debut).toISOString(),
+        champion: moi && moi.championId ? String(moi.championId) : null,
+        queue: g.gameQueueConfigId || null,
+        seen_at: new Date().toISOString()
+      });
+    }catch(e){
+      // Une clé refusée doit remonter ; le reste ne doit pas priver le
+      // relevé des rangs, qui compte bien plus que cet affichage.
+      if(e instanceof RiotError && (e.status === 401 || e.status === 403)) throw e;
+    }
+  }
+
+  const dedans = enJeu.map(x => x.player_id);
+  if(enJeu.length) await db.from("live_games").upsert(enJeu, { onConflict: "player_id" });
+  // Ceux qui ont fini : on retire leur ligne.
+  if(dedans.length) await db.from("live_games").delete().not("player_id", "in", "(" + dedans.map(x => '"' + x + '"').join(",") + ")");
+  else await db.from("live_games").delete().neq("player_id", "");
+
+  return enJeu.length;
+}
+
+
 /* --------------------------- alerte clé ---------------------------
    La fonction est le seul endroit qui apprenne la mort de la clé au
    moment où elle arrive : le cron l'appelle toutes les 5 minutes, même
@@ -588,7 +643,7 @@ async function sync(force){
   const { data: go } = await db.rpc("riot_try_start_sync", { p_force: force });
   if(!go) return { skipped: true };
 
-  const bilan = { players: 0, games: 0, adjusts: 0, loot: 0, objets: 0, gold: 0, waiting: [], errors: [] };
+  const bilan = { players: 0, games: 0, adjusts: 0, loot: 0, objets: 0, gold: 0, live: 0, waiting: [], errors: [] };
   let cleRefusee = false, lus = 0;
   try{
     const [ch, pl, sn, it] = await Promise.all([
@@ -632,6 +687,14 @@ async function sync(force){
 
     const parCle = Object.fromEntries(tous_objets.map(i => [i.key, i]));
     const players = tous.filter(x => x.puuid && !x.__justLinked);
+
+    // Avant les rangs : si la clé est morte, autant le savoir tout de
+    // suite, et cet appel est le moins coûteux des deux.
+    try{ bilan.live = await releverEnDirect(players); }
+    catch(e){
+      bilan.errors.push("en direct : " + (e.message || e));
+      if(e instanceof RiotError && (e.status === 401 || e.status === 403)) cleRefusee = true;
+    }
     const byPuuid = Object.fromEntries(tous.filter(x => x.puuid).map(p => [p.puuid, p]));
 
     for(const p of players){

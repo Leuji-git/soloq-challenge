@@ -62,6 +62,7 @@ const iso = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+
 =================================================================== */
 const S = {
   ledger: [],       // journal des mouvements d'or
+  live: {},         // id joueur -> partie en cours chez Riot
   challenge: null,
   players: [],
   games: [],
@@ -109,7 +110,7 @@ if(!SUPABASE_URL || SUPABASE_URL.includes("xxxxxxxx") || SUPABASE_ANON_KEY.inclu
 =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, sn, pr, bt, st, pi, gl] = await Promise.all([
+  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at"),
@@ -118,7 +119,8 @@ async function loadAll(){
     sb.from("items").select("*").eq("active", true).order("sort"),
     sb.from("sync_state").select("*").eq("id",1).maybeSingle(),
     sb.from("player_items").select("*").order("obtained_at"),
-    sb.from("gold_ledger").select("*").order("at", { ascending:false }).limit(60)
+    sb.from("gold_ledger").select("*").order("at", { ascending:false }).limit(60),
+    sb.from("live_games").select("*")
   ]);
   const err = ch.error || pl.error || gm.error || sn.error || pr.error || bt.error || st.error || pi.error;
   if(err){
@@ -138,6 +140,9 @@ async function loadAll(){
   // economie.sql n'est peut-être pas encore lancé : son absence ne doit
   // pas empêcher le reste du site de s'afficher.
   S.ledger    = gl.error ? [] : (gl.data || []);
+  // en-direct.sql n'est peut-être pas encore lancé : le site doit
+  // simplement ne rien afficher dans ce cas.
+  S.live      = lv.error ? {} : Object.fromEntries((lv.data || []).map(r => [r.player_id, r]));
   S.ready = true;
   $("#errBox").hidden = true;
   render();
@@ -441,7 +446,8 @@ function renderRosters(states){
           return '<li'+(mine && mine.id === s.player.id ? ' class="me"' : '')+'>'
             + avatarRing(s.player, { sm:true }) + crest(r)
             + '<div style="min-width:0">' + nameLink(s.player)
-            + '<div class="psub">'+esc(rankLabel(r))+(s.player.claimed_by ? "" : " · profil libre")+'</div></div>'
+            + '<div class="psub">'+esc(rankLabel(r))+(s.player.claimed_by ? "" : " · profil libre")+'</div>'
+            + pastilleLive(s.player.id) + '</div>'
             + '<div class="pright">' + deltaHtml(s.global)
               + '<span class="plp"><b title="LP nets : ceux du classement individuel">'
               + signed(s.net) + ' net</b> · ' + s.w + 'V ' + s.l + 'D</span></div></li>';
@@ -1366,6 +1372,49 @@ function renderEntry(){
   renderFeed(vu);
 }
 
+/* ---------------------------------------------------------------------
+   « En direct »
+   Spectator-V5 nous dit qui joue et depuis quand. Le compteur n'est
+   jamais stocké : on le recalcule depuis l'heure de début, sinon il
+   serait faux l'instant d'après.
+
+   Garde-fou : au-delà de deux heures, on considère que la ligne est
+   restée coincée — une partie classée ne dure pas si longtemps, et
+   mieux vaut ne rien afficher qu'un compteur absurde.
+--------------------------------------------------------------------- */
+const DUREE_MAX_LIVE = 2 * 3600e3;
+
+function enDirect(id){
+  const r = S.live && S.live[id];
+  if(!r || !r.started_at) return null;
+  const ms = Date.now() - new Date(r.started_at).getTime();
+  if(ms < 0 || ms > DUREE_MAX_LIVE) return null;
+  return ms;
+}
+
+const chrono = ms => {
+  const t = Math.floor(ms / 1000);
+  return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0");
+};
+
+function pastilleLive(id){
+  const ms = enDirect(id);
+  if(ms === null) return "";
+  return '<span class="livenow" data-live="' + esc(id) + '"'
+    + ' title="En partie classée en ce moment">'
+    + '<i></i>En direct<b>' + chrono(ms) + '</b></span>';
+}
+
+// Les compteurs avancent chaque seconde sans tout redessiner.
+function tickLive(){
+  document.querySelectorAll("[data-live]").forEach(el => {
+    const ms = enDirect(el.dataset.live);
+    const b = el.querySelector("b");
+    if(ms === null){ el.remove(); return; }
+    if(b) b.textContent = chrono(ms);
+  });
+}
+
 /* Photo Discord cerclée de la couleur de l'équipe.
    Sans compte lié, on retombe sur l'initiale du pseudo. */
 function avatarRing(p, opts){
@@ -1650,7 +1699,7 @@ function renderFeed(t){
   const nb = g.filter(x => x.kind !== "adjust").length;
   const mine = myPlayer();
   head.innerHTML = avatarRing(t, { lg:true })
-    + '<span class="feedwho">' + esc(t.name) + (mine && t.id === mine.id ? "" : "") + '</span>'
+    + '<span class="feedwho">' + esc(t.name) + '</span>' + pastilleLive(t.id)
     + '<span class="feedcount">' + (nb ? nb + (nb > 1 ? " parties relevées" : " partie relevée") : "aucune partie") + '</span>';
 
   if(!g.length){
@@ -2121,6 +2170,7 @@ function initUI(){
   // Plus de décompte : on repasse seulement après l'affichage du
   // résultat, d'où un intervalle large.
   setInterval(majBoutonRefresh, 3000);
+  setInterval(tickLive, 1000);
   $("#btnShop").addEventListener("click", () => openShop(true));
   $("#shopClose").addEventListener("click", () => openShop(false));
   $("#shopScrim").addEventListener("click", () => openShop(false));
