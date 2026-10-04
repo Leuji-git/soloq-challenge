@@ -462,11 +462,17 @@ function renderGames(){
       + '<span class="delta '+(g.lp>=0?"up":"down")+'" style="min-width:52px">'+(g.approx ? "≈" : "")+signed(g.lp)+'</span>'
       + '<span class="wl" style="min-width:130px">'+esc(p ? p.name : g.player_id)+'</span>'
       + '<span class="g">'+esc(g.played_on)+' · '+esc(bits.join(" · "))+'</span>'
+      + (g.match_id && !String(g.match_id).startsWith("sim-")
+          ? '<button type="button" class="x recalc" data-rc="'+esc(g.player_id)+'|'+esc(g.match_id)+'"'
+            + ' title="Relire cette partie chez Riot et réappliquer les effets des objets">↻</button>'
+          : '')
       + '<button type="button" class="x" data-id="'+esc(g.id)+'" aria-label="Supprimer">✕</button></div>';
   }).join("");
 
   $("#gFeed").querySelectorAll(".x").forEach(b =>
     b.addEventListener("click", () => deleteGame(b.dataset.id)));
+  $("#gFeed").querySelectorAll("[data-rc]").forEach(b =>
+    b.addEventListener("click", () => recalculerPartie(b.dataset.rc, b)));
 }
 
 function renderAccounts(){
@@ -541,6 +547,40 @@ async function releasePlayer(id){
   const { error } = await sb.from("players").update({ claimed_by: null }).eq("id", id);
   say("#pLog", error ? "Erreur : " + error.message : "Compte délié — le profil peut être réclamé à nouveau.", !!error);
   await loadAll();
+}
+
+/* Relit une partie chez Riot et réapplique les effets des objets.
+   À utiliser quand le calcul était faux au moment du relèvement : la
+   fonction repart de la réponse de Riot, rien n'est saisi à la main. */
+async function recalculerPartie(cle, btn){
+  const [player, match_id] = String(cle).split("|");
+  btn.disabled = true;
+  say("#gLog", "Relecture de la partie chez Riot…");
+  try{
+    const { data, error } = await sb.functions.invoke("riot", {
+      body: { action: "recompute", player, match_id }
+    });
+    if(error){
+      let msg = error.message;
+      try{ const b = await error.context.json(); if(b && b.error) msg = b.error; }catch(_){}
+      throw new Error(msg);
+    }
+    if(data && data.error) throw new Error(data.error);
+
+    const bouge = (data.objets || []).filter(o => o.change);
+    const texte = data.joueur + " · durée réelle " + data.duree
+      + " · objets " + signed(data.lp_items_avant) + " → " + signed(data.lp_items_apres)
+      + (bouge.length
+          ? " — " + bouge.map(o => nomObjet(o.item) + " " + signed(o.avant) + " → " + signed(o.apres)
+              + " (" + o.note + ")").join(" · ")
+          : " — rien à corriger, le calcul était déjà bon");
+    say("#gLog", texte);
+    await loadAll();
+  }catch(e){
+    say("#gLog", e.message || String(e), true);
+  }finally{
+    btn.disabled = false;
+  }
 }
 
 async function forceSync(){

@@ -186,6 +186,11 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
    ligne tremble à chaque tic. */
 .clocksmall{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
 
+/* Recalcul d'une partie : discret, à côté de la suppression. */
+.x.recalc{color:var(--muted);font-size:15px}
+.x.recalc:hover{color:var(--accent)}
+.x.recalc:disabled{opacity:.4;cursor:default}
+
 /* ---------- infobulle en bloc ----------
    Posée en position fixe sur le document : elle doit pouvoir sortir du
    volet ou de la carte qui la déclenche sans être rognée. */

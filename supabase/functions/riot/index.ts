@@ -96,7 +96,11 @@ function readMatch(match, puuid, byPuuid, myTeam){
     // sur une donnée manquante.
     deaths: me.deaths,
     vision: me.visionScore,
-    dureeMin: Math.round((end - start) / 60000)
+    /* Durée EXACTE, en minutes décimales. Surtout pas arrondie : une
+       partie de 24 min 40 devenait « 25 min » et perdait le bonus de
+       rapidité au moment précis où il était mérité. Le cas s'est
+       produit le 4 octobre sur Runailen. */
+    dureeMin: (end - start) / 60000
   };
 }
 
@@ -139,6 +143,12 @@ function splitLp(delta, games){
 
    Une donnée manquante (vieille partie sans `deaths`) ne doit jamais
    déclencher un malus : toutes les comparaisons échouent vers 0.     */
+// « 24 min 40 s » à partir de minutes décimales.
+function dureeMatch(min){
+  const t = Math.max(0, Math.round((Number(min) || 0) * 60));
+  return Math.floor(t / 60) + " min " + String(t % 60).padStart(2, "0") + " s";
+}
+
 const EFFETS = {
   // ---- bonus, posés sur soi ----
   pierre_garde: c => c.win
@@ -146,8 +156,8 @@ const EFFETS = {
     : { lp: -c.lp, note: "défaite amortie" },
 
   bottes_celerite: c => (c.win && c.dureeMin < 25)
-    ? { lp: 20, note: "victoire en " + c.dureeMin + " min" }
-    : { lp: 0, note: c.win ? "victoire trop longue (" + c.dureeMin + " min)" : "partie perdue" },
+    ? { lp: 20, note: "victoire en " + dureeMatch(c.dureeMin) }
+    : { lp: 0, note: c.win ? "victoire trop longue (" + dureeMatch(c.dureeMin) + ")" : "partie perdue" },
 
   larme_deesse: c => ({ lp: 5, note: "quoi qu'il arrive" }),
 
@@ -763,6 +773,89 @@ async function simuler(user, body){
 }
 
 
+/* --------------------------- recalcul ------------------------------
+   Relit une partie chez Riot et réapplique les effets des objets qui
+   s'y sont déjà joués.
+
+   Sert quand le calcul était faux au moment du relevé — c'est arrivé :
+   la durée était arrondie, et une victoire de 24 min 40 comptait comme
+   25 minutes, privant « Bottes de Célérité » de son bonus.
+
+   On ne touche QUE les objets déjà appliqués à cette partie, et on les
+   recalcule avec la source de vérité : la réponse de Riot. Rien n'est
+   inventé, rien n'est saisi à la main.                                 */
+async function recalculer(user, body){
+  if(!user || !await isAdmin(user.id)) return json({ error: "Réservé à un administrateur." }, 403);
+  if(!body.match_id || !body.player) return json({ error: "Joueur et partie attendus." }, 400);
+
+  const { data: joueur } = await db.from("players")
+    .select("id,name,team,puuid").eq("id", body.player).maybeSingle();
+  if(!joueur || !joueur.puuid) return json({ error: "Joueur inconnu ou non rattaché à Riot." }, 400);
+
+  const { data: jeu } = await db.from("games").select("*")
+    .eq("player_id", joueur.id).eq("match_id", body.match_id).maybeSingle();
+  if(!jeu) return json({ error: "Partie introuvable." }, 400);
+  if(String(jeu.match_id).startsWith("sim-"))
+    return json({ error: "Une partie simulée n'existe pas chez Riot." }, 400);
+
+  const brut = await riot(`${REGION}/lol/match/v5/matches/${jeu.match_id}`);
+  if(!brut) return json({ error: "Riot ne connaît pas cette partie." }, 400);
+
+  const { data: tous } = await db.from("players").select("id,team,puuid");
+  const byPuuid = Object.fromEntries((tous || []).filter(x => x.puuid).map(p => [p.puuid, p]));
+  const g = readMatch(brut, joueur.puuid, byPuuid, joueur.team);
+  if(!g) return json({ error: "Partie illisible (file de jeu ou joueur absent)." }, 400);
+
+  const { data: cat } = await db.from("items").select("key,rarity,target,active");
+  const parCle = Object.fromEntries((cat || []).map(i => [i.key, i]));
+
+  const { data: poses } = await db.from("player_items")
+    .select("id,item_key,lp_effect,note")
+    .eq("applied_match", jeu.match_id).eq("target_id", joueur.id);
+  if(!poses || !poses.length){
+    return json({ error: "Aucun objet ne s'est joué sur cette partie.", duree: g.dureeMin }, 400);
+  }
+
+  const { data: passees } = await db.from("games")
+    .select("champion").eq("player_id", joueur.id).neq("match_id", jeu.match_id);
+
+  const ctx = {
+    win: g.win, lp: jeu.lp, duo: g.duo, champion: g.champion,
+    deaths: g.deaths, vision: g.vision, dureeMin: g.dureeMin,
+    championsJoues: (passees || []).map(x => x.champion).filter(Boolean)
+  };
+
+  let total = 0;
+  const detail = [];
+  for(const it of poses){
+    const f = EFFETS[it.item_key];
+    const r = f ? f(ctx) : { lp: 0, note: "effet inconnu" };
+    const lp = Math.round(r.lp) || 0;
+    total += lp;
+    if(lp !== it.lp_effect || r.note !== it.note){
+      await db.from("player_items").update({ lp_effect: lp, note: r.note }).eq("id", it.id);
+    }
+    detail.push({ item: it.item_key, avant: it.lp_effect, apres: lp, note: r.note,
+                  change: lp !== it.lp_effect });
+  }
+
+  const lpItems = clampLp(total);
+  if(lpItems !== jeu.lp_items){
+    await db.from("games").update({ lp_items: lpItems })
+      .eq("player_id", joueur.id).eq("match_id", jeu.match_id);
+  }
+
+  return json({
+    joueur: joueur.name, match_id: jeu.match_id,
+    duree_minutes: Math.round(g.dureeMin * 100) / 100,
+    duree: dureeMatch(g.dureeMin),
+    lp_net: jeu.lp,
+    lp_items_avant: jeu.lp_items, lp_items_apres: lpItems,
+    objets: detail
+  });
+}
+
+
 /* ------------------------------ entrée ----------------------------- */
 Deno.serve(async (req) => {
   if(req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -781,6 +874,7 @@ Deno.serve(async (req) => {
       case "sync":       return json(await sync(!!(body.force && user && await isAdmin(user.id))));
       case "register":   return await register(user, body);
       case "sim":        return await simuler(user, body);
+      case "recompute":  return await recalculer(user, body);
       default:           return json({ error: "Action inconnue." }, 400);
     }
   }catch(e){
