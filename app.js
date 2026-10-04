@@ -691,7 +691,7 @@ function renderChart(){
     if(avecAire){
       out += '<path d="'+aireSous(d, X, Y, t0, t1)+'" fill="url(#grad'+i+')" stroke="none"/>';
     }
-    out += '<path d="'+d+'" fill="none" stroke="'+s.color
+    out += '<path id="serie'+i+'" d="'+d+'" fill="none" stroke="'+s.color
         +  '" stroke-width="'+(avecAire ? 2.4 : 1.8)+'" stroke-linejoin="round" stroke-linecap="round"'
         +  ' opacity="'+(chartMode==="players" ? 0.9 : 1)+'"/>';
 
@@ -705,6 +705,7 @@ function renderChart(){
     }
 
     // Le dernier état, en bout de ligne : la valeur qu'on vient chercher.
+    // Le tracé se termine exactement sur ce point, les deux coïncident.
     const xFin = X(t1), yFin = Y(valueAt(s.pts, t1));
     out += '<circle cx="'+xFin.toFixed(1)+'" cy="'+yFin.toFixed(1)+'" r="8" fill="'+s.color+'" opacity=".16"/>'
         +  '<circle cx="'+xFin.toFixed(1)+'" cy="'+yFin.toFixed(1)+'" r="4.2" fill="'+s.color+'"/>';
@@ -735,6 +736,26 @@ function renderChart(){
 /* État du dernier tracé, relu au survol. */
 let chartSurvol = null;
 
+/* Ordonnée du tracé à une abscisse donnée, lue sur le chemin lui-même.
+
+   Pourquoi ne pas réutiliser valueAt : il rend la valeur en escalier,
+   celle qui a vraiment cours à cet instant. La courbe, elle, est lissée
+   et passe ailleurs entre deux parties. Poser la pastille sur valueAt
+   la décollait donc du trait. Le nombre affiché reste valueAt — c'est
+   le vrai total de LP ; seule la pastille suit ce qui est dessiné. */
+function ySurTrace(path, x){
+  if(!path || !path.getTotalLength) return null;
+  const L = path.getTotalLength();
+  if(!L) return null;
+  let a = 0, b = L;
+  // Le tracé va de gauche à droite : une dichotomie suffit.
+  for(let k = 0; k < 24; k++){
+    const m = (a + b) / 2;
+    if(path.getPointAtLength(m).x < x) a = m; else b = m;
+  }
+  return path.getPointAtLength((a + b) / 2).y;
+}
+
 /* Au survol : un repère vertical, un point par courbe, et les valeurs
    sous le curseur. On lit les mêmes séries que celles dessinées, donc
    l'infobulle ne peut pas annoncer autre chose que la courbe. */
@@ -751,9 +772,13 @@ function majSurvol(clientX, clientY){
 
   // Les pastilles sur chaque courbe.
   let pastilles = "";
-  const lignes = c.vis.map(s => {
+  const lignes = c.vis.map((s, i) => {
     const y = valueAt(s.pts, t);
-    pastilles += '<circle cx="' + x.toFixed(1) + '" cy="' + c.Y(y).toFixed(1)
+    // La pastille se pose sur le trait ; si le chemin n'est pas encore
+    // mesurable, on retombe sur l'escalier plutôt que de ne rien montrer.
+    const yTrace = ySurTrace($("#serie" + i), x);
+    const cy = yTrace === null ? c.Y(y) : yTrace;
+    pastilles += '<circle cx="' + x.toFixed(1) + '" cy="' + cy.toFixed(1)
       + '" r="4" fill="' + s.color + '" stroke="var(--surface)" stroke-width="2"/>';
     return { label: s.label, color: s.color, y };
   }).sort((a, b) => b.y - a.y);
@@ -1042,7 +1067,7 @@ function renderItems(){
     const arme  = (armes[it.key]  || [])[0];
     return '<article class="item' + (connu ? "" : " locked") + ' ' + esc(it.rarity) + '">'
       + '<div class="itemhead">'
-        + '<span class="itemicon" title="' + esc(infobulleObjet(it, connu, null)) + '">'
+        + '<span class="itemicon" data-tip="' + esc(infobulleObjet(it, connu, null)) + '">'
           + (connu ? esc(it.icon) : "🔒") + '</span>'
         + '<div class="itemid">'
           + '<div class="itemname">' + esc(connu ? it.name : "Objet inconnu") + '</div>'
@@ -1234,6 +1259,50 @@ function celluleLp(x){
     + '</span>';
 }
 
+/* ------------------------------------------------------------------
+   Infobulle en bloc
+   Le `title` du navigateur met une seconde à sortir, s'affiche en police
+   système et ne se met pas en forme. On refait la même chose en HTML,
+   dans le style du reste : tout élément portant data-tip la déclenche.
+------------------------------------------------------------------- */
+function initInfobulles(){
+  const bulle = $("#floatTip");
+  if(!bulle) return;
+
+  const montrer = el => {
+    const txt = el.getAttribute("data-tip");
+    if(!txt) return;
+    const [titre, ...reste] = txt.split("\n").filter(Boolean);
+    bulle.innerHTML = '<div class="tiptitre">' + esc(titre) + '</div>'
+      + reste.map(l => '<div class="tipcorps' + (l.startsWith("\u2192") ? " tipnote" : "") + '">'
+          + esc(l) + '</div>').join("");
+    bulle.hidden = false;
+    placer(el);
+  };
+
+  const placer = el => {
+    const r = el.getBoundingClientRect();
+    const b = bulle.getBoundingClientRect();
+    // On préfère au-dessus ; en haut d'écran on bascule en dessous.
+    const dessus = r.top > b.height + 12;
+    let x = r.left + r.width / 2 - b.width / 2;
+    x = Math.max(8, Math.min(x, window.innerWidth - b.width - 8));
+    bulle.style.left = x + "px";
+    bulle.style.top = (dessus ? r.top - b.height - 8 : r.bottom + 8) + "px";
+  };
+
+  document.addEventListener("mouseover", e => {
+    const el = e.target.closest && e.target.closest("[data-tip]");
+    if(el) montrer(el);
+  });
+  document.addEventListener("mouseout", e => {
+    const el = e.target.closest && e.target.closest("[data-tip]");
+    if(el) bulle.hidden = true;
+  });
+  // Un défilement sous une infobulle ouverte la laisserait flotter seule.
+  window.addEventListener("scroll", () => { bulle.hidden = true; }, true);
+}
+
 /* L'infobulle d'un objet : son nom, son effet, et ce qu'il a donné ici.
    L'effet n'apparaît que si le visiteur connaît l'objet — sinon on
    dévoilerait par l'infobulle ce que la grille garde secret. */
@@ -1253,7 +1322,7 @@ function chipsObjets(x, decouverts){
     const vu = decouverts.has(r.item_key);
     const lp = r.lp_effect || 0;
     const titre = infobulleObjet(it, vu && !!it, r.note);
-    return '<span class="objchip ' + (lp > 0 ? "up" : lp < 0 ? "down" : "flat") + '" title="' + esc(titre) + '">'
+    return '<span class="objchip ' + (lp > 0 ? "up" : lp < 0 ? "down" : "flat") + '" data-tip="' + esc(titre) + '">'
       + '<span class="objico">' + (vu && it ? esc(it.icon) : "🔒") + '</span>'
       + signed(lp) + '</span>';
   }).join("") + '</div>';
@@ -1266,6 +1335,37 @@ function chipsObjets(x, decouverts){
    encore armé reste anonyme pour qui ne l'a jamais obtenu — savoir
    qu'on est visé fait partie du jeu, savoir par quoi serait tricher.
 ------------------------------------------------------------------- */
+/* ------------------------------------------------------------------
+   Lu / non lu
+   Propre à chaque visiteur, donc stocké dans son navigateur : ce n'est
+   pas une donnée du challenge, et la partager n'aurait aucun sens.
+   Tout accès est protégé — en navigation privée le stockage peut jeter,
+   et le journal doit rester lisible dans ce cas.
+------------------------------------------------------------------- */
+const CLE_LUS = "soloq-journal-lus";
+
+function chargerLus(){
+  try{ return new Set(JSON.parse(localStorage.getItem(CLE_LUS) || "[]")); }
+  catch(_){ return new Set(); }
+}
+function enregistrerLus(set){
+  try{ localStorage.setItem(CLE_LUS, JSON.stringify([...set].slice(-400))); }
+  catch(_){}
+}
+let journalLus = chargerLus();
+
+function basculerLu(id){
+  journalLus.has(id) ? journalLus.delete(id) : journalLus.add(id);
+  enregistrerLus(journalLus);
+  renderWarlog();
+}
+
+function toutMarquerLu(){
+  S.inventory.filter(r => r.locked_at || r.applied_match).forEach(r => journalLus.add(r.id));
+  enregistrerLus(journalLus);
+  renderWarlog();
+}
+
 function renderWarlog(){
   const box = $("#warLog");
   if(!box) return;
@@ -1278,12 +1378,16 @@ function renderWarlog(){
     ? S.items.map(i => i.key)
     : (moi ? S.inventory.filter(r => r.player_id === moi.id).map(r => r.item_key) : []));
 
-  // Sur le bouton de la barre : juste le nombre, et rien du tout à zéro.
+  // La pastille compte les NON LUS : un compteur qui ne redescend
+  // jamais n'incite plus personne à ouvrir le journal.
+  const nonLus = lignes.filter(r => !journalLus.has(r.id)).length;
   const pastille = $("#warCount");
   if(pastille){
-    pastille.textContent = lignes.length;
-    pastille.hidden = !lignes.length;
+    pastille.textContent = nonLus;
+    pastille.hidden = !nonLus;
   }
+  const btnLu = $("#warRead");
+  if(btnLu) btnLu.disabled = !nonLus;
   const intro = $("#warHint");
   if(intro){
     intro.textContent = lignes.length
@@ -1311,11 +1415,13 @@ function renderWarlog(){
     const verbe = soi ? "s'est protégé avec" : "a lancé";
     const cible = soi ? "" : ' sur <b>' + esc(sur ? sur.name : "?") + '</b>';
 
-    return '<div class="warrow' + (resolu ? "" : " pending") + '">'
+    const lu = journalLus.has(r.id);
+    return '<div class="warrow' + (resolu ? "" : " pending") + (lu ? "" : " unread")
+      + '" data-lu="' + esc(r.id) + '" title="' + (lu ? "Marquer non lu" : "Marquer lu") + '">'
       + avatarRing(par, { sm:true })
       + '<div class="wartext">'
         + '<div class="warline"><b>' + esc(par ? par.name : "?") + '</b> ' + verbe
-          + ' <span class="waritem" title="' + esc(infobulleObjet(it, connu, resolu ? r.note : null))
+          + ' <span class="waritem" data-tip="' + esc(infobulleObjet(it, connu, resolu ? r.note : null))
           + '">' + nom + '</span>' + cible + '</div>'
         + '<div class="warmeta">'
           + (resolu
@@ -1329,6 +1435,11 @@ function renderWarlog(){
       + '</div>';
   }).join("");
 
+  box.querySelectorAll("[data-lu]").forEach(el => el.addEventListener("click", e => {
+    // Le nom de l'objet porte son infobulle : on ne bascule pas dessus.
+    if(e.target.closest("[data-tip]")) return;
+    basculerLu(el.dataset.lu);
+  }));
 }
 
 // « il y a 12 min », « il y a 3 h », « le 4 oct. »
@@ -1673,6 +1784,8 @@ function initUI(){
   setInterval(majBoutonRefresh, 1000);
   $("#btnWar").addEventListener("click", () => openWar(true));
   $("#warClose").addEventListener("click", () => openWar(false));
+  $("#warRead").addEventListener("click", toutMarquerLu);
+  initInfobulles();
   $("#warScrim").addEventListener("click", () => openWar(false));
   $("#btnRules").addEventListener("click", () => openRules(true));
   $("#rulesClose").addEventListener("click", () => openRules(false));

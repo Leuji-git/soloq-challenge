@@ -91,11 +91,15 @@
   </div>
 </dialog>
 
+<div class="floattip" id="floatTip" hidden></div>
 <div class="scrim" id="warScrim" hidden></div>
 <aside class="drawer right" id="warDrawer" aria-hidden="true" aria-label="Journal de guerre">
   <div class="drawerhead">
     <h2>Journal de guerre</h2>
-    <button type="button" class="x" id="warClose" aria-label="Fermer le journal">✕</button>
+    <div class="warhead">
+      <button type="button" class="btn ghost sm" id="warRead">Tout marquer lu</button>
+      <button type="button" class="x" id="warClose" aria-label="Fermer le journal">✕</button>
+    </div>
   </div>
   <p class="hint warintro" id="warHint">Qui a lancé quoi, sur qui, et ce que ça a donné.</p>
   <div class="drawerbody warlog" id="warLog"></div>
