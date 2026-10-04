@@ -105,6 +105,8 @@ const lpDe = g => chartLp === "total" ? g.lp + (g.lp_items || 0) : g.lp;
 // Tracer les places au classement plutôt que les LP. N'a de sens qu'en
 // mode joueurs : une équipe n'a pas de rang parmi dix.
 let chartRank = false;
+// Le bloc « Suivi » montre soit les parties, soit la réserve d'objets.
+let suiviVue = "hist";
 let hidden = new Set();
 
 const myPlayer = () => S.session ? S.players.find(p => p.claimed_by === S.session.user.id) || null : null;
@@ -1410,6 +1412,71 @@ function renderEntry(){
 
   renderSyncStatus();
   renderFeed(vu);
+  renderInventaire(vu);
+}
+
+/* L'inventaire d'un joueur — le sien ou celui d'un autre.
+
+   Un objet n'est nommé que si le VISITEUR l'a déjà obtenu, même quand
+   il regarde la réserve de quelqu'un d'autre : sinon il suffirait de
+   consulter les autres pour apprendre tout le catalogue. On voit donc
+   combien d'objets l'adversaire garde sous le coude, pas lesquels. */
+function renderInventaire(t){
+  const grille = $("#invGrid");
+  if(!grille || !t) return;
+
+  const moi = myPlayer();
+  const vus = new Set(isAdmin()
+    ? S.items.map(i => i.key)
+    : (moi ? S.inventory.filter(r => r.player_id === moi.id).map(r => r.item_key) : []));
+
+  const aLui = S.inventory.filter(r => r.player_id === t.id && !r.used_at);
+  if(!aLui.length){
+    grille.innerHTML = '<div class="empty">'
+      + esc(t.name) + " n'a aucun objet en réserve.</div>";
+    return;
+  }
+
+  // Regroupés par objet : trois Pierres de Garde font une carte « ×3 ».
+  const parCle = {};
+  aLui.forEach(r => { (parCle[r.item_key] = parCle[r.item_key] || []).push(r); });
+
+  grille.innerHTML = Object.entries(parCle).map(([cle, rangs]) => {
+    const it = S.items.find(i => i.key === cle);
+    const connu = vus.has(cle);
+    const arme = rangs.find(r => r.locked_at);
+    const cible = arme ? S.players.find(p => p.id === arme.target_id) : null;
+
+    return '<article class="item' + (connu ? "" : " locked") + ' ' + esc(it ? it.rarity : "") + '">'
+      + '<div class="itemhead">'
+        + '<span class="itemicon">' + (connu && it ? esc(it.icon) : "\u{1F512}") + '</span>'
+        + '<div class="itemid">'
+          + '<div class="itemname">' + esc(connu && it ? it.name : "Objet inconnu") + '</div>'
+          + '<div class="itemtags">'
+            + (it ? '<span class="rarity ' + esc(it.rarity) + '">'
+                  + esc(RARETES[it.rarity] || it.rarity) + '</span>' : "")
+            + (it ? '<span class="itemtarget">'
+                  + (it.target === "soi" ? "pour lui" : "sur un adversaire") + '</span>' : "")
+          + '</div>'
+        + '</div>'
+        + (rangs.length > 1 ? '<span class="itemcount">\u00d7' + rangs.length + '</span>' : '')
+      + '</div>'
+      + '<p class="itemtext' + (connu ? "" : " teaser") + '">'
+        + esc(connu && it ? it.effect : (it ? it.teaser : "")) + '</p>'
+      + (arme
+          ? '<div class="itemact armed"><span class="armedon">Armé sur <b>'
+            + esc(cible ? cible.name : "?") + '</b></span></div>'
+          : "")
+      + '</article>';
+  }).join("");
+}
+
+/* Historique ou inventaire : on bascule l'affichage, pas les données. */
+function majVueSuivi(){
+  const hist = suiviVue === "hist";
+  const f = $("#feed"), g = $("#invGrid");
+  if(f) f.hidden = !hist;
+  if(g) g.hidden = hist;
 }
 
 /* ---------------------------------------------------------------------
@@ -2256,6 +2323,10 @@ function segment(aSel, bSel, onA, onB){
 
 function initUI(){
   $("#fPlayer").addEventListener("change", () => renderEntry());
+  segment("#suiviHist", "#suiviInv",
+    () => { suiviVue = "hist"; majVueSuivi(); },
+    () => { suiviVue = "inv";  majVueSuivi(); });
+  majVueSuivi();
   // Le délai d'annulation s'écoule : on redessine la grille chaque
   // seconde tant qu'un objet armé est encore reprenable.
   setInterval(() => {
