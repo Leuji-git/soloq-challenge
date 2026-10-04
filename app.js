@@ -199,6 +199,20 @@ const started = () => new Date() >= startDate();
    Score d'équipe : la somme des LP nets de ses membres.
 ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------
+   Les deux lectures du score — ne jamais les mélanger
+
+   * Le classement INDIVIDUEL se fait au LP net : ce que Riot a vraiment
+     donné. Un joueur ne monte ni ne descend à cause d'un objet, et
+     personne ne peut faire chuter quelqu'un d'autre au tableau.
+   * Le duel d'ÉQUIPES se fait au LP global, objets compris. C'est là
+     que les objets pèsent : on sabote l'autre camp, pas une personne.
+
+   D'où cette fonction, et le fait que `stateFor` continue d'employer
+   `g.lp` tout seul.
+------------------------------------------------------------------- */
+const lpGlobal = g => g.lp + (g.lp_items || 0);
+
+/* ------------------------------------------------------------------
    L'objectif journalier
    Chaque jour, une équipe qui engrange OBJECTIF_JOUR LP décroche
    PRIME_OBJECTIF LP de plus. Seuls les gains comptent : une défaite ne
@@ -211,13 +225,16 @@ const OBJECTIF_JOUR = 150;
 const PRIME_OBJECTIF = 80;
 
 // LP gagnés par une équipe un jour donné (défaites ignorées).
+// En LP globaux, comme le score d'équipe : une victoire annulée par un
+// malus ne doit pas faire avancer l'objectif.
 function lpGagnesJour(team, jour){
   let n = 0;
   S.games.forEach(g => {
-    if(g.lp <= 0) return;
+    const v = lpGlobal(g);
+    if(v <= 0) return;
     if(dayOf(g.played_on) !== jour) return;
     const p = S.players.find(x => x.id === g.player_id);
-    if(p && p.team === team) n += g.lp;
+    if(p && p.team === team) n += v;
   });
   return n;
 }
@@ -240,7 +257,7 @@ function teamScores(){
     if(dayOf(g.played_on) < from) return;
     const p = S.players.find(x => x.id === g.player_id);
     if(!p) return;
-    out[p.team] += g.lp;
+    out[p.team] += lpGlobal(g);
   });
   out.a += primeObjectif("a").lp;
   out.b += primeObjectif("b").lp;
@@ -400,7 +417,9 @@ function renderRosters(states){
     const total = teamScores()[tk];
     const played = ms.reduce((acc,s) => acc + s.games.length, 0);
     return '<div class="roster '+tk+'">'
-      + '<header><span class="tname '+tk+'">'+esc(tname)+'</span><span class="lbl">'+played+' parties · '+signed(total)+' LP</span></header>'
+      + '<header><span class="tname '+tk+'">'+esc(tname)+'</span>'
+        + '<span class="lbl" title="Score d\'équipe : LP globaux, objets et primes compris. Les lignes ci-dessous sont en LP nets, ceux du classement individuel.">'
+        + played+' parties · '+signed(total)+' LP globaux</span></header>'
       + '<ul>' + (ms.length ? ms.map(s => {
           const r = estRank(s.player);
           return '<li'+(mine && mine.id === s.player.id ? ' class="me"' : '')+'>'
@@ -1577,9 +1596,12 @@ function render(){
    Règlement — volet latéral à onglets
 =================================================================== */
 const RULES = [
-  { t:"Le seul score qui compte", h:
-    "<p>Le <strong>LP net</strong> : la somme des LP gagnés moins ceux perdus, partie après partie. Tu gagnes une game à +20 ? +20 au compteur. Tu la perds à −18 ? −18.</p>"
-  + "<p>Ton rang de départ n'entre pas dans le calcul. Un Argent qui enchaîne bat un Diamant qui stagne.</p>" },
+  { t:"Les deux scores", h:
+    "<p>Il y a <strong>deux classements</strong>, et ils ne se lisent pas pareil.</p>"
+  + "<p><strong>Le classement individuel se fait au LP net</strong> \u2014 ce que Riot t'a vraiment donn\u00e9, rien d'autre. Aucun objet ne peut t'y faire monter ni descendre, et personne ne peut t'y faire chuter.</p>"
+  + "<p><strong>Le duel d'\u00e9quipes se fait au LP global</strong>, objets et primes journali\u00e8res compris. C'est l\u00e0 que les objets p\u00e8sent : on sabote le camp d'en face, pas une personne au tableau.</p>"
+  + "<p>Sur chaque partie, le gros chiffre est ton total ressenti, objets compris ; le petit en dessous est ton LP net. Le premier nourrit le score d'\u00e9quipe, le second ton classement.</p>"
+  + "<p>Le rang affich\u00e9 \u00e0 c\u00f4t\u00e9 de ton pseudo est ton vrai rang chez Riot. Il ne compte pas : partir de Fer ou de Diamant ne change rien.</p>" },
 
   { t:"Suivi automatique", h:
     "<p>Personne ne déclare rien : <strong>tes parties sont relevées directement chez Riot</strong>, toutes les cinq minutes environ. Une partie apparaît quelques minutes après sa fin.</p>"
@@ -1601,14 +1623,15 @@ const RULES = [
   + "<p>Un objet est un <strong>bonus</strong> que tu poses sur toi, ou un <strong>malus</strong> que tu poses sur un adversaire.</p>"
   + "<p><strong>Il faut le verrouiller avant de jouer.</strong> Tu choisis l'objet, tu choisis la cible, et il agira sur la <strong>prochaine partie de cette personne</strong> — où qu'elle joue, avec qui qu'elle veuille. Tu n'as pas besoin d'être dans sa partie, ni même d'être connecté. Que sa condition soit remplie ou non, l'objet est consommé.</p>"
   + "<p>Sur une même partie, au plus <strong>un bonus et trois malus</strong> font effet. Les objets verrouillés en trop restent en réserve, intacts.</p>"
-  + "<p>Le récap d'une partie montre en gros ce que tu as <em>ressenti</em>, objets compris, et en petit tes <em>LP nets</em>. "
-  + "Attention : <strong>le classement se fait sur les LP nets</strong>, ceux que Riot a vraiment donnés. Les objets ne décident pas du vainqueur du challenge — ils décident de l'ambiance.</p>"
+  + "<p>Le récap d'une partie montre en gros ce que tu as <em>ressenti</em>, objets compris, et en petit tes <em>LP nets</em>.</p>"
+  + "<p><strong>Les objets ne touchent pas ton classement individuel</strong>, qui reste au LP net. Mais ils comptent pleinement dans le <strong>score de ton équipe</strong>, calculé en LP globaux. Un malus bien placé ne fait pas chuter quelqu'un au tableau : il coûte des points à son camp.</p>"
   + "<p>Tant que tu n'as jamais obtenu un objet, l'onglet n'en montre qu'une <em>rumeur</em> : tu sais qu'il existe, pas ce qu'il fait. Dès que tu en décroches un, son effet t'est révélé pour de bon — y compris dans le récap des parties.</p>"
   + "<p>Plus un objet est rare, plus il est puissant — et plus il se fait attendre.</p>" },
 
   { t:"L'objectif du jour", h:
     "<p>Chaque jour, une équipe qui engrange <strong>150 LP</strong> décroche <strong>+80 LP</strong> de plus pour elle.</p>"
-  + "<p><strong>Seuls les gains comptent.</strong> Une défaite ne fait pas reculer le compteur du jour : l'objectif récompense ce qu'on va chercher, pas ce qu'on évite de perdre. Le classement général, lui, reste au LP net — défaites comprises.</p>"
+  + "<p><strong>Seuls les gains comptent.</strong> Une défaite ne fait pas reculer le compteur du jour : l'objectif récompense ce qu'on va chercher, pas ce qu'on évite de perdre.</p>"
+  + "<p>Le compteur se lit en <strong>LP globaux</strong>, comme le score d'équipe : une victoire annulée par un malus adverse ne le fait pas avancer.</p>"
   + "<p>La jauge est sous le nom de chaque équipe. La prime s'ajoute au total de l'équipe, jamais au compte d'un joueur : personne ne grimpe au classement individuel grâce à elle.</p>"
   + "<p>Un jour couru, un jour gagné : les primes s'accumulent sur toute la durée du challenge.</p>" },
 
@@ -1762,6 +1785,15 @@ async function savePlayers(){
 /* ===================================================================
    Câblage
 =================================================================== */
+// Les deux boutons LP doivent refléter l'état réel après une bascule
+// de mode, sinon ils mentiraient sur ce qui est tracé.
+function majSegLp(){
+  const n = $("#lpNet"), t = $("#lpTotal");
+  if(!n || !t) return;
+  n.setAttribute("aria-pressed", String(chartLp === "net"));
+  t.setAttribute("aria-pressed", String(chartLp === "total"));
+}
+
 function segment(aSel, bSel, onA, onB){
   const a = $(aSel), b = $(bSel);
   a.addEventListener("click", () => { a.setAttribute("aria-pressed","true"); b.setAttribute("aria-pressed","false"); onA(); });
@@ -1835,8 +1867,11 @@ function initUI(){
     () => { period = "week"; render(); });
   initChartZoom();
   segment("#chartPlayers", "#chartTeams",
-    () => { chartMode = "players"; hidden = new Set(); renderChart(); },
-    () => { chartMode = "teams";   hidden = new Set(); renderChart(); });
+    // On bascule aussi la lecture des LP : en joueurs c'est le net qui
+    // classe, en équipes c'est le global qui compte. Rien n'empêche de
+    // changer ensuite, les deux boutons restent libres.
+    () => { chartMode = "players"; chartLp = "net";   hidden = new Set(); majSegLp(); renderChart(); },
+    () => { chartMode = "teams";   chartLp = "total"; hidden = new Set(); majSegLp(); renderChart(); });
   segment("#lpNet", "#lpTotal",
     () => { chartLp = "net";   renderChart(); },
     () => { chartLp = "total"; renderChart(); });
