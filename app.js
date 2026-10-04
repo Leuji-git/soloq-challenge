@@ -80,6 +80,10 @@ let chartMode = "players";
    « total » : les mêmes, objets compris — ce que le joueur a ressenti. */
 let chartLp = "net";
 const lpDe = g => chartLp === "total" ? g.lp + (g.lp_items || 0) : g.lp;
+// Tracer les places au classement plutôt que les LP. N'a de sens qu'en
+// mode joueurs : une équipe n'a pas de rang parmi dix.
+let chartRank = false;
+const rangFr = r => r === 1 ? "1er" : r + "e";
 let hidden = new Set();
 
 const myPlayer = () => S.session ? S.players.find(p => p.claimed_by === S.session.user.id) || null : null;
@@ -528,6 +532,40 @@ function playerPoints(id){
   let run = 0;
   return gs.map(g => ({ t: tsOf(g), y: (run += lpDe(g)) }));
 }
+/* Places au classement dans le temps.
+
+   À chaque partie on recalcule le cumul de tout le monde, puis l'ordre.
+   On n'ajoute un palier à un joueur que si sa place a changé : sinon
+   dix joueurs × soixante parties donneraient six cents points pour
+   décrire une ligne plate.
+
+   Le classement se lit au LP net, comme le tableau — on ne va pas
+   afficher un rang qui contredirait celui d'à côté. */
+function rangPoints(){
+  const ids = S.players.map(p => p.id);
+  const cum = {}, sortie = {}, dernier = {};
+  ids.forEach(id => { cum[id] = 0; sortie[id] = []; });
+
+  const evts = S.games
+    .filter(g => g.lp && cum[g.player_id] !== undefined)
+    .map(g => ({ t: tsOf(g), id: g.player_id, d: g.lp }))
+    .sort((a, b) => a.t - b.t);
+
+  const classer = t => {
+    // À égalité, on départage par identifiant : le tri reste stable
+    // d'un relevé à l'autre, sinon des courbes sauteraient sans raison.
+    const ordre = ids.slice().sort((a, b) => cum[b] - cum[a] || (a < b ? -1 : 1));
+    ordre.forEach((id, i) => {
+      const r = i + 1;
+      if(dernier[id] !== r){ sortie[id].push({ t, y: r }); dernier[id] = r; }
+    });
+  };
+
+  if(evts.length) classer(evts[0].t - 1);     // l'état de départ, à égalité
+  evts.forEach(e => { cum[e.id] += e.d; classer(e.t); });
+  return sortie;
+}
+
 // Paliers cumulés d'une équipe.
 function teamPoints(tk){
   const evts = [];
@@ -642,8 +680,14 @@ function renderChart(){
   view = clampView(view);
   const { t0, t1 } = view;
 
+  // Le mode rang ne vaut qu'en joueurs : la case est masquée ailleurs,
+  // mais on ne s'y fie pas, on revérifie ici.
+  const rang = chartRank && chartMode === "players";
+  const rangs = rang ? rangPoints() : null;
+
   const series = chartMode === "players"
-    ? S.players.map(p => ({ key:p.id, label:p.name, color:TEAM_COLOR[p.team], pts:playerPoints(p.id) }))
+    ? S.players.map(p => ({ key:p.id, label:p.name, color:TEAM_COLOR[p.team],
+                            pts: rang ? rangs[p.id] : playerPoints(p.id) }))
     : ["a","b"].map(tk => ({
         key: tk,
         label: tk === "a" ? S.challenge.team_a_name : S.challenge.team_b_name,
@@ -655,30 +699,48 @@ function renderChart(){
 
   // L'axe vertical se recalcule sur ce qui est visible : c'est ce qui
   // donne du relief quand on zoome sur une soirée.
-  const ys = [0];
-  vis.forEach(s => {
-    ys.push(valueAt(s.pts, t0));
-    s.pts.filter(p => p.t > t0 && p.t <= t1).forEach(p => ys.push(p.y));
-  });
-  let lo = Math.min(...ys), hi = Math.max(...ys);
-  const amp = hi - lo;
-  const pad = Math.max(20, amp * 0.18);
-  const grain = amp > 400 ? 50 : amp > 120 ? 20 : 10;
-  lo = Math.floor((lo - pad) / grain) * grain;
-  hi = Math.ceil((hi + pad) / grain) * grain;
-  if(hi === lo) hi = lo + grain * 4;
-
+  let lo, hi, Y;
   const X = t => PL + ((t - t0) / (t1 - t0)) * (W - PL - PR);
-  const Y = v => PT + (1 - (v - lo) / (hi - lo)) * (H - PT - PB);
+
+  if(rang){
+    // Axe inversé : la première place en haut, comme on lit un podium.
+    lo = 1; hi = Math.max(2, S.players.length);
+    Y = v => PT + ((v - lo) / (hi - lo)) * (H - PT - PB);
+  }else{
+    const ys = [0];
+    vis.forEach(s => {
+      ys.push(valueAt(s.pts, t0));
+      s.pts.filter(p => p.t > t0 && p.t <= t1).forEach(p => ys.push(p.y));
+    });
+    lo = Math.min(...ys); hi = Math.max(...ys);
+    const amp = hi - lo;
+    const pad = Math.max(20, amp * 0.18);
+    const grain = amp > 400 ? 50 : amp > 120 ? 20 : 10;
+    lo = Math.floor((lo - pad) / grain) * grain;
+    hi = Math.ceil((hi + pad) / grain) * grain;
+    if(hi === lo) hi = lo + grain * 4;
+    Y = v => PT + (1 - (v - lo) / (hi - lo)) * (H - PT - PB);
+  }
 
   let out = "";
-  const vStep = Math.max(grain, Math.ceil((hi - lo) / 6 / grain) * grain);
-  for(let v = Math.ceil(lo / vStep) * vStep; v <= hi; v += vStep){
-    const y = Y(v);
-    out += '<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)+'" stroke="var(--line-soft)" stroke-width="1" opacity=".6"/>'
-        +  '<text x="'+(PL-10)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" fill="var(--muted)" font-family="Barlow Semi Condensed" font-size="12">'+(v>0?"+":"")+v+'</text>';
+  if(rang){
+    // Une graduation par place, et pas de ligne du zéro : il n'y a pas
+    // de zéro dans un classement.
+    for(let v = lo; v <= hi; v++){
+      const y = Y(v);
+      out += '<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)+'" stroke="var(--line-soft)" stroke-width="1" opacity="'+(v===1?".9":".45")+'"/>'
+          +  '<text x="'+(PL-10)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" fill="var(--muted)" font-family="Barlow Semi Condensed" font-size="12">'+rangFr(v)+'</text>';
+    }
+  }else{
+    const grain = (hi - lo) > 400 ? 50 : (hi - lo) > 120 ? 20 : 10;
+    const vStep = Math.max(grain, Math.ceil((hi - lo) / 6 / grain) * grain);
+    for(let v = Math.ceil(lo / vStep) * vStep; v <= hi; v += vStep){
+      const y = Y(v);
+      out += '<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)+'" stroke="var(--line-soft)" stroke-width="1" opacity=".6"/>'
+          +  '<text x="'+(PL-10)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" fill="var(--muted)" font-family="Barlow Semi Condensed" font-size="12">'+(v>0?"+":"")+v+'</text>';
+    }
+    out += '<line x1="'+PL+'" y1="'+Y(0).toFixed(1)+'" x2="'+(W-PR)+'" y2="'+Y(0).toFixed(1)+'" stroke="var(--line)" stroke-width="1.5"/>';
   }
-  out += '<line x1="'+PL+'" y1="'+Y(0).toFixed(1)+'" x2="'+(W-PR)+'" y2="'+Y(0).toFixed(1)+'" stroke="var(--line)" stroke-width="1.5"/>';
 
   const pas = pickStep(t1 - t0);
   axisTicks(t0, t1, pas).forEach(t => {
@@ -689,7 +751,8 @@ function renderChart(){
 
   const jour = new Date(t0).toLocaleDateString("fr-FR", { day:"numeric", month:"long" });
   out += '<text x="'+PL+'" y="'+(H-4)+'" text-anchor="start" fill="var(--muted)" font-family="Barlow Semi Condensed" font-size="11" letter-spacing="1.2">'
-       + (chartLp === "total" ? 'LP CUMULÉS, OBJETS COMPRIS · ' : 'LP NETS CUMULÉS · ')
+       + (rang ? 'PLACE AU CLASSEMENT · '
+               : chartLp === "total" ? 'LP CUMULÉS, OBJETS COMPRIS · ' : 'LP NETS CUMULÉS · ')
        + esc(jour.toUpperCase()) + '</text>';
 
   // Un dégradé par série, pour l'aire sous la courbe.
@@ -703,7 +766,7 @@ function renderChart(){
 
   // En mode « joueurs » il y a dix courbes : l'aire les rendrait
   // illisibles, on la réserve au duel d'équipes.
-  const avecAire = chartMode !== "players";
+  const avecAire = chartMode !== "players" && !rang;
 
   vis.forEach((s, i) => {
     const d = coursePath(s.pts, X, Y, t0, t1);
@@ -739,7 +802,7 @@ function renderChart(){
   $("#zoomLabel").textContent = spanLabel(t1 - t0);
 
   // De quoi répondre au survol sans tout recalculer à chaque pixel.
-  chartSurvol = { X, Y, t0, t1, vis, PL, PR, W, H, PT, PB };
+  chartSurvol = { X, Y, t0, t1, vis, PL, PR, W, H, PT, PB, rang };
 
   $("#legend").innerHTML = series.map(s =>
     '<button type="button" data-key="'+esc(s.key)+'" aria-pressed="'+(hidden.has(s.key)?"false":"true")+'"><i style="background:'+s.color+'"></i>'+esc(s.label)+'</button>'
@@ -800,14 +863,15 @@ function majSurvol(clientX, clientY){
     pastilles += '<circle cx="' + x.toFixed(1) + '" cy="' + cy.toFixed(1)
       + '" r="4" fill="' + s.color + '" stroke="var(--surface)" stroke-width="2"/>';
     return { label: s.label, color: s.color, y };
-  }).sort((a, b) => b.y - a.y);
+  }).sort((a, b) => c.rang ? a.y - b.y : b.y - a.y);
   $("#chartDots").innerHTML = pastilles;
 
   bulle.innerHTML = '<div class="tiptime">'
       + new Date(t).toLocaleString("fr-FR", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })
       + '</div>'
     + lignes.map(l => '<div class="tipline"><i style="background:' + l.color + '"></i>'
-        + '<span>' + esc(l.label) + '</span><b>' + signed(l.y) + '</b></div>').join("");
+        + '<span>' + esc(l.label) + '</span><b>'
+        + (c.rang ? rangFr(l.y) : signed(l.y)) + '</b></div>').join("");
 
   // L'infobulle suit la souris, et bascule à gauche près du bord droit.
   const dx = clientX - box.left, dy = clientY - box.top;
@@ -1787,6 +1851,21 @@ async function savePlayers(){
 =================================================================== */
 // Les deux boutons LP doivent refléter l'état réel après une bascule
 // de mode, sinon ils mentiraient sur ce qui est tracé.
+/* La case n'a de sens qu'en mode joueurs : une équipe n'a pas de place
+   parmi dix. On la masque plutôt que de la laisser sans effet. */
+function majCaseRang(){
+  const w = $("#rankWrap"), c = $("#rankMode");
+  if(!w || !c) return;
+  w.hidden = chartMode !== "players";
+  c.checked = chartRank;
+  // En rang, l'axe des LP n'a plus cours : les deux boutons seraient
+  // trompeurs, on les éteint.
+  const n = $("#lpNet"), t = $("#lpTotal");
+  const off = chartRank && chartMode === "players";
+  if(n) n.disabled = off;
+  if(t) t.disabled = off;
+}
+
 function majSegLp(){
   const n = $("#lpNet"), t = $("#lpTotal");
   if(!n || !t) return;
@@ -1872,8 +1951,16 @@ function initUI(){
     // On bascule aussi la lecture des LP : en joueurs c'est le net qui
     // classe, en équipes c'est le global qui compte. Rien n'empêche de
     // changer ensuite, les deux boutons restent libres.
-    () => { chartMode = "players"; chartLp = "net";   hidden = new Set(); majSegLp(); renderChart(); },
-    () => { chartMode = "teams";   chartLp = "total"; hidden = new Set(); majSegLp(); renderChart(); });
+    () => { chartMode = "players"; chartLp = "net";   hidden = new Set(); majSegLp(); majCaseRang(); renderChart(); },
+    // Le rang n'existe pas pour une équipe : on le retire en passant.
+    () => { chartMode = "teams";   chartLp = "total"; chartRank = false; hidden = new Set(); majSegLp(); majCaseRang(); renderChart(); });
+
+  $("#rankMode").addEventListener("change", e => {
+    chartRank = e.target.checked;
+    majCaseRang();
+    renderChart();
+  });
+  majCaseRang();
   segment("#lpNet", "#lpTotal",
     () => { chartLp = "net";   renderChart(); },
     () => { chartLp = "total"; renderChart(); });
