@@ -172,13 +172,16 @@ function stateFor(p){
   // Le net compte tout, esquives comprises ; victoires et défaites ne
   // comptent que les vraies parties.
   const net = games.reduce((a,g) => a + g.lp, 0);
+  // Le même total, objets compris : celui qui nourrit le score d'équipe.
+  // Le classement individuel, lui, reste sur `net`.
+  const global = games.reduce((a,g) => a + lpGlobal(g), 0);
   const played = games.filter(g => g.kind !== "adjust");
   const w = played.filter(g => g.win).length;
   const byDay = {};
   games.forEach(g => { const d = dayOf(g.played_on); byDay[d] = (byDay[d]||0) + g.lp; });
   let best = null;
   Object.keys(byDay).forEach(k => { if(!best || byDay[k] > best.lp) best = { day:+k, lp:byDay[k] }; });
-  return { player:p, all, games: played, net, w, l: played.length - w, best };
+  return { player:p, all, games: played, net, global, w, l: played.length - w, best };
 }
 const allStates = () => S.players.map(stateFor);
 
@@ -416,7 +419,12 @@ function renderRosters(states){
   const mine = myPlayer();
   $("#rosters").innerHTML = ["a","b"].map(tk => {
     const tname = tk === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
-    const ms = states.filter(s => s.player.team === tk).sort((x,y) => y.net - x.net);
+    // Ces listes servent le duel d'équipes : elles se lisent donc en LP
+    // globaux, objets compris, et se trient dessus. Le tableau du
+    // classement plus bas reste au LP net — ce sont deux lectures
+    // différentes, et c'est voulu.
+    const ms = states.filter(s => s.player.team === tk)
+      .sort((x,y) => y.global - x.global || y.net - x.net);
     const total = teamScores()[tk];
     const played = ms.reduce((acc,s) => acc + s.games.length, 0);
     return '<div class="roster '+tk+'">'
@@ -429,7 +437,9 @@ function renderRosters(states){
             + avatarRing(s.player, { sm:true }) + crest(r)
             + '<div style="min-width:0">' + nameLink(s.player)
             + '<div class="psub">'+esc(rankLabel(r))+(s.player.claimed_by ? "" : " · profil libre")+'</div></div>'
-            + '<div class="pright">'+deltaHtml(s.net)+'<span class="plp">'+s.w+'V '+s.l+'D</span></div></li>';
+            + '<div class="pright">' + deltaHtml(s.global)
+              + '<span class="plp"><b title="LP nets : ceux du classement individuel">'
+              + signed(s.net) + ' net</b> · ' + s.w + 'V ' + s.l + 'D</span></div></li>';
         }).join("") : '<li><span class="empty">Aucun joueur dans cette équipe.</span></li>')
       + '</ul></div>';
   }).join("");

@@ -126,6 +126,9 @@ a{color:inherit}
 .roster li.me{background:color-mix(in srgb, var(--accent) 9%, transparent)}
 .pright{text-align:right;display:flex;flex-direction:column;gap:2px}
 .plp{font-family:"Barlow Semi Condensed",sans-serif;font-weight:600;font-size:12.5px;color:var(--muted)}
+/* Le LP net sous le global : présent, mais clairement secondaire. */
+.plp b{font-weight:600;color:var(--ink);opacity:.72;font-variant-numeric:tabular-nums}
+.plp{white-space:nowrap}
 
 /* ---------- identité joueur : pseudo + tag sur une ligne ---------- */
 .pn{
