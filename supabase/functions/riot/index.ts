@@ -648,7 +648,7 @@ async function sync(force){
   try{
     const [ch, pl, sn, it] = await Promise.all([
       db.from("challenge").select("*").eq("id", 1).single(),
-      db.from("players").select("id,name,tag,team,puuid,claimed_by"),
+      db.from("players").select("id,name,tag,team,puuid,claimed_by,boost_until"),
       db.from("rank_snapshots").select("*"),
       db.from("items").select("key,rarity,target,active")
     ]);
@@ -784,6 +784,20 @@ async function sync(force){
           if(error && !/duplicate/i.test(error.message)) throw error;
           if(!error){
             bilan.games++;
+
+            /* Le bonus « double LP » acheté en boutique. Il ne double
+               que les GAINS, et seulement si la partie s'est TERMINÉE
+               dans la fenêtre de deux heures — pas si elle a juste
+               commencé dedans, sinon on lancerait une partie à 1 h 59
+               pour la finir sous bonus.
+
+               Le doublement vit dans le total global, jamais dans le
+               net : le classement individuel reste ce que Riot a donné. */
+            const net = clampLp(split.lps[i]);
+            let lpBoost = 0;
+            if(net > 0 && p.boost_until && g.end <= new Date(p.boost_until).getTime()){
+              lpBoost = net;
+            }
             // L'index unique (player_id, match_id) du journal d'or rend
             // ce crédit idempotent : un relevé qui repasse ne paie pas
             // deux fois.
@@ -794,11 +808,12 @@ async function sync(force){
               });
               if(!eOr) bilan.gold += or;
             }
-            const obj = await appliquerObjets(p, g, clampLp(split.lps[i]), parCle);
-            if(obj.detail.length){
-              await db.from("games").update({ lp_items: obj.lp })
+            const obj = await appliquerObjets(p, g, net, parCle);
+            if(obj.detail.length || lpBoost){
+              await db.from("games").update({ lp_items: clampLp(obj.lp + lpBoost) })
                 .eq("player_id", p.id).eq("match_id", g.matchId);
               bilan.objets += obj.detail.length;
+              if(lpBoost) bilan.boost = (bilan.boost || 0) + lpBoost;
             }
           }
 

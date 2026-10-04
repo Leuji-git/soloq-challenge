@@ -1898,7 +1898,11 @@ function renderRules(){
    surprise — et des LP fictifs hors de prix qui ne comptent que dans
    le score d'équipe, jamais au classement individuel.
 ------------------------------------------------------------------- */
-const LOTS_LP = [{ lp:10, prix:2000 }, { lp:25, prix:4500 }, { lp:50, prix:8500 }];
+/* Le rayon. Les prix vivent AUSSI dans boutique-v2.sql, qui seul
+   décide : la page ne fait que les annoncer. Si tu changes l'un,
+   change l'autre. */
+const PRIX = { lp25: 2000, boost: 5000, swap: 25000 };
+const BOOST_HEURES = 2;
 const orFr = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, "\u202f");
 
 function openShop(open){
@@ -1946,16 +1950,20 @@ function renderShop(){
       + '</div>';
   };
 
-  const ligneLp = l => {
-    const possible = or >= l.prix;
+  const article = (ico, nom, sous, prix, attr, bloque) => {
+    const possible = or >= prix && !bloque;
     return '<div class="shoprow' + (possible ? "" : " court") + '">'
-      + '<span class="shopico">\u{1F4C8}</span>'
-      + '<div class="shoptext"><div class="shopname">' + l.lp + ' LP</div>'
-        + '<div class="shopsub">pour ton équipe</div></div>'
-      + '<button type="button" class="btn sm" data-lp="' + l.lp + '"'
-        + (possible ? "" : " disabled") + '>' + orFr(l.prix) + ' or</button>'
+      + '<span class="shopico">' + ico + '</span>'
+      + '<div class="shoptext"><div class="shopname">' + nom + '</div>'
+        + '<div class="shopsub">' + sous + '</div></div>'
+      + '<button type="button" class="btn sm" ' + attr
+        + (possible ? "" : " disabled") + '>' + orFr(prix) + ' or</button>'
       + '</div>';
   };
+
+  // Le bonus en cours, s'il y en a un.
+  const finBoost = moi.boost_until ? new Date(moi.boost_until).getTime() : 0;
+  const boostActif = finBoost > Date.now();
 
   const mouvements = S.ledger.filter(r => r.player_id === moi.id).slice(0, 12);
 
@@ -1964,9 +1972,16 @@ function renderShop(){
     + (rayon.length
         ? rayon.map(ligneObjet).join("")
         : '<div class="empty">Tu ne peux acheter qu\'un objet que tu as déjà décroché en jeu. Gagne une partie pour en découvrir un.</div>')
-    + '<h4>LP fictifs</h4>'
-    + LOTS_LP.map(ligneLp).join("")
-    + '<p class="hint">Ces LP comptent dans le <b>score de ton équipe</b>, pas dans ton classement individuel — celui-là reste du pur LP Riot.</p>'
+    + '<h4>Pour ton équipe</h4>'
+    + article("\u{1F4C8}", "25 LP", "cr\u00e9dit\u00e9s \u00e0 ton \u00e9quipe", PRIX.lp25, 'data-lp="25"', false)
+    + article("\u26A1", "Double LP \u00b7 " + BOOST_HEURES + " h",
+        boostActif
+          ? '<b class="boostvif">actif encore ' + resteBoost(finBoost) + '</b> \u00b7 rachat = +' + BOOST_HEURES + ' h'
+          : "tes gains comptent double pendant " + BOOST_HEURES + " heures",
+        PRIX.boost, 'data-boost="1"', false)
+    + article("\u{1F500}", "Changer d'\u00e9quipe",
+        "\u00e9change avec un adversaire <b>tir\u00e9 au sort</b>", PRIX.swap, 'data-swap="1"', false)
+    + '<p class="hint">Ces LP comptent dans le <b>score de ton équipe</b>, pas dans ton classement individuel — celui-là reste du pur LP Riot. Le doublement suit la même règle, et ne double que les gains.</p>'
     + '<h4>Tes derniers mouvements</h4>'
     + (mouvements.length
         ? '<div class="ledger">' + mouvements.map(r =>
@@ -1981,6 +1996,10 @@ function renderShop(){
     b.addEventListener("click", () => acheterObjet(b.dataset.buy, b)));
   corps.querySelectorAll("[data-lp]").forEach(b =>
     b.addEventListener("click", () => acheterLp(Number(b.dataset.lp), b)));
+  corps.querySelectorAll("[data-boost]").forEach(b =>
+    b.addEventListener("click", () => acheterBoost(b)));
+  corps.querySelectorAll("[data-swap]").forEach(b =>
+    b.addEventListener("click", () => echangerEquipe(b)));
 }
 
 async function acheter(fn, args, btn, dire){
@@ -2007,6 +2026,34 @@ function acheterObjet(cle, btn){
 function acheterLp(lp, btn){
   acheter("shop_buy_lp", { p_lp: lp }, btn,
     r => lp + " LP crédités à ton équipe pour " + orFr((r && r.prix) || 0) + " or.");
+}
+
+// « 1 h 47 » / « 23 min » : ce qu'il reste de bonus.
+function resteBoost(fin){
+  const ms = Math.max(0, fin - Date.now());
+  const m = Math.round(ms / 60000);
+  return m >= 60 ? Math.floor(m / 60) + " h " + String(m % 60).padStart(2, "0") : m + " min";
+}
+
+function acheterBoost(btn){
+  acheter("shop_buy_boost", {}, btn,
+    r => "Double LP actif jusqu'à "
+       + new Date(r.boost_until).toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" })
+       + ". Seuls tes gains comptent double.");
+}
+
+/* Le changement d'équipe est irréversible et coûte très cher : on le
+   fait confirmer, en disant bien que la cible est tirée au sort. */
+function echangerEquipe(btn){
+  const moi = myPlayer();
+  if(!moi) return;
+  const camp = moi.team === "a" ? S.challenge.team_b_name : S.challenge.team_a_name;
+  if(!confirm("Changer d'équipe pour " + orFr(PRIX.swap) + " or ?\n\n"
+    + "Tu rejoins " + camp + ", et un joueur de ce camp — TIRÉ AU SORT, tu ne le choisis pas — "
+    + "prend ta place.\n\nTous tes LP suivent ta nouvelle équipe. C'est irréversible.")) return;
+
+  acheter("shop_swap_team", {}, btn,
+    r => "Échange fait : tu pars avec " + (r && r.autre ? r.autre : "un adversaire") + ".");
 }
 
 /* Le journal s'ouvre et se ferme comme le règlement, mais par la droite. */

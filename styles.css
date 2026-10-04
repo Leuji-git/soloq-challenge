@@ -1223,3 +1223,6 @@ dialog.modal .form{margin-bottom:12px}
   margin-left:auto;
 }
 .itemtags{align-items:center}
+
+/* Le bonus de doublement, quand il court. */
+.boostvif{color:var(--gold);font-weight:700}
