@@ -11,9 +11,30 @@
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
---  1. Le bonus de doublement
+--  1. Le bonus de doublement — il appartient à l'ÉQUIPE
+--
+--  Un joueur l'achète, toute son équipe en profite pendant deux heures.
+--  Il vit donc ici et pas sur la fiche du joueur : sinon il faudrait le
+--  recopier sur chacun, et il se désynchroniserait au premier échange
+--  d'équipe.
 -- ---------------------------------------------------------------------
-alter table public.players add column if not exists boost_until timestamptz;
+create table if not exists public.team_boosts (
+  team      text primary key check (team in ('a','b')),
+  until     timestamptz not null,
+  bought_by text references public.players(id) on delete set null,
+  at        timestamptz not null default now()
+);
+
+alter table public.team_boosts enable row level security;
+drop policy if exists boosts_read on public.team_boosts;
+-- Lecture publique : l'équipe d'en face doit pouvoir voir qu'on double.
+create policy boosts_read on public.team_boosts
+  for select to anon, authenticated using (true);
+
+do $$ begin
+  begin execute 'alter publication supabase_realtime add table public.team_boosts';
+  exception when duplicate_object then null; end;
+end $$;
 
 
 -- ---------------------------------------------------------------------
@@ -87,19 +108,29 @@ end $$;
 -- ---------------------------------------------------------------------
 create or replace function public.shop_buy_boost()
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare moi public.players; prix int := 5000; fin timestamptz;
+declare moi public.players; prix int := 5000; fin timestamptz; actuel timestamptz;
 begin
   select * into moi from public.players where claimed_by = auth.uid();
   if not found then raise exception 'Connecte-toi avec ton profil joueur'; end if;
   if moi.gold < prix then raise exception 'Il te manque % or', prix - moi.gold; end if;
 
-  fin := greatest(coalesce(moi.boost_until, now()), now()) + interval '2 hours';
+  -- On prolonge si l'équipe est déjà sous bonus, on ne l'écrase pas :
+  -- deux joueurs qui achètent coup sur coup doivent cumuler, sinon le
+  -- second aurait payé pour rien.
+  select until into actuel from public.team_boosts where team = moi.team for update;
+  fin := greatest(coalesce(actuel, now()), now()) + interval '2 hours';
 
-  update public.players set gold = gold - prix, boost_until = fin where id = moi.id;
+  update public.players set gold = gold - prix where id = moi.id;
   insert into public.gold_ledger (player_id, delta, raison)
-  values (moi.id, -prix, 'achat : double LP pendant 2 h');
+  values (moi.id, -prix, 'achat : double LP pour l''équipe, 2 h');
 
-  return jsonb_build_object('boost_until', fin, 'prix', prix, 'gold', moi.gold - prix);
+  insert into public.team_boosts (team, until, bought_by, at)
+  values (moi.team, fin, moi.id, now())
+  on conflict (team) do update set until = excluded.until,
+                                   bought_by = excluded.bought_by, at = now();
+
+  return jsonb_build_object('boost_until', fin, 'team', moi.team,
+                            'prix', prix, 'gold', moi.gold - prix);
 end $$;
 
 
@@ -144,4 +175,5 @@ grant  execute on function public.shop_swap_team() to authenticated, service_rol
 
 notify pgrst, 'reload schema';
 
-select name, team, gold, boost_until from public.players order by gold desc;
+select name, team, gold from public.players order by gold desc;
+select * from public.team_boosts;

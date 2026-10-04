@@ -80,6 +80,7 @@ const iso = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+
 const S = {
   ledger: [],       // journal des mouvements d'or
   live: {},         // id joueur -> partie en cours chez Riot
+  boosts: {},       // équipe -> bonus « double LP » en cours
   challenge: null,
   players: [],
   games: [],
@@ -127,7 +128,7 @@ if(!SUPABASE_URL || SUPABASE_URL.includes("xxxxxxxx") || SUPABASE_ANON_KEY.inclu
 =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv] = await Promise.all([
+  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv, tb] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at"),
@@ -137,7 +138,8 @@ async function loadAll(){
     sb.from("sync_state").select("*").eq("id",1).maybeSingle(),
     sb.from("player_items").select("*").order("obtained_at"),
     sb.from("gold_ledger").select("*").order("at", { ascending:false }).limit(60),
-    sb.from("live_games").select("*")
+    sb.from("live_games").select("*"),
+    sb.from("team_boosts").select("*")
   ]);
   const err = ch.error || pl.error || gm.error || sn.error || pr.error || bt.error || st.error || pi.error;
   if(err){
@@ -160,6 +162,7 @@ async function loadAll(){
   // en-direct.sql n'est peut-être pas encore lancé : le site doit
   // simplement ne rien afficher dans ce cas.
   S.live      = lv.error ? {} : Object.fromEntries((lv.data || []).map(r => [r.player_id, r]));
+  S.boosts    = tb.error ? {} : Object.fromEntries((tb.data || []).map(r => [r.team, r]));
   S.ready = true;
   $("#errBox").hidden = true;
   render();
@@ -415,6 +418,18 @@ function renderBalance(states){
   $("#leadTxt").innerHTML = lead;
 
   renderObjectif("a"); renderObjectif("b");
+  renderBoost("a");     renderBoost("b");
+}
+
+/* Le bonus de doublement, annoncé sous le nom de l'équipe. Les deux
+   camps le voient : savoir que l'autre double est une information de
+   jeu, pas un secret. */
+function renderBoost(team){
+  const box = $("#boost" + team.toUpperCase());
+  if(!box) return;
+  const fin = boostEquipe(team);
+  box.hidden = !fin;
+  if(fin) box.innerHTML = '\u26A1 Double LP \u00b7 encore <b>' + resteBoost(fin) + '</b>';
 }
 
 /* La jauge du jour, sous le nom de l'équipe. */
@@ -1905,6 +1920,14 @@ const PRIX = { lp25: 2000, boost: 5000, swap: 25000 };
 const BOOST_HEURES = 2;
 const orFr = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, "\u202f");
 
+/* Le bonus « double LP » d'une équipe, s'il court encore. */
+function boostEquipe(team){
+  const b = S.boosts && S.boosts[team];
+  if(!b || !b.until) return 0;
+  const fin = new Date(b.until).getTime();
+  return fin > Date.now() ? fin : 0;
+}
+
 function openShop(open){
   if(open) openWar(false);                 // un seul volet à la fois
   $("#shopDrawer").classList.toggle("open", open);
@@ -1961,9 +1984,9 @@ function renderShop(){
       + '</div>';
   };
 
-  // Le bonus en cours, s'il y en a un.
-  const finBoost = moi.boost_until ? new Date(moi.boost_until).getTime() : 0;
-  const boostActif = finBoost > Date.now();
+  // Le bonus en cours — celui de TON ÉQUIPE, pas le tien.
+  const finBoost = boostEquipe(moi.team);
+  const boostActif = finBoost > 0;
 
   const mouvements = S.ledger.filter(r => r.player_id === moi.id).slice(0, 12);
 
@@ -1977,7 +2000,7 @@ function renderShop(){
     + article("\u26A1", "Double LP \u00b7 " + BOOST_HEURES + " h",
         boostActif
           ? '<b class="boostvif">actif encore ' + resteBoost(finBoost) + '</b> \u00b7 rachat = +' + BOOST_HEURES + ' h'
-          : "tes gains comptent double pendant " + BOOST_HEURES + " heures",
+          : "les gains de <b>toute ton \u00e9quipe</b> comptent double pendant " + BOOST_HEURES + " heures",
         PRIX.boost, 'data-boost="1"', false)
     + article("\u{1F500}", "Changer d'\u00e9quipe",
         "\u00e9change avec un adversaire <b>tir\u00e9 au sort</b>", PRIX.swap, 'data-swap="1"', false)
@@ -2037,9 +2060,9 @@ function resteBoost(fin){
 
 function acheterBoost(btn){
   acheter("shop_buy_boost", {}, btn,
-    r => "Double LP actif jusqu'à "
+    r => "Double LP actif pour toute ton équipe jusqu'à "
        + new Date(r.boost_until).toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" })
-       + ". Seuls tes gains comptent double.");
+       + ". Seuls les gains comptent double.");
 }
 
 /* Le changement d'équipe est irréversible et coûte très cher : on le

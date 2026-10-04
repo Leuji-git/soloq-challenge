@@ -1226,3 +1226,14 @@ dialog.modal .form{margin-bottom:12px}
 
 /* Le bonus de doublement, quand il court. */
 .boostvif{color:var(--gold);font-weight:700}
+
+/* Le bonus de doublement, sous le nom de l'équipe. */
+.boostbar{
+  margin-top:7px;padding:3px 10px;border-radius:var(--pill);display:inline-block;
+  background:color-mix(in srgb, var(--gold) 13%, transparent);
+  border:1px solid color-mix(in srgb, var(--gold) 36%, transparent);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;font-weight:600;
+  letter-spacing:.05em;color:var(--gold);white-space:nowrap;
+}
+.boostbar b{font-weight:700;font-variant-numeric:tabular-nums}
+.heads > div:last-child .boostbar{margin-left:auto;display:block;width:max-content}

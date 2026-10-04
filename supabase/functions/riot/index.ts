@@ -646,11 +646,12 @@ async function sync(force){
   const bilan = { players: 0, games: 0, adjusts: 0, loot: 0, objets: 0, gold: 0, live: 0, waiting: [], errors: [] };
   let cleRefusee = false, lus = 0;
   try{
-    const [ch, pl, sn, it] = await Promise.all([
+    const [ch, pl, sn, it, tb] = await Promise.all([
       db.from("challenge").select("*").eq("id", 1).single(),
-      db.from("players").select("id,name,tag,team,puuid,claimed_by,boost_until"),
+      db.from("players").select("id,name,tag,team,puuid,claimed_by"),
       db.from("rank_snapshots").select("*"),
-      db.from("items").select("key,rarity,target,active")
+      db.from("items").select("key,rarity,target,active"),
+      db.from("team_boosts").select("team,until")
     ]);
     // Deux usages distincts : le tirage ne propose que les objets actifs,
     // mais un objet désactivé déjà en main doit encore pouvoir agir.
@@ -686,6 +687,9 @@ async function sync(force){
     }
 
     const parCle = Object.fromEntries(tous_objets.map(i => [i.key, i]));
+    // Le bonus « double LP » appartient à l'équipe, pas au joueur.
+    const boosts = Object.fromEntries(((tb && tb.data) || [])
+      .map(b => [b.team, new Date(b.until).getTime()]));
     const players = tous.filter(x => x.puuid && !x.__justLinked);
 
     // Avant les rangs : si la clé est morte, autant le savoir tout de
@@ -785,19 +789,20 @@ async function sync(force){
           if(!error){
             bilan.games++;
 
-            /* Le bonus « double LP » acheté en boutique. Il ne double
-               que les GAINS, et seulement si la partie s'est TERMINÉE
-               dans la fenêtre de deux heures — pas si elle a juste
-               commencé dedans, sinon on lancerait une partie à 1 h 59
-               pour la finir sous bonus.
+            /* Le bonus « double LP » acheté en boutique. Il vaut pour
+               TOUTE L'ÉQUIPE de l'acheteur, pas pour lui seul.
+
+               Il ne double que les GAINS, et seulement si la partie
+               s'est TERMINÉE dans la fenêtre de deux heures — pas si
+               elle a juste commencé dedans, sinon on lancerait une
+               partie à 1 h 59 pour la finir sous bonus.
 
                Le doublement vit dans le total global, jamais dans le
                net : le classement individuel reste ce que Riot a donné. */
             const net = clampLp(split.lps[i]);
+            const finBoost = boosts[p.team] || 0;
             let lpBoost = 0;
-            if(net > 0 && p.boost_until && g.end <= new Date(p.boost_until).getTime()){
-              lpBoost = net;
-            }
+            if(net > 0 && finBoost && g.end <= finBoost) lpBoost = net;
             // L'index unique (player_id, match_id) du journal d'or rend
             // ce crédit idempotent : un relevé qui repasse ne paie pas
             // deux fois.
