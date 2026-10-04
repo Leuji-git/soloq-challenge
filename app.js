@@ -76,6 +76,10 @@ const S = {
 let claimDismissed = false;
 let period = "all";
 let chartMode = "players";
+/* « net » : les LP rendus par Riot, ceux du classement.
+   « total » : les mêmes, objets compris — ce que le joueur a ressenti. */
+let chartLp = "net";
+const lpDe = g => chartLp === "total" ? g.lp + (g.lp_items || 0) : g.lp;
 let hidden = new Set();
 
 const myPlayer = () => S.session ? S.players.find(p => p.claimed_by === S.session.user.id) || null : null;
@@ -503,15 +507,16 @@ function clampView(v){
 function playerPoints(id){
   const gs = gamesOf(id).slice().sort((a,b) => tsOf(a) - tsOf(b));
   let run = 0;
-  return gs.map(g => ({ t: tsOf(g), y: (run += g.lp) }));
+  return gs.map(g => ({ t: tsOf(g), y: (run += lpDe(g)) }));
 }
 // Paliers cumulés d'une équipe.
 function teamPoints(tk){
   const evts = [];
   S.games.forEach(g => {
     const p = S.players.find(x => x.id === g.player_id);
-    if(!p || p.team !== tk || !g.lp) return;
-    evts.push({ t: tsOf(g), d: g.lp });
+    const d = lpDe(g);
+    if(!p || p.team !== tk || !d) return;
+    evts.push({ t: tsOf(g), d });
   });
   evts.sort((a,b) => a.t - b.t);
   let run = 0;
@@ -524,6 +529,51 @@ function valueAt(pts, t){
   for(const p of pts){ if(p.t > t) break; y = p.y; }
   return y;
 }
+/* Courbe arrondie, en cubiques monotones (Fritsch–Carlson).
+   Pourquoi monotone et pas une spline ordinaire : une spline libre
+   dépasse les points qu'elle relie, et on verrait la courbe grimper
+   au-dessus d'un sommet de LP qui n'a jamais existé. Ici, entre deux
+   paliers, elle ne sort jamais de leur intervalle. */
+function coursePath(pts, X, Y, t0, t1){
+  // Les points visibles, encadrés par la valeur aux deux bornes.
+  const dedans = pts.filter(p => p.t > t0 && p.t < t1);
+  const P = [{ t: t0, y: valueAt(pts, t0) }]
+    .concat(dedans)
+    .concat([{ t: t1, y: valueAt(pts, t1) }]);
+  const n = P.length;
+  if(n < 2) return "";
+
+  const xs = P.map(p => X(p.t)), ys = P.map(p => Y(p.y));
+
+  // Pentes des segments, puis tangentes bridées pour rester monotone.
+  const dx = [], dy = [], m = [];
+  for(let i = 0; i < n - 1; i++){
+    dx.push(xs[i+1] - xs[i]);
+    dy.push(ys[i+1] - ys[i]);
+    m.push(dx[i] === 0 ? 0 : dy[i] / dx[i]);
+  }
+  const tg = new Array(n);
+  tg[0] = m[0]; tg[n-1] = m[n-2];
+  for(let i = 1; i < n - 1; i++){
+    tg[i] = (m[i-1] * m[i] <= 0) ? 0 : (m[i-1] + m[i]) / 2;
+  }
+  for(let i = 0; i < n - 1; i++){
+    if(m[i] === 0){ tg[i] = 0; tg[i+1] = 0; continue; }
+    const a = tg[i] / m[i], b = tg[i+1] / m[i];
+    const h = Math.hypot(a, b);
+    if(h > 3){ tg[i] = 3 * a / h * m[i]; tg[i+1] = 3 * b / h * m[i]; }
+  }
+
+  let d = "M " + xs[0].toFixed(1) + " " + ys[0].toFixed(1);
+  for(let i = 0; i < n - 1; i++){
+    const h = dx[i] / 3;
+    d += " C " + (xs[i] + h).toFixed(1) + " " + (ys[i] + tg[i] * h).toFixed(1)
+       + " "   + (xs[i+1] - h).toFixed(1) + " " + (ys[i+1] - tg[i+1] * h).toFixed(1)
+       + " "   + xs[i+1].toFixed(1) + " " + ys[i+1].toFixed(1);
+  }
+  return d;
+}
+
 /* La même marche d'escalier, refermée sur la ligne du zéro : c'est ce
    qui donne l'aire teintée sous la courbe. On ne recalcule rien, on
    prolonge le tracé — les deux ne peuvent donc pas diverger. */
@@ -620,7 +670,8 @@ function renderChart(){
 
   const jour = new Date(t0).toLocaleDateString("fr-FR", { day:"numeric", month:"long" });
   out += '<text x="'+PL+'" y="'+(H-4)+'" text-anchor="start" fill="var(--muted)" font-family="Barlow Semi Condensed" font-size="11" letter-spacing="1.2">'
-       + 'LP NETS CUMULÉS · ' + esc(jour.toUpperCase()) + '</text>';
+       + (chartLp === "total" ? 'LP CUMULÉS, OBJETS COMPRIS · ' : 'LP NETS CUMULÉS · ')
+       + esc(jour.toUpperCase()) + '</text>';
 
   // Un dégradé par série, pour l'aire sous la courbe.
   let defs = '<defs>';
@@ -636,7 +687,7 @@ function renderChart(){
   const avecAire = chartMode !== "players";
 
   vis.forEach((s, i) => {
-    const d = stepPath(s.pts, X, Y, t0, t1);
+    const d = coursePath(s.pts, X, Y, t0, t1);
     if(avecAire){
       out += '<path d="'+aireSous(d, X, Y, t0, t1)+'" fill="url(#grad'+i+')" stroke="none"/>';
     }
@@ -659,8 +710,16 @@ function renderChart(){
         +  '<circle cx="'+xFin.toFixed(1)+'" cy="'+yFin.toFixed(1)+'" r="4.2" fill="'+s.color+'"/>';
   });
 
+  // Le repere de survol vit dans le SVG : il doit donc etre reecrit a
+  // chaque rendu, sinon innerHTML l'emporterait.
+  out += '<line id="chartGuide" stroke="var(--muted)" stroke-width="1"'
+      +  ' stroke-dasharray="3 3" opacity=".7" style="display:none"/>'
+      +  '<g id="chartDots"></g>';
   $("#chart").innerHTML = out;
   $("#zoomLabel").textContent = spanLabel(t1 - t0);
+
+  // De quoi répondre au survol sans tout recalculer à chaque pixel.
+  chartSurvol = { X, Y, t0, t1, vis, PL, PR, W, H, PT, PB };
 
   $("#legend").innerHTML = series.map(s =>
     '<button type="button" data-key="'+esc(s.key)+'" aria-pressed="'+(hidden.has(s.key)?"false":"true")+'"><i style="background:'+s.color+'"></i>'+esc(s.label)+'</button>'
@@ -673,6 +732,56 @@ function renderChart(){
 }
 
 /* ---------- zoom et déplacement ---------- */
+/* État du dernier tracé, relu au survol. */
+let chartSurvol = null;
+
+/* Au survol : un repère vertical, un point par courbe, et les valeurs
+   sous le curseur. On lit les mêmes séries que celles dessinées, donc
+   l'infobulle ne peut pas annoncer autre chose que la courbe. */
+function majSurvol(clientX, clientY){
+  const c = chartSurvol, bulle = $("#chartTip"), guide = $("#chartGuide");
+  if(!c || !bulle) return;
+  const box = $("#chart").getBoundingClientRect();
+  const t = chartTimeAt(clientX);
+
+  const x = c.X(t);
+  guide.setAttribute("x1", x.toFixed(1)); guide.setAttribute("x2", x.toFixed(1));
+  guide.setAttribute("y1", c.PT); guide.setAttribute("y2", c.H - c.PB);
+  guide.style.display = "";
+
+  // Les pastilles sur chaque courbe.
+  let pastilles = "";
+  const lignes = c.vis.map(s => {
+    const y = valueAt(s.pts, t);
+    pastilles += '<circle cx="' + x.toFixed(1) + '" cy="' + c.Y(y).toFixed(1)
+      + '" r="4" fill="' + s.color + '" stroke="var(--surface)" stroke-width="2"/>';
+    return { label: s.label, color: s.color, y };
+  }).sort((a, b) => b.y - a.y);
+  $("#chartDots").innerHTML = pastilles;
+
+  bulle.innerHTML = '<div class="tiptime">'
+      + new Date(t).toLocaleString("fr-FR", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })
+      + '</div>'
+    + lignes.map(l => '<div class="tipline"><i style="background:' + l.color + '"></i>'
+        + '<span>' + esc(l.label) + '</span><b>' + signed(l.y) + '</b></div>').join("");
+
+  // L'infobulle suit la souris, et bascule à gauche près du bord droit.
+  const dx = clientX - box.left, dy = clientY - box.top;
+  const aGauche = dx > box.width - 190;
+  bulle.style.left = (aGauche ? dx - 14 : dx + 14) + "px";
+  bulle.style.top  = Math.max(4, dy - 12) + "px";
+  bulle.style.transform = aGauche ? "translateX(-100%)" : "";
+  bulle.hidden = false;
+}
+
+function cacherSurvol(){
+  const bulle = $("#chartTip"), guide = $("#chartGuide");
+  if(bulle) bulle.hidden = true;
+  if(guide) guide.style.display = "none";
+  const dots = $("#chartDots");
+  if(dots) dots.innerHTML = "";
+}
+
 function chartTimeAt(clientX){
   const box = $("#chart").getBoundingClientRect();
   const PL = 58, PR = 20, W = 920;
@@ -682,6 +791,15 @@ function chartTimeAt(clientX){
 }
 function initChartZoom(){
   const svg = $("#chart");
+
+  svg.addEventListener("mousemove", e => majSurvol(e.clientX, e.clientY));
+  svg.addEventListener("mouseleave", cacherSurvol);
+  // Au doigt, on suit aussi : c'est le seul moyen de lire une valeur
+  // précise sur téléphone.
+  svg.addEventListener("touchmove", e => {
+    if(e.touches[0]) majSurvol(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  svg.addEventListener("touchend", cacherSurvol);
 
   svg.addEventListener("wheel", e => {
     if(!view) return;
@@ -924,7 +1042,8 @@ function renderItems(){
     const arme  = (armes[it.key]  || [])[0];
     return '<article class="item' + (connu ? "" : " locked") + ' ' + esc(it.rarity) + '">'
       + '<div class="itemhead">'
-        + '<span class="itemicon">' + (connu ? esc(it.icon) : "🔒") + '</span>'
+        + '<span class="itemicon" title="' + esc(infobulleObjet(it, connu, null)) + '">'
+          + (connu ? esc(it.icon) : "🔒") + '</span>'
         + '<div class="itemid">'
           + '<div class="itemname">' + esc(connu ? it.name : "Objet inconnu") + '</div>'
           + '<div class="itemtags">'
@@ -1051,22 +1170,32 @@ async function deverrouiller(rowId){
 function renderEntry(){
   const block = $("#entryBlock");
   const mine = myPlayer();
-  if(!S.session || (!mine && !isAdmin())){ block.hidden = true; return; }
+  // Visible pour tout le monde, connecté ou non : le suivi d'un joueur
+  // est public, et c'est précisément ce qu'on vient regarder.
+  if(!S.players.length){ block.hidden = true; return; }
   block.hidden = false;
 
-  $("#adminPickWrap").hidden = !isAdmin();
-  if(isAdmin()){
-    const cur = $("#fPlayer").value;
-    $("#fPlayer").innerHTML = S.players.map(p => '<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join("");
-    $("#fPlayer").value = cur && S.players.some(p => p.id === cur) ? cur : (mine ? mine.id : (S.players[0] && S.players[0].id));
-  }
+  // Le menu est rempli pour tous, pas seulement pour l'admin.
+  const sel = $("#fPlayer");
+  const cur = sel.value;
+  sel.innerHTML = S.players.map(p =>
+    '<option value="' + esc(p.id) + '">' + esc(p.name)
+    + (mine && p.id === mine.id ? " (toi)" : "") + '</option>').join("");
+  sel.value = cur && S.players.some(p => p.id === cur)
+    ? cur
+    : (mine ? mine.id : (S.players[0] && S.players[0].id));
 
-  $("#autoHint").textContent = started()
-    ? "Tes parties classées Solo/Duo sont relevées automatiquement chez Riot, dans les minutes qui suivent leur fin. Les duos avec un joueur du challenge sont reconnus tout seuls."
-    : "Le relevé automatique commencera le jour du lancement. Les parties jouées avant ne comptent pas.";
+  const vu = targetPlayer();
+  const cestMoi = mine && vu && vu.id === mine.id;
+
+  $("#autoHint").textContent = !started()
+    ? "Le relevé automatique commencera le jour du lancement. Les parties jouées avant ne comptent pas."
+    : cestMoi
+      ? "Tes parties classées Solo/Duo sont relevées automatiquement chez Riot, dans les minutes qui suivent leur fin. Les duos avec un joueur du challenge sont reconnus tout seuls."
+      : "Les parties classées Solo/Duo de chaque joueur sont relevées automatiquement chez Riot, dans les minutes qui suivent leur fin.";
 
   renderSyncStatus();
-  renderFeed(targetPlayer());
+  renderFeed(vu);
 }
 
 /* Photo Discord cerclée de la couleur de l'équipe.
@@ -1105,6 +1234,16 @@ function celluleLp(x){
     + '</span>';
 }
 
+/* L'infobulle d'un objet : son nom, son effet, et ce qu'il a donné ici.
+   L'effet n'apparaît que si le visiteur connaît l'objet — sinon on
+   dévoilerait par l'infobulle ce que la grille garde secret. */
+function infobulleObjet(it, connu, note){
+  if(!connu || !it) return "Objet inconnu" + (note ? " — " + note : "");
+  return it.name
+    + (it.effect ? "\n" + it.effect : "")
+    + (note ? "\n\n→ " + note : "");
+}
+
 /* Les objets qui ont pesé sur cette partie, avec ce qu'ils ont fait. */
 function chipsObjets(x, decouverts){
   const rows = S.inventory.filter(r => r.applied_match && r.applied_match === x.match_id);
@@ -1113,7 +1252,7 @@ function chipsObjets(x, decouverts){
     const it = S.items.find(i => i.key === r.item_key);
     const vu = decouverts.has(r.item_key);
     const lp = r.lp_effect || 0;
-    const titre = (vu && it ? it.name : "Objet inconnu") + (r.note ? " — " + r.note : "");
+    const titre = infobulleObjet(it, vu && !!it, r.note);
     return '<span class="objchip ' + (lp > 0 ? "up" : lp < 0 ? "down" : "flat") + '" title="' + esc(titre) + '">'
       + '<span class="objico">' + (vu && it ? esc(it.icon) : "🔒") + '</span>'
       + signed(lp) + '</span>';
@@ -1130,8 +1269,6 @@ function chipsObjets(x, decouverts){
 function renderWarlog(){
   const box = $("#warLog");
   if(!box) return;
-  const bloc = $("#warBlock");
-
   const lignes = S.inventory
     .filter(r => r.locked_at || r.applied_match)
     .sort((x, y) => new Date(y.locked_at || y.obtained_at) - new Date(x.locked_at || x.obtained_at));
@@ -1141,14 +1278,24 @@ function renderWarlog(){
     ? S.items.map(i => i.key)
     : (moi ? S.inventory.filter(r => r.player_id === moi.id).map(r => r.item_key) : []));
 
-  $("#warCount").textContent = lignes.length
-    ? lignes.length + (lignes.length > 1 ? " objets lancés" : " objet lancé")
-    : "rien pour l'instant";
+  // Sur le bouton de la barre : juste le nombre, et rien du tout à zéro.
+  const pastille = $("#warCount");
+  if(pastille){
+    pastille.textContent = lignes.length;
+    pastille.hidden = !lignes.length;
+  }
+  const intro = $("#warHint");
+  if(intro){
+    intro.textContent = lignes.length
+      ? "Qui a lancé quoi, sur qui, et ce que ça a donné."
+      : "Rien n'a encore été lancé.";
+  }
 
   if(!lignes.length){
     box.innerHTML = '<div class="empty">Aucun objet n\'a encore été lancé. Ça ne saurait tarder.</div>';
     return;
   }
+
 
   box.innerHTML = lignes.slice(0, 60).map(r => {
     const par = S.players.find(p => p.id === r.player_id);
@@ -1168,7 +1315,8 @@ function renderWarlog(){
       + avatarRing(par, { sm:true })
       + '<div class="wartext">'
         + '<div class="warline"><b>' + esc(par ? par.name : "?") + '</b> ' + verbe
-          + ' <span class="waritem">' + nom + '</span>' + cible + '</div>'
+          + ' <span class="waritem" title="' + esc(infobulleObjet(it, connu, resolu ? r.note : null))
+          + '">' + nom + '</span>' + cible + '</div>'
         + '<div class="warmeta">'
           + (resolu
               ? esc(r.note || "effet appliqué") + " · " + quand(r.used_at || r.locked_at)
@@ -1181,7 +1329,6 @@ function renderWarlog(){
       + '</div>';
   }).join("");
 
-  if(bloc) bloc.hidden = false;
 }
 
 // « il y a 12 min », « il y a 3 h », « le 4 oct. »
@@ -1208,11 +1355,16 @@ function renderFeed(t){
 
   const g = gamesOf(t.id).slice().reverse();
   const nb = g.filter(x => x.kind !== "adjust").length;
+  const mine = myPlayer();
   head.innerHTML = avatarRing(t, { lg:true })
+    + '<span class="feedwho">' + esc(t.name) + (mine && t.id === mine.id ? "" : "") + '</span>'
     + '<span class="feedcount">' + (nb ? nb + (nb > 1 ? " parties relevées" : " partie relevée") : "aucune partie") + '</span>';
 
   if(!g.length){
-    box.innerHTML = '<div class="empty">Rien pour l\'instant. Tes parties classées apparaîtront ici quelques minutes après leur fin.</div>';
+    const amoi = myPlayer() && myPlayer().id === t.id;
+    box.innerHTML = '<div class="empty">Rien pour l\'instant. '
+      + (amoi ? "Tes parties classées apparaîtront ici quelques minutes après leur fin."
+              : esc(t.name) + " n\'a pas encore de partie relevée.") + '</div>';
     return;
   }
 
@@ -1370,6 +1522,14 @@ function renderRules(){
   $("#rulesTabs").querySelectorAll("button").forEach(b =>
     b.addEventListener("click", () => { ruleIndex = +b.dataset.i; renderRules(); }));
 }
+/* Le journal s'ouvre et se ferme comme le règlement, mais par la droite. */
+function openWar(open){
+  $("#warDrawer").classList.toggle("open", open);
+  $("#warDrawer").setAttribute("aria-hidden", String(!open));
+  $("#warScrim").hidden = !open;
+  if(open) renderWarlog();
+}
+
 function openRules(open){
   $("#rulesDrawer").classList.toggle("open", open);
   $("#rulesDrawer").setAttribute("aria-hidden", String(!open));
@@ -1511,10 +1671,14 @@ function initUI(){
   $("#tgClose").addEventListener("click", () => { objetAPoser = null; $("#targetDialog").close(); });
   $("#btnRefresh").addEventListener("click", refreshNow);
   setInterval(majBoutonRefresh, 1000);
+  $("#btnWar").addEventListener("click", () => openWar(true));
+  $("#warClose").addEventListener("click", () => openWar(false));
+  $("#warScrim").addEventListener("click", () => openWar(false));
   $("#btnRules").addEventListener("click", () => openRules(true));
   $("#rulesClose").addEventListener("click", () => openRules(false));
   $("#rulesScrim").addEventListener("click", () => openRules(false));
   document.addEventListener("keydown", e => {
+    if(e.key === "Escape" && $("#warDrawer").classList.contains("open")) openWar(false);
     if(e.key === "Escape" && $("#rulesDrawer").classList.contains("open")) openRules(false);
   });
 
@@ -1560,6 +1724,9 @@ function initUI(){
   segment("#chartPlayers", "#chartTeams",
     () => { chartMode = "players"; hidden = new Set(); renderChart(); },
     () => { chartMode = "teams";   hidden = new Set(); renderChart(); });
+  segment("#lpNet", "#lpTotal",
+    () => { chartLp = "net";   renderChart(); },
+    () => { chartLp = "total"; renderChart(); });
 }
 
 async function boot(){

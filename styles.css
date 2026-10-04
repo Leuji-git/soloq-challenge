@@ -292,7 +292,27 @@ tr.me td{background:color-mix(in srgb, var(--accent) 8%, var(--surface-2))}
 .wr{font-size:11.5px;color:var(--muted);font-family:"Barlow Semi Condensed",sans-serif}
 
 /* ---------- graphique ---------- */
-.chartbox{padding:8px 12px 4px}
+.chartbox{padding:8px 12px 4px;position:relative}
+
+/* Les valeurs sous le curseur. Elle ne doit jamais intercepter la
+   souris, sinon elle se déroberait sous son propre survol. */
+.charttip{
+  position:absolute;z-index:5;pointer-events:none;
+  min-width:150px;max-width:230px;padding:9px 11px;
+  border-radius:var(--r-md);border:1px solid var(--line);
+  background:color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter:blur(8px);box-shadow:0 10px 30px rgba(0,0,0,.45);
+}
+.tiptime{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;
+  letter-spacing:.07em;text-transform:uppercase;color:var(--muted);
+  margin-bottom:6px;white-space:nowrap;
+}
+.tipline{display:flex;align-items:center;gap:7px;font-size:12.5px;line-height:1.7}
+.tipline i{width:8px;height:8px;border-radius:2px;flex:none}
+.tipline span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.tipline b{font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)}
+.chartbox svg{cursor:crosshair}
 .chartbox svg{display:block;width:100%;height:auto}
 .legend{display:flex;flex-wrap:wrap;gap:6px;padding:8px 16px 18px}
 .legend button{
@@ -723,6 +743,27 @@ dialog.modal .form{margin-bottom:12px}
   transition:transform .28s cubic-bezier(.4,0,.2,1);
 }
 .drawer.open{transform:translateX(0)}
+
+/* Le journal s'ouvre à droite, comme un salon de discussion : on le
+   garde ouvert à côté du classement pendant qu'on joue. */
+.drawer.right{
+  left:auto;right:0;
+  border-right:0;border-left:1px solid var(--line);
+  box-shadow:-24px 0 60px rgba(0,0,0,.55);
+  transform:translateX(102%);
+}
+.drawer.right.open{transform:translateX(0)}
+.warintro{padding:14px 22px 4px;margin:0}
+.drawerbody.warlog{padding:8px 12px 22px;max-height:none}
+
+/* Le compteur sur le bouton de la barre du haut. */
+.warbadge{
+  min-width:18px;padding:1px 5px;border-radius:var(--pill);
+  background:var(--accent);color:#0B0E14;
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;font-weight:700;
+  line-height:16px;text-align:center;
+}
+@media (max-width:640px){ .iconbtn#btnWar > span:not(.warbadge){display:none} }
 .drawerhead{
   display:flex;align-items:center;justify-content:space-between;gap:12px;
   padding:20px 22px 14px;border-bottom:1px solid var(--line);

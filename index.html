@@ -28,6 +28,13 @@
       </svg>
       <span id="refreshLbl">Actualiser</span>
     </button>
+    <button type="button" class="btn ghost sm iconbtn" id="btnWar" title="Journal de guerre">
+      <svg class="ico" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.9-.9L3 20.5l1.6-4.6A8.4 8.4 0 0 1 3.6 11 8.4 8.4 0 0 1 12 2.6a8.4 8.4 0 0 1 9 8.9z"/>
+      </svg>
+      <span>Journal</span><span class="warbadge" id="warCount" hidden></span>
+    </button>
     <button type="button" class="btn ghost sm" id="btnRules">Règlement</button>
     <button type="button" class="btn discord" id="btnLogin" hidden>
       <svg width="16" height="12" viewBox="0 0 71 55" aria-hidden="true"><path fill="currentColor" d="M60.1 4.9A58.5 58.5 0 0 0 45.6.4a41 41 0 0 0-1.9 3.8 54.1 54.1 0 0 0-16.2 0A40 40 0 0 0 25.5.4 58.4 58.4 0 0 0 11 4.9C1.8 18.6-.7 32 .5 45.2a58.9 58.9 0 0 0 17.8 9 43.3 43.3 0 0 0 3.8-6.2 38.2 38.2 0 0 1-6-2.9l1.5-1.2a42 42 0 0 0 36 0l1.5 1.2a38.2 38.2 0 0 1-6 2.9 42.9 42.9 0 0 0 3.8 6.2 58.7 58.7 0 0 0 17.8-9c1.4-15.3-2.4-28.6-10.6-40.3ZM23.7 37.1c-3.5 0-6.4-3.2-6.4-7.2s2.8-7.2 6.4-7.2c3.6 0 6.5 3.3 6.4 7.2 0 4-2.8 7.2-6.4 7.2Zm23.6 0c-3.5 0-6.4-3.2-6.4-7.2s2.8-7.2 6.4-7.2c3.6 0 6.5 3.3 6.4 7.2 0 4-2.8 7.2-6.4 7.2Z"/></svg>
@@ -84,6 +91,16 @@
   </div>
 </dialog>
 
+<div class="scrim" id="warScrim" hidden></div>
+<aside class="drawer right" id="warDrawer" aria-hidden="true" aria-label="Journal de guerre">
+  <div class="drawerhead">
+    <h2>Journal de guerre</h2>
+    <button type="button" class="x" id="warClose" aria-label="Fermer le journal">✕</button>
+  </div>
+  <p class="hint warintro" id="warHint">Qui a lancé quoi, sur qui, et ce que ça a donné.</p>
+  <div class="drawerbody warlog" id="warLog"></div>
+</aside>
+
 <div class="scrim" id="rulesScrim" hidden></div>
 <aside class="drawer" id="rulesDrawer" aria-hidden="true" aria-label="Règlement">
   <div class="drawerhead">
@@ -113,17 +130,6 @@
     <span>⚠</span><div id="errTxt"></div>
   </div>
 
-  <section class="block" id="warBlock">
-    <header>
-      <h2>Journal de guerre</h2>
-      <span class="lbl" id="warCount">—</span>
-    </header>
-    <div class="body">
-      <p class="hint" id="warHint">Qui a lancé quoi, sur qui, et ce que ça a donné.</p>
-      <div class="warlog" id="warLog"></div>
-    </div>
-  </section>
-
   <div class="balance">
     <div class="heads">
       <div>
@@ -151,7 +157,7 @@
 
   <section class="block" id="entryBlock" hidden>
     <header>
-      <h2>Mon suivi</h2>
+      <h2>Suivi</h2>
       <span class="syncpill wait" id="syncPill">—</span>
     </header>
     <div class="body">
@@ -162,8 +168,8 @@
       </div>
 
       <div class="sect">
-        <div class="field" id="adminPickWrap" hidden style="max-width:280px">
-          <label for="fPlayer">Voir l'historique de</label>
+        <div class="field" id="adminPickWrap" style="max-width:280px">
+          <label for="fPlayer">Suivi de</label>
           <select id="fPlayer"></select>
         </div>
         <h4 id="feedTitle">Mes parties</h4>
@@ -218,13 +224,21 @@
         <button type="button" id="chartPlayers" aria-pressed="true">Joueurs</button>
         <button type="button" id="chartTeams" aria-pressed="false">Équipes</button>
       </div>
+      <div class="seg" role="group" aria-label="Quels LP tracer">
+        <button type="button" id="lpNet" aria-pressed="true" title="Les LP rendus par Riot : ceux du classement">LP nets</button>
+        <button type="button" id="lpTotal" aria-pressed="false" title="Les mêmes, objets compris : ce que le joueur a ressenti">LP globaux</button>
+      </div>
     </header>
     <div class="charttools">
       <span class="lbl">Échelle <b id="zoomLabel">—</b></span>
       <span class="charthint">Molette pour zoomer · glisser pour se déplacer · double-clic pour tout revoir</span>
       <button type="button" class="btn ghost sm" id="zoomReset">Tout voir</button>
     </div>
-    <div class="chartbox"><svg id="chart" viewBox="0 0 920 360" role="img" aria-label="LP nets cumulés dans le temps"></svg></div>
+    <div class="chartbox">
+      <svg id="chart" viewBox="0 0 920 360" role="img" aria-label="LP cumulés dans le temps">
+      </svg>
+      <div class="charttip" id="chartTip" hidden></div>
+    </div>
     <div class="legend" id="legend"></div>
   </section>
 
