@@ -122,10 +122,23 @@ a{color:inherit}
 .roster.a>header{box-shadow:inset 0 3px 0 var(--team-a)}
 .roster.b>header{box-shadow:inset 0 3px 0 var(--team-b)}
 .roster ul{list-style:none;margin:0;padding:0 10px 10px}
-.roster li{display:grid;grid-template-columns:auto auto 1fr auto;gap:11px;align-items:center;padding:10px 12px;border-radius:var(--r-md)}
+.roster li{display:grid;grid-template-columns:auto auto 1fr auto auto;gap:11px;align-items:center;padding:10px 12px;border-radius:var(--r-md)}
 .roster li+li{margin-top:2px}
 .roster li.me{background:color-mix(in srgb, var(--accent) 9%, transparent)}
-.pright{text-align:right;display:flex;flex-direction:column;gap:2px}
+.pright{text-align:right;display:flex;flex-direction:column;gap:2px;align-items:flex-end}
+/* Première ligne : LP globaux, puis l'or. */
+.pmain{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.pmain .u{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;font-weight:600;
+  color:var(--muted);letter-spacing:.04em;
+}
+.pmain .sep{color:var(--line);font-size:12px}
+.purseline{display:inline-flex;align-items:center;gap:4px}
+.purseline b{
+  font-family:"Outfit",system-ui,sans-serif;font-size:14px;font-weight:600;
+  color:var(--gold);font-variant-numeric:tabular-nums;letter-spacing:-.01em;
+}
+.coin{width:16px;height:16px;flex:none;display:block}
 .plp{font-family:"Barlow Semi Condensed",sans-serif;font-weight:600;font-size:12.5px;color:var(--muted)}
 /* Le LP net sous le global : présent, mais clairement secondaire. */
 .plp b{font-weight:600;color:var(--ink);opacity:.72;font-variant-numeric:tabular-nums}
@@ -875,6 +888,20 @@ dialog.modal .form{margin-bottom:12px}
 
 /* Dans l'en-tête du suivi, la pastille vit sur la même ligne. */
 #feedTitle .livenow{margin-top:0;margin-left:10px}
+/* Dans une ligne de joueur, elle occupe la dernière colonne — et s'y
+   fait toute petite. Les deux cartes d'équipe sont côte à côte : avec
+   le libellé en entier, le pseudo s'écrasait contre les chiffres.
+   Le point qui bat et le chrono suffisent à se faire comprendre, et
+   l'infobulle dit le reste. */
+.roster li .livenow{margin-top:0;padding:2px 8px 2px 7px;gap:5px}
+.roster li .livenow .lbl{display:none}
+
+@media (max-width:620px){
+  /* Trop serré même comme ça : le direct passe sous le reste. */
+  .roster li{grid-template-columns:auto auto 1fr auto}
+  .roster li .livenow{grid-column:3 / -1;justify-self:start;margin-top:4px}
+  .roster li .livenow .lbl{display:inline}
+}
 
 /* ---------- boutique ----------
    La bourse en haut du volet : c'est le chiffre qu'on vient voir. */

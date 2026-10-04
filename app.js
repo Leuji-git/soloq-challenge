@@ -24,6 +24,23 @@ const ROMAN = { 1:"I", 2:"II", 3:"III", 4:"IV" };
 const APEX = 7;
 const TEAM_COLOR = { a:"var(--team-a)", b:"var(--team-b)" };
 
+/* Pile de pièces, dessinée ici plutôt qu'importée : une image externe
+   pour seize pixels coûterait une requête et un clignotement. Les
+   ellipses du bas forment la pile, le disque du haut la pièce de face,
+   avec son reflet. */
+const PIECE_OR =
+  '<svg class="coin" viewBox="0 0 18 18" aria-hidden="true" focusable="false">'
+  + '<ellipse cx="9" cy="14.1" rx="6.4" ry="2.5" fill="#6E5416"/>'
+  + '<ellipse cx="9" cy="12.6" rx="6.4" ry="2.5" fill="#C9A233"/>'
+  + '<ellipse cx="9" cy="12.0" rx="6.4" ry="2.5" fill="#8A6B1E"/>'
+  + '<ellipse cx="9" cy="10.5" rx="6.4" ry="2.5" fill="#C9A233"/>'
+  + '<ellipse cx="9" cy="9.9"  rx="6.4" ry="2.5" fill="#8A6B1E"/>'
+  + '<circle cx="9" cy="6.4" r="5.3" fill="#E3C055" stroke="#8A6B1E" stroke-width="1.1"/>'
+  + '<circle cx="9" cy="6.4" r="3.1" fill="none" stroke="#F6E296" stroke-width="1"/>'
+  + '<path d="M6.6 4.4a3.6 3.6 0 0 0-1.3 2.1" stroke="#FFF7D6" stroke-width="1.2"'
+  + ' fill="none" stroke-linecap="round"/>'
+  + '</svg>';
+
 const toScore = (t,d,lp) => {
   const i = TIDX[t];
   if(i === undefined) return 0;
@@ -443,14 +460,20 @@ function renderRosters(states){
         + played+' parties · '+signed(total)+' LP globaux</span></header>'
       + '<ul>' + (ms.length ? ms.map(s => {
           const r = estRank(s.player);
+          const or = s.player.gold || 0;
           return '<li'+(mine && mine.id === s.player.id ? ' class="me"' : '')+'>'
             + avatarRing(s.player, { sm:true }) + crest(r)
             + '<div style="min-width:0">' + nameLink(s.player)
-            + '<div class="psub">'+esc(rankLabel(r))+(s.player.claimed_by ? "" : " · profil libre")+'</div>'
-            + pastilleLive(s.player.id) + '</div>'
-            + '<div class="pright">' + deltaHtml(s.global)
+            + '<div class="psub">'+esc(rankLabel(r))+(s.player.claimed_by ? "" : " · profil libre")+'</div></div>'
+            + '<div class="pright">'
+              + '<span class="pmain">' + deltaHtml(s.global) + '<span class="u">LP</span>'
+                + '<span class="sep">·</span>'
+                + '<span class="purseline" title="Or gagné en jouant">' + PIECE_OR
+                + '<b>' + orFr(or) + '</b></span></span>'
               + '<span class="plp"><b title="LP nets : ceux du classement individuel">'
-              + signed(s.net) + ' net</b> · ' + s.w + 'V ' + s.l + 'D</span></div></li>';
+              + signed(s.net) + ' net</b> LP · ' + s.w + 'V ' + s.l + 'D</span>'
+            + '</div>'
+            + pastilleLive(s.player.id) + '</li>';
         }).join("") : '<li><span class="empty">Aucun joueur dans cette équipe.</span></li>')
       + '</ul></div>';
   }).join("");
@@ -1402,7 +1425,7 @@ function pastilleLive(id){
   if(ms === null) return "";
   return '<span class="livenow" data-live="' + esc(id) + '"'
     + ' title="En partie classée en ce moment">'
-    + '<i></i>En direct<b>' + chrono(ms) + '</b></span>';
+    + '<i></i><span class="lbl">En direct</span><b>' + chrono(ms) + '</b></span>';
 }
 
 // Les compteurs avancent chaque seconde sans tout redessiner.
