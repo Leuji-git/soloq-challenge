@@ -377,7 +377,11 @@ tr.me td{background:color-mix(in srgb, var(--accent) 8%, var(--surface-2))}
 
 /* En mode rang : l'écusson du palier, puis la division et les LP. */
 .tipline.rank{align-items:center;gap:8px;line-height:1.25}
-.tipline.rank img{width:20px;height:20px;flex:none;object-fit:contain}
+.tipline.rank img{width:22px;height:22px;flex:none;object-fit:contain}
+/* Ceinture : quoi qu'il arrive, aucune image de cette infobulle ne
+   peut déborder. Une feuille en cache ne doit pas pouvoir afficher un
+   écusson en taille réelle par-dessus tout le graphique. */
+.charttip img{max-width:22px;max-height:22px}
 .tipline.rank b{display:flex;flex-direction:column;align-items:flex-end;font-size:12px}
 .tipline.rank b em{font-style:normal;font-weight:500;font-size:11px;color:var(--muted)}
 

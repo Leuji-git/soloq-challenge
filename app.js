@@ -870,31 +870,50 @@ function majSurvol(clientX, clientY){
   guide.setAttribute("y1", c.PT); guide.setAttribute("y2", c.H - c.PB);
   guide.style.display = "";
 
-  // Les pastilles sur chaque courbe.
-  let pastilles = "";
+  // L'ordonnée du curseur dans le repère du SVG, pour savoir quelle
+  // courbe on vise.
+  const yCurseur = ((clientY - box.top) / box.height) * c.H;
+
   const lignes = c.vis.map((s, i) => {
     const y = valueAt(s.pts, t);
     // La pastille se pose sur le trait ; si le chemin n'est pas encore
     // mesurable, on retombe sur l'escalier plutôt que de ne rien montrer.
     const yTrace = ySurTrace($("#serie" + i), x);
     const cy = yTrace === null ? c.Y(y) : yTrace;
-    pastilles += '<circle cx="' + x.toFixed(1) + '" cy="' + cy.toFixed(1)
-      + '" r="4" fill="' + s.color + '" stroke="var(--surface)" stroke-width="2"/>';
-    return { label: s.label, color: s.color, y };
-  }).sort((a, b) => b.y - a.y);
-  $("#chartDots").innerHTML = pastilles;
+    return { label: s.label, color: s.color, y, cy, ecart: Math.abs(cy - yCurseur) };
+  });
+
+  // La courbe la plus proche du curseur. Avec dix joueurs, lister tout
+  // le monde donne une infobulle de trois cents pixels qu'on ne lit
+  // pas : on répond à la question posée, celle du trait qu'on vise.
+  const plusProche = lignes.reduce((m, l) => (!m || l.ecart < m.ecart) ? l : m, null);
+  const toutMontrer = lignes.length <= 3;
+  const retenues = toutMontrer ? lignes.slice().sort((a, b) => b.y - a.y) : [plusProche];
+
+  // La pastille visée est plus grosse, les autres s'effacent.
+  $("#chartDots").innerHTML = lignes.map(l => {
+    const vise = l === plusProche;
+    return '<circle cx="' + x.toFixed(1) + '" cy="' + l.cy.toFixed(1)
+      + '" r="' + (vise ? 5 : 3) + '" fill="' + l.color + '"'
+      + ' stroke="var(--surface)" stroke-width="2"'
+      + (vise || toutMontrer ? '' : ' opacity=".45"') + '/>';
+  }).join("");
 
   bulle.innerHTML = '<div class="tiptime">'
       + new Date(t).toLocaleString("fr-FR", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })
       + '</div>'
-    + lignes.map(l => {
+    + retenues.map(l => {
         if(!c.rang){
           return '<div class="tipline"><i style="background:' + l.color + '"></i>'
             + '<span>' + esc(l.label) + '</span><b>' + signed(l.y) + '</b></div>';
         }
-        // En rang : l'écusson du palier, puis « Or III · 44 LP ».
+        // En rang : l'écusson du palier, puis « Or III » et les LP.
+        // Les dimensions sont aussi posées sur la balise : sans elles,
+        // une feuille de style en cache afficherait l'image en taille
+        // réelle, c'est-à-dire énorme.
         const r = fromScore(l.y);
-        return '<div class="tipline rank"><img src="' + esc(emblem(r.t)) + '" alt="" loading="lazy">'
+        return '<div class="tipline rank"><img src="' + esc(emblem(r.t))
+          + '" alt="" width="22" height="22" decoding="async">'
           + '<span>' + esc(l.label) + '</span>'
           + '<b>' + esc(shortRank(r)) + '<em>' + r.lp + ' LP</em></b></div>';
       }).join("");
