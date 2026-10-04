@@ -220,13 +220,16 @@ function resoudreObjets(armes, ctx){
   };
 }
 
-/* Qui a droit à un butin ?
-   Une victoire en solo ou en duo avec un allié. Jamais quand un
-   adversaire était dans l'équipe : deux joueurs d'équipes opposées qui
-   se donnent rendez-vous en file pourraient sinon se fabriquer des
-   objets à volonté. */
+/* Qui a droit à un butin ? Toute victoire, quelle que soit la
+   compagnie : solo, duo allié, duo adverse.
+
+   La restriction sur le duo adverse a été levée à la demande des
+   joueurs. Elle fermait une entente possible — deux joueurs d'équipes
+   opposées qui se donnent rendez-vous en file pour s'alimenter en
+   objets — mais elle rendait surtout le duo adverse ingrat. Si l'abus
+   apparaît, c'est cette fonction qu'il faut resserrer, et elle seule. */
 function peutLooter(duo, win){
-  return !!win && duo !== "enemy";
+  return !!win;
 }
 
 // Tirage pondéré par la rareté. `alea` entre 0 et 1 : fourni par les tests,

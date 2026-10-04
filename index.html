@@ -113,16 +113,29 @@
     <span>⚠</span><div id="errTxt"></div>
   </div>
 
+  <section class="block" id="warBlock">
+    <header>
+      <h2>Journal de guerre</h2>
+      <span class="lbl" id="warCount">—</span>
+    </header>
+    <div class="body">
+      <p class="hint" id="warHint">Qui a lancé quoi, sur qui, et ce que ça a donné.</p>
+      <div class="warlog" id="warLog"></div>
+    </div>
+  </section>
+
   <div class="balance">
     <div class="heads">
       <div>
         <div class="tname a" id="tnA">Les Médiocres</div>
         <div class="tscore a" id="scoreA">—</div>
+        <div class="objgoal" id="objA"></div>
       </div>
       <div class="lbl" style="align-self:center;text-align:center">Balance des LP</div>
       <div style="text-align:right">
         <div class="tname b" id="tnB">Les Pitoyables</div>
         <div class="tscore b" id="scoreB">—</div>
+        <div class="objgoal" id="objB"></div>
       </div>
     </div>
     <div class="beam">
@@ -150,7 +163,7 @@
 
       <div class="sect">
         <div class="field" id="adminPickWrap" hidden style="max-width:280px">
-          <label for="fPlayer">Voir l'historique de (admin)</label>
+          <label for="fPlayer">Voir l'historique de</label>
           <select id="fPlayer"></select>
         </div>
         <h4 id="feedTitle">Mes parties</h4>

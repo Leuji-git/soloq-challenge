@@ -186,6 +186,44 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
    ligne tremble à chaque tic. */
 .clocksmall{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
 
+/* ---------- journal de guerre ----------
+   Une ligne par objet lancé. Les coups déjà portés sont nets ; ceux qui
+   attendent leur partie restent en retrait, avec une barre d'attente. */
+.warlog{display:flex;flex-direction:column;gap:2px;max-height:460px;overflow:auto}
+.warrow{
+  display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center;
+  padding:9px 11px;border-radius:var(--r-md);
+}
+.warrow:hover{background:var(--surface-2)}
+.warrow.pending{opacity:.72;border-left:2px solid color-mix(in srgb, var(--accent) 55%, transparent)}
+.wartext{min-width:0}
+.warline{font-size:13.5px;color:var(--ink);line-height:1.35}
+.warline b{font-weight:600}
+.waritem{font-weight:600;color:var(--accent)}
+.warmeta{
+  margin-top:2px;font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;
+  letter-spacing:.02em;color:var(--muted);
+}
+.warwait{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--accent);white-space:nowrap;
+}
+
+/* Objectif journalier, sous le nom de chaque équipe. */
+.objgoal{margin-top:9px;max-width:220px}
+.heads > div:last-child .objgoal{margin-left:auto}
+.objbar{height:4px;border-radius:var(--pill);background:var(--surface-2);overflow:hidden}
+.objbar i{display:block;height:100%;border-radius:var(--pill);transition:width .5s ease}
+.objbar i.a{background:var(--team-a)}
+.objbar i.b{background:var(--team-b)}
+.objbar i.done{background:var(--up)}
+.objtxt{
+  margin-top:5px;font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;
+  letter-spacing:.03em;color:var(--muted);font-variant-numeric:tabular-nums;
+}
+.objtxt.done{color:var(--up);font-weight:600}
+.objsum{display:block;font-size:11px;opacity:.78;margin-top:1px}
+
 .lockedin{
   font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;font-weight:700;
   letter-spacing:.09em;text-transform:uppercase;color:var(--muted);

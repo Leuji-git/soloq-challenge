@@ -194,6 +194,41 @@ const started = () => new Date() >= startDate();
 /* ------------------------------------------------------------------
    Score d'équipe : la somme des LP nets de ses membres.
 ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   L'objectif journalier
+   Chaque jour, une équipe qui engrange OBJECTIF_JOUR LP décroche
+   PRIME_OBJECTIF LP de plus. Seuls les gains comptent : une défaite ne
+   recule pas le compteur du jour. C'est voulu — l'objectif récompense
+   ce qu'on va chercher, pas ce qu'on évite de perdre. Le classement
+   général, lui, reste au LP net : la prime s'ajoute au total d'équipe,
+   jamais au compte d'un joueur.
+------------------------------------------------------------------- */
+const OBJECTIF_JOUR = 150;
+const PRIME_OBJECTIF = 80;
+
+// LP gagnés par une équipe un jour donné (défaites ignorées).
+function lpGagnesJour(team, jour){
+  let n = 0;
+  S.games.forEach(g => {
+    if(g.lp <= 0) return;
+    if(dayOf(g.played_on) !== jour) return;
+    const p = S.players.find(x => x.id === g.player_id);
+    if(p && p.team === team) n += g.lp;
+  });
+  return n;
+}
+
+// Les journées déjà gagnées, dans la fenêtre affichée.
+function primeObjectif(team){
+  const from = windowStart();
+  const jusqua = Math.min(currentDay(), S.challenge.days - 1);
+  let jours = 0;
+  for(let j = Math.max(from, 0); j <= jusqua; j++){
+    if(lpGagnesJour(team, j) >= OBJECTIF_JOUR) jours++;
+  }
+  return { jours, lp: jours * PRIME_OBJECTIF };
+}
+
 function teamScores(){
   const from = windowStart();
   const out = { a:0, b:0 };
@@ -203,6 +238,8 @@ function teamScores(){
     if(!p) return;
     out[p.team] += g.lp;
   });
+  out.a += primeObjectif("a").lp;
+  out.b += primeObjectif("b").lp;
   return out;
 }
 
@@ -322,6 +359,33 @@ function renderBalance(states){
     ? "Égalité parfaite"
     : "<b>" + esc(diff>0 ? S.challenge.team_a_name : S.challenge.team_b_name) + "</b> mène de <b>" + Math.abs(diff) + " LP</b>";
   $("#leadTxt").innerHTML = lead;
+
+  renderObjectif("a"); renderObjectif("b");
+}
+
+/* La jauge du jour, sous le nom de l'équipe. */
+function renderObjectif(team){
+  const box = $("#obj" + team.toUpperCase());
+  if(!box) return;
+  const jour = Math.min(Math.max(currentDay(), 0), S.challenge.days - 1);
+  const fait = lpGagnesJour(team, jour);
+  const atteint = fait >= OBJECTIF_JOUR;
+  const pct = Math.min(100, Math.round(fait / OBJECTIF_JOUR * 100));
+  const prime = primeObjectif(team);
+
+  box.innerHTML =
+      '<div class="objbar"><i class="' + team + (atteint ? " done" : "")
+        + '" style="width:' + pct + '%"></i></div>'
+    + '<div class="objtxt' + (atteint ? " done" : "") + '">'
+      + (atteint
+          ? "Objectif du jour atteint · +" + PRIME_OBJECTIF + " LP"
+          : fait + " / " + OBJECTIF_JOUR + " LP aujourd'hui")
+      + (prime.jours
+          ? '<span class="objsum">' + prime.jours + (prime.jours > 1 ? " jours" : " jour")
+            + " · +" + prime.lp + " LP</span>"
+          : "")
+    + '</div>';
+  box.title = "Seuls les LP gagnés comptent : une défaite ne fait pas reculer le compteur du jour.";
 }
 
 function renderRosters(states){
@@ -460,6 +524,15 @@ function valueAt(pts, t){
   for(const p of pts){ if(p.t > t) break; y = p.y; }
   return y;
 }
+/* La même marche d'escalier, refermée sur la ligne du zéro : c'est ce
+   qui donne l'aire teintée sous la courbe. On ne recalcule rien, on
+   prolonge le tracé — les deux ne peuvent donc pas diverger. */
+function aireSous(d, X, Y, t0, t1){
+  if(!d) return "";
+  return d + " L " + X(t1).toFixed(1) + " " + Y(0).toFixed(1)
+           + " L " + X(t0).toFixed(1) + " " + Y(0).toFixed(1) + " Z";
+}
+
 function stepPath(pts, X, Y, t0, t1){
   let y = valueAt(pts, t0);
   let d = "M " + X(t0).toFixed(1) + " " + Y(y).toFixed(1);
@@ -533,7 +606,7 @@ function renderChart(){
   const vStep = Math.max(grain, Math.ceil((hi - lo) / 6 / grain) * grain);
   for(let v = Math.ceil(lo / vStep) * vStep; v <= hi; v += vStep){
     const y = Y(v);
-    out += '<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)+'" stroke="var(--line-soft)" stroke-width="1"/>'
+    out += '<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)+'" stroke="var(--line-soft)" stroke-width="1" opacity=".6"/>'
         +  '<text x="'+(PL-10)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" fill="var(--muted)" font-family="Barlow Semi Condensed" font-size="12">'+(v>0?"+":"")+v+'</text>';
   }
   out += '<line x1="'+PL+'" y1="'+Y(0).toFixed(1)+'" x2="'+(W-PR)+'" y2="'+Y(0).toFixed(1)+'" stroke="var(--line)" stroke-width="1.5"/>';
@@ -549,13 +622,41 @@ function renderChart(){
   out += '<text x="'+PL+'" y="'+(H-4)+'" text-anchor="start" fill="var(--muted)" font-family="Barlow Semi Condensed" font-size="11" letter-spacing="1.2">'
        + 'LP NETS CUMULÉS · ' + esc(jour.toUpperCase()) + '</text>';
 
-  vis.forEach(s => {
-    out += '<path d="'+stepPath(s.pts, X, Y, t0, t1)+'" fill="none" stroke="'+s.color
-        +  '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="'+(chartMode==="players"?0.85:1)+'"/>';
-    // Un point par partie : visible dès qu'on zoome assez.
-    s.pts.filter(p => p.t >= t0 && p.t <= t1).forEach(p => {
-      out += '<circle cx="'+X(p.t).toFixed(1)+'" cy="'+Y(p.y).toFixed(1)+'" r="3" fill="'+s.color+'"/>';
-    });
+  // Un dégradé par série, pour l'aire sous la courbe.
+  let defs = '<defs>';
+  vis.forEach((s, i) => {
+    defs += '<linearGradient id="grad'+i+'" x1="0" y1="0" x2="0" y2="1">'
+         +  '<stop offset="0" stop-color="'+s.color+'" stop-opacity=".22"/>'
+         +  '<stop offset="1" stop-color="'+s.color+'" stop-opacity="0"/></linearGradient>';
+  });
+  out = defs + '</defs>' + out;
+
+  // En mode « joueurs » il y a dix courbes : l'aire les rendrait
+  // illisibles, on la réserve au duel d'équipes.
+  const avecAire = chartMode !== "players";
+
+  vis.forEach((s, i) => {
+    const d = stepPath(s.pts, X, Y, t0, t1);
+    if(avecAire){
+      out += '<path d="'+aireSous(d, X, Y, t0, t1)+'" fill="url(#grad'+i+')" stroke="none"/>';
+    }
+    out += '<path d="'+d+'" fill="none" stroke="'+s.color
+        +  '" stroke-width="'+(avecAire ? 2.4 : 1.8)+'" stroke-linejoin="round" stroke-linecap="round"'
+        +  ' opacity="'+(chartMode==="players" ? 0.9 : 1)+'"/>';
+
+    // Un point par partie, tant qu'ils ne se marchent pas dessus.
+    const dedans = s.pts.filter(p => p.t >= t0 && p.t <= t1);
+    if(dedans.length <= 40){
+      dedans.forEach(p => {
+        out += '<circle cx="'+X(p.t).toFixed(1)+'" cy="'+Y(p.y).toFixed(1)
+            +  '" r="2.6" fill="var(--surface)" stroke="'+s.color+'" stroke-width="1.6"/>';
+      });
+    }
+
+    // Le dernier état, en bout de ligne : la valeur qu'on vient chercher.
+    const xFin = X(t1), yFin = Y(valueAt(s.pts, t1));
+    out += '<circle cx="'+xFin.toFixed(1)+'" cy="'+yFin.toFixed(1)+'" r="8" fill="'+s.color+'" opacity=".16"/>'
+        +  '<circle cx="'+xFin.toFixed(1)+'" cy="'+yFin.toFixed(1)+'" r="4.2" fill="'+s.color+'"/>';
   });
 
   $("#chart").innerHTML = out;
@@ -728,7 +829,10 @@ function spinWheel(team, rank){
 }
 
 function targetPlayer(){
-  if(isAdmin() && $("#fPlayer").value) return S.players.find(p => p.id === $("#fPlayer").value) || myPlayer();
+  // Ouvert à tout le monde : voir la progression des autres fait partie
+  // du jeu, et toutes ces données sont déjà publiques.
+  const choisi = $("#fPlayer") && $("#fPlayer").value;
+  if(choisi) return S.players.find(p => p.id === choisi) || myPlayer();
   return myPlayer();
 }
 
@@ -794,9 +898,9 @@ function renderItems(){
   $("#itemsHint").textContent = admin
     ? "Vue administrateur : tous les objets sont révélés, les joueurs ne voient que ceux qu'ils ont obtenus. Le pourcentage est la chance de tomber sur cet objet à chaque butin."
     : mine
-      ? "Un objet tombe à chaque victoire, en solo comme en duo avec un allié — jamais en duo avec un adversaire. Tant que tu n'en as jamais obtenu un, tu n'en connais que la rumeur."
+      ? "Un objet tombe à chaque victoire, quelle que soit la compagnie. Tant que tu n'en as jamais obtenu un, tu n'en connais que la rumeur."
         + (total ? " Tu en as " + total + " en réserve." : "")
-      : "Connecte-toi pour voir ceux que tu as découverts. Un objet tombe à chaque victoire, en solo comme en duo avec un allié.";
+      : "Connecte-toi pour voir ceux que tu as découverts. Un objet tombe à chaque victoire.";
 
   // Les exemplaires en main, par objet : libres d'un côté, armés de l'autre.
   const libres = {}, armes = {};
@@ -1016,6 +1120,82 @@ function chipsObjets(x, decouverts){
   }).join("") + '</div>';
 }
 
+/* ------------------------------------------------------------------
+   Journal de guerre
+   Tout ce qui a été lancé, dans l'ordre inverse. Un objet déjà résolu
+   est nommé : son effet a eu lieu, le cacher n'a plus de sens. Un objet
+   encore armé reste anonyme pour qui ne l'a jamais obtenu — savoir
+   qu'on est visé fait partie du jeu, savoir par quoi serait tricher.
+------------------------------------------------------------------- */
+function renderWarlog(){
+  const box = $("#warLog");
+  if(!box) return;
+  const bloc = $("#warBlock");
+
+  const lignes = S.inventory
+    .filter(r => r.locked_at || r.applied_match)
+    .sort((x, y) => new Date(y.locked_at || y.obtained_at) - new Date(x.locked_at || x.obtained_at));
+
+  const moi = myPlayer();
+  const vus = new Set(isAdmin()
+    ? S.items.map(i => i.key)
+    : (moi ? S.inventory.filter(r => r.player_id === moi.id).map(r => r.item_key) : []));
+
+  $("#warCount").textContent = lignes.length
+    ? lignes.length + (lignes.length > 1 ? " objets lancés" : " objet lancé")
+    : "rien pour l'instant";
+
+  if(!lignes.length){
+    box.innerHTML = '<div class="empty">Aucun objet n\'a encore été lancé. Ça ne saurait tarder.</div>';
+    return;
+  }
+
+  box.innerHTML = lignes.slice(0, 60).map(r => {
+    const par = S.players.find(p => p.id === r.player_id);
+    const sur = S.players.find(p => p.id === r.target_id);
+    const it = S.items.find(i => i.key === r.item_key);
+    const resolu = !!r.applied_match;
+    const connu = resolu || vus.has(r.item_key);
+    const soi = par && sur && par.id === sur.id;
+
+    const nom = connu && it ? (it.icon ? it.icon + " " : "") + it.name : "\u{1F512} un objet";
+    const lp = r.lp_effect || 0;
+
+    const verbe = soi ? "s'est protégé avec" : "a lancé";
+    const cible = soi ? "" : ' sur <b>' + esc(sur ? sur.name : "?") + '</b>';
+
+    return '<div class="warrow' + (resolu ? "" : " pending") + '">'
+      + avatarRing(par, { sm:true })
+      + '<div class="wartext">'
+        + '<div class="warline"><b>' + esc(par ? par.name : "?") + '</b> ' + verbe
+          + ' <span class="waritem">' + nom + '</span>' + cible + '</div>'
+        + '<div class="warmeta">'
+          + (resolu
+              ? esc(r.note || "effet appliqué") + " · " + quand(r.used_at || r.locked_at)
+              : "en attente de sa prochaine partie · " + quand(r.locked_at))
+        + '</div>'
+      + '</div>'
+      + (resolu
+          ? '<span class="delta ' + (lp > 0 ? "up" : lp < 0 ? "down" : "flat") + '">' + signed(lp) + '</span>'
+          : '<span class="warwait">armé</span>')
+      + '</div>';
+  }).join("");
+
+  if(bloc) bloc.hidden = false;
+}
+
+// « il y a 12 min », « il y a 3 h », « le 4 oct. »
+function quand(t){
+  if(!t) return "—";
+  const ms = Date.now() - new Date(t).getTime();
+  const m = Math.floor(ms / 60000);
+  if(m < 1) return "à l'instant";
+  if(m < 60) return "il y a " + m + " min";
+  const h = Math.floor(m / 60);
+  if(h < 24) return "il y a " + h + " h";
+  return "le " + new Date(t).toLocaleDateString("fr-FR", { day:"numeric", month:"short" });
+}
+
 function renderFeed(t){
   const box = $("#feed");
   const head = $("#feedTitle");
@@ -1067,7 +1247,7 @@ function renderFeed(t){
     let meta;
     // Le butin suit peutLooter() dans la fonction serveur : victoire en
     // solo ou en duo allié. Un duo adverse n'en donne jamais.
-    const aLoote = x.win && x.duo !== "enemy";
+    const aLoote = !!x.win;
     if(x.duo === "team")      meta = "Avec " + (partner ? partner.name : "un coéquipier");
     else if(x.duo === "enemy") meta = "Contre " + (partner ? partner.name : "un adversaire");
     else                       meta = "Partie solo";
@@ -1123,6 +1303,7 @@ function render(){
   renderRosters(states);
   renderEntry();
   renderItems();
+  renderWarlog();
   renderLadder(states);
   renderChart();
   renderAdmin();
@@ -1153,15 +1334,25 @@ const RULES = [
   + "<p>Une seule mauvaise soirée peut faire basculer la balance : personne n'est jamais à l'abri.</p>" },
 
   { t:"Les objets", h:
-    "<p><strong>Gagne une partie</strong> : un objet tombe. En solo comme en duo avec un allié — mais <strong>jamais en duo avec un adversaire</strong>, sinon deux joueurs d'équipes opposées pourraient se donner rendez-vous en file et se fabriquer des objets à volonté.</p>"
-  + "<p>Croiser un adversaire <em>en face</em> de toi ne change rien : tu n'as pas choisi l'adversaire que le matchmaking t'a donné.</p>"
+    "<p><strong>Gagne une partie</strong> : un objet tombe. Solo, duo allié, duo adverse — toute victoire compte.</p>"
   + "<p>Un objet est un <strong>bonus</strong> que tu poses sur toi, ou un <strong>malus</strong> que tu poses sur un adversaire.</p>"
-  + "<p><strong>Il faut le verrouiller avant de jouer.</strong> Tu choisis l'objet, tu choisis la cible, et il agira sur la prochaine partie de cette personne — que sa condition soit remplie ou non. Tant que la partie n'a pas eu lieu, tu peux encore annuler.</p>"
+  + "<p><strong>Il faut le verrouiller avant de jouer.</strong> Tu choisis l'objet, tu choisis la cible, et il agira sur la <strong>prochaine partie de cette personne</strong> — où qu'elle joue, avec qui qu'elle veuille. Tu n'as pas besoin d'être dans sa partie, ni même d'être connecté. Que sa condition soit remplie ou non, l'objet est consommé.</p>"
   + "<p>Sur une même partie, au plus <strong>un bonus et trois malus</strong> font effet. Les objets verrouillés en trop restent en réserve, intacts.</p>"
   + "<p>Le récap d'une partie montre en gros ce que tu as <em>ressenti</em>, objets compris, et en petit tes <em>LP nets</em>. "
   + "Attention : <strong>le classement se fait sur les LP nets</strong>, ceux que Riot a vraiment donnés. Les objets ne décident pas du vainqueur du challenge — ils décident de l'ambiance.</p>"
   + "<p>Tant que tu n'as jamais obtenu un objet, l'onglet n'en montre qu'une <em>rumeur</em> : tu sais qu'il existe, pas ce qu'il fait. Dès que tu en décroches un, son effet t'est révélé pour de bon — y compris dans le récap des parties.</p>"
   + "<p>Plus un objet est rare, plus il est puissant — et plus il se fait attendre.</p>" },
+
+  { t:"L'objectif du jour", h:
+    "<p>Chaque jour, une équipe qui engrange <strong>150 LP</strong> décroche <strong>+80 LP</strong> de plus pour elle.</p>"
+  + "<p><strong>Seuls les gains comptent.</strong> Une défaite ne fait pas reculer le compteur du jour : l'objectif récompense ce qu'on va chercher, pas ce qu'on évite de perdre. Le classement général, lui, reste au LP net — défaites comprises.</p>"
+  + "<p>La jauge est sous le nom de chaque équipe. La prime s'ajoute au total de l'équipe, jamais au compte d'un joueur : personne ne grimpe au classement individuel grâce à elle.</p>"
+  + "<p>Un jour couru, un jour gagné : les primes s'accumulent sur toute la durée du challenge.</p>" },
+
+  { t:"Le journal de guerre", h:
+    "<p>Tout ce qui a été lancé, par qui et sur qui, dans l'ordre inverse.</p>"
+  + "<p>Un objet <strong>déjà résolu</strong> est nommé, avec ce qu'il a coûté ou rapporté : son effet a eu lieu, le cacher n'aurait plus de sens.</p>"
+  + "<p>Un objet <strong>encore armé</strong> reste anonyme pour qui ne l'a jamais obtenu. Savoir qu'on est visé fait partie du jeu ; savoir par quoi serait tricher.</p>" },
 
   { t:"Ce qui compte", h:
     "<p>File <strong>Solo/Duo classée</strong> uniquement — ni Flex, ni ARAM. Les remakes sont ignorés, les placements ne rapportent rien tant que le rang n'est pas attribué.</p>"

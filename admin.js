@@ -123,12 +123,31 @@ function render(){
    l'admin, qui marquent « sim- » tout ce qu'elles écrivent.           */
 const RARETE_FR = { commun:"Commun", rare:"Rare", legendaire:"Légendaire" };
 
+/* Lecture tolérante d'un champ. Une page servie depuis le cache du
+   navigateur peut ne pas encore avoir un champ ajouté récemment : mieux
+   vaut une valeur par défaut qu'un « Cannot read properties of null »
+   que personne ne peut relier à sa cause. */
+function champ(sel, parDefaut){
+  const el = $(sel);
+  return el ? el.value : (parDefaut === undefined ? "" : parDefaut);
+}
+const nombreOuRien = sel => { const v = champ(sel); return v === "" ? undefined : Number(v); };
+
 function renderSandbox(force){
+  // Un seul champ manquant ne doit pas faire tomber render() tout entier,
+  // qui dessine aussi le challenge, les joueurs et les parties.
+  try{ dessinerSandbox(force); }
+  catch(e){ say("#bLog", "Bac à sable indisponible : " + (e.message || e), true); }
+}
+
+function dessinerSandbox(force){
   // On ne rebat pas les menus pendant que l'admin est dedans — sauf
   // quand il vient lui-même de changer de joueur.
   if(!force && document.activeElement && document.activeElement.closest(".sandbox")) return;
 
-  const joueurs = $("#bPlayer"), choisiJ = joueurs.value;
+  const joueurs = $("#bPlayer");
+  if(!joueurs) return;                   // section absente d'une page en cache
+  const choisiJ = joueurs.value;
   joueurs.innerHTML = S.players.map(p =>
     '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join("");
   if(choisiJ) joueurs.value = choisiJ;
@@ -144,31 +163,37 @@ function renderSandbox(force){
   // Partenaires possibles : la fonction refuse un allié de l'autre
   // équipe et un adversaire de la sienne, autant ne pas les proposer.
   const moi = S.players.find(p => p.id === joueurs.value);
-  const duo = $("#bDuo").value;
-  const part = $("#bPartner"), choisiP = part.value;
+  const duo = champ("#bDuo", "solo");
+  const part = $("#bPartner"), choisiP = part ? part.value : "";
   const possibles = !moi || duo === "solo" ? []
     : S.players.filter(p => p.id !== moi.id
         && (duo === "team" ? p.team === moi.team : p.team !== moi.team));
+  if(part){
   part.disabled = duo === "solo";
   part.innerHTML = duo === "solo"
     ? '<option value="">— partie solo —</option>'
     : (possibles.map(p => '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join("")
        || '<option value="">— personne dans ce cas —</option>');
   if(choisiP && possibles.some(p => p.id === choisiP)) part.value = choisiP;
+  }
 
   // Objets libres du joueur choisi : ni consommés, ni déjà armés.
   const qui = joueurs.value;
   const libres = S.inventory.filter(r => r.player_id === qui && !r.used_at && !r.locked_at);
-  const owned = $("#bOwned"), choisiL = owned.value;
+  const owned = $("#bOwned"), choisiL = owned ? owned.value : "";
+  if(owned){
   owned.innerHTML = libres.map(r =>
     '<option value="' + esc(r.id) + '">' + esc(nomObjet(r.item_key)) + '</option>').join("")
     || '<option value="">— aucun objet libre —</option>';
   if(choisiL) owned.value = choisiL;
+  }
 
-  const cibles = $("#bTarget"), choisiC = cibles.value;
-  cibles.innerHTML = S.players.map(p =>
-    '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join("");
-  if(choisiC) cibles.value = choisiC;
+  const cibles = $("#bTarget"), choisiC = cibles ? cibles.value : "";
+  if(cibles){
+    cibles.innerHTML = S.players.map(p =>
+      '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join("");
+    if(choisiC) cibles.value = choisiC;
+  }
 
   // Ce qui est déjà armé, pour ne pas chercher pourquoi un effet retombe.
   const arms = S.inventory.filter(r => !r.used_at && r.locked_at);
@@ -220,9 +245,9 @@ const nomObjet = cle => {
 };
 
 function giveItem(){
-  const p = $("#bPlayer").value;
+  const p = champ("#bPlayer");
   if(!p) return say("#bLog", "Choisis un joueur.", true);
-  sandbox("admin_grant_item", { p_player: p, p_item: $("#bItem").value || null },
+  sandbox("admin_grant_item", { p_player: p, p_item: champ("#bItem") || null },
     "#bGive", cle => "Objet donné : " + nomObjet(cle) + ".");
 }
 
@@ -230,25 +255,29 @@ function giveItem(){
    c'est elle qui porte le moteur d'effets, et on veut que le bac à sable
    donne exactement ce que donnera le relèvement réel. */
 async function simGame(){
-  const p = $("#bPlayer").value;
+  const p = champ("#bPlayer");
   if(!p) return say("#bLog", "Choisis un joueur.", true);
-  const lp = Number($("#bLp").value);
+  const lp = Number(champ("#bLp"));
   if(!Number.isInteger(lp) || lp < -200 || lp > 200)
     return say("#bLog", "Les LP doivent être un entier entre -200 et 200.", true);
+
+  const duo = champ("#bDuo", "solo");
+  if(duo !== "solo" && !champ("#bPartner"))
+    return say("#bLog", "Choisis le joueur avec qui la partie se joue.", true);
 
   const btn = $("#bPlay");
   btn.disabled = true;
   say("#bLog", "Simulation en cours…");
   try{
     const { data, error } = await sb.functions.invoke("riot", { body: {
-      action: "sim", player: p, lp,
-      win: $("#bWin").value === "1", duo: $("#bDuo").value,
-      partner: $("#bDuo").value === "solo" ? undefined : ($("#bPartner").value || undefined),
-      lpPartner: $("#bLpPartner").value === "" ? undefined : Number($("#bLpPartner").value),
-      champion: $("#bChamp").value.trim() || undefined,
-      dureeMin: Number($("#bDur").value) || undefined,
-      deaths: $("#bDeaths").value === "" ? undefined : Number($("#bDeaths").value),
-      vision: $("#bVision").value === "" ? undefined : Number($("#bVision").value)
+      action: "sim", player: p, lp, duo,
+      win: champ("#bWin", "1") === "1",
+      partner: duo === "solo" ? undefined : (champ("#bPartner") || undefined),
+      lpPartner: nombreOuRien("#bLpPartner"),
+      champion: champ("#bChamp").trim() || undefined,
+      dureeMin: Number(champ("#bDur")) || undefined,
+      deaths: nombreOuRien("#bDeaths"),
+      vision: nombreOuRien("#bVision")
     }});
     if(error){
       let msg = error.message;
@@ -288,7 +317,7 @@ async function simGame(){
 /* Verrouiller un objet à la place d'un joueur, pour pouvoir essayer les
    effets sans devoir se connecter avec son compte. */
 function lockItem(){
-  const row = $("#bOwned").value, cible = $("#bTarget").value;
+  const row = champ("#bOwned"), cible = champ("#bTarget");
   if(!row)   return say("#bLog", "Ce joueur n'a aucun objet libre en réserve.", true);
   if(!cible) return say("#bLog", "Choisis une cible.", true);
   sandbox("lock_item", { p_item: row, p_target: cible }, "#bLock",
