@@ -9,3 +9,8 @@ demo-artifact.html
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Le jeton Supabase vit dans le dossier utilisateur, jamais ici.
+# Cette ligne est une ceinture au cas ou il atterrirait dans le depot.
+.soloq-supabase-token
+*.token

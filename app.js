@@ -24,21 +24,23 @@ const ROMAN = { 1:"I", 2:"II", 3:"III", 4:"IV" };
 const APEX = 7;
 const TEAM_COLOR = { a:"var(--team-a)", b:"var(--team-b)" };
 
-/* Pile de pièces, dessinée ici plutôt qu'importée : une image externe
-   pour seize pixels coûterait une requête et un clignotement. Les
-   ellipses du bas forment la pile, le disque du haut la pièce de face,
-   avec son reflet. */
+/* La pièce d'or, dans le parti pris du logo du Discord : trait épais,
+   formes franches, et une lueur dorée posée en CSS plutôt que dans le
+   dessin — un filtre SVG ne suivrait pas la couleur du contexte.
+
+   Un seul disque plutôt qu'une pile : à seize pixels, deux formes qui
+   se chevauchent deviennent une tache. L'anneau intérieur et
+   l'étincelle suffisent à dire « monnaie ». */
 const PIECE_OR =
-  '<svg class="coin" viewBox="0 0 18 18" aria-hidden="true" focusable="false">'
-  + '<ellipse cx="9" cy="14.1" rx="6.4" ry="2.5" fill="#6E5416"/>'
-  + '<ellipse cx="9" cy="12.6" rx="6.4" ry="2.5" fill="#C9A233"/>'
-  + '<ellipse cx="9" cy="12.0" rx="6.4" ry="2.5" fill="#8A6B1E"/>'
-  + '<ellipse cx="9" cy="10.5" rx="6.4" ry="2.5" fill="#C9A233"/>'
-  + '<ellipse cx="9" cy="9.9"  rx="6.4" ry="2.5" fill="#8A6B1E"/>'
-  + '<circle cx="9" cy="6.4" r="5.3" fill="#E3C055" stroke="#8A6B1E" stroke-width="1.1"/>'
-  + '<circle cx="9" cy="6.4" r="3.1" fill="none" stroke="#F6E296" stroke-width="1"/>'
-  + '<path d="M6.6 4.4a3.6 3.6 0 0 0-1.3 2.1" stroke="#FFF7D6" stroke-width="1.2"'
-  + ' fill="none" stroke-linecap="round"/>'
+  '<svg class="coin" viewBox="0 0 24 24" aria-hidden="true" focusable="false"'
+  + ' fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">'
+  + '<circle cx="10.6" cy="13.6" r="7.9" stroke-width="2.2"/>'
+  + '<circle cx="10.6" cy="13.6" r="3.7" stroke-width="1.6" opacity=".72"/>'
+  // Un eclat plutot qu'une croix : a cote d'un montant, un « + » se
+  // lirait comme un signe et non comme un reflet.
+  + '<path d="M19.4 2.2c.2 1.5 1 2.3 2.5 2.5c-1.5.2-2.3 1-2.5 2.5'
+  +   'c-.2-1.5-1-2.3-2.5-2.5c1.5-.2 2.3-1 2.5-2.5z"'
+  +   ' fill="currentColor" stroke="none"/>'
   + '</svg>';
 
 const toScore = (t,d,lp) => {
@@ -1738,7 +1740,8 @@ function renderFeed(t){
   const mine = myPlayer();
   head.innerHTML = avatarRing(t, { lg:true })
     + '<span class="feedwho">' + esc(t.name) + '</span>' + pastilleLive(t.id)
-    + '<span class="feedcount">' + (nb ? nb + (nb > 1 ? " parties relevées" : " partie relevée") : "aucune partie") + '</span>';
+    + '<span class="feedcount">' + (nb ? nb + (nb > 1 ? " parties relevées" : " partie relevée") : "aucune partie") + '</span>'
+    + '<span class="goldchip" title="Or en réserve">' + PIECE_OR + '<b>' + orFr(t.gold || 0) + '</b></span>';
 
   if(!g.length){
     const amoi = myPlayer() && myPlayer().id === t.id;
@@ -1795,6 +1798,10 @@ function renderFeed(t){
         + '<div class="rowtitle">' + (x.win ? "Victoire" : "Défaite") + chip + '</div>'
         + '<div class="rowmeta">' + esc(meta) + '</div>'
         + chipsObjets(x, decouvertsParMoi)
+        + (x.gold_gagne
+            ? '<div class="rowgold" title="Or gagné sur cette partie, selon ton poste et ta performance">'
+              + PIECE_OR + '<b>+' + orFr(x.gold_gagne) + '</b></div>'
+            : "")
       + '</div>'
       + time + del + '</div>';
   }).join("");
@@ -1953,7 +1960,7 @@ function renderShop(){
     corps.innerHTML = '<div class="empty">Connecte-toi avec ton profil joueur pour gagner et dépenser de l\'or.</div>';
     return;
   }
-  bourse.innerHTML = '<b>' + orFr(or) + '</b> <span>or</span>';
+  bourse.innerHTML = PIECE_OR + '<b>' + orFr(or) + '</b> <span>or</span>';
 
   // Les objets déjà décrochés au moins une fois : eux seuls sont en rayon.
   const connus = new Set(S.inventory.filter(r => r.player_id === moi.id).map(r => r.item_key));

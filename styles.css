@@ -138,7 +138,14 @@ a{color:inherit}
   font-family:"Outfit",system-ui,sans-serif;font-size:14px;font-weight:600;
   color:var(--gold);font-variant-numeric:tabular-nums;letter-spacing:-.01em;
 }
-.coin{width:16px;height:16px;flex:none;display:block}
+/* La lueur dorée du logo, posée ici : elle suit ainsi la couleur du
+   contexte, ce qu'un filtre écrit dans le SVG ne ferait pas. */
+.coin{
+  width:16px;height:16px;flex:none;display:block;color:var(--gold);
+  filter:drop-shadow(0 0 2.5px color-mix(in srgb, var(--gold) 55%, transparent));
+}
+/* Dans la bourse, la pièce est grande : la lueur suit. */
+.purse .coin{filter:drop-shadow(0 0 5px color-mix(in srgb, var(--gold) 60%, transparent))}
 .plp{font-family:"Barlow Semi Condensed",sans-serif;font-weight:600;font-size:12.5px;color:var(--muted)}
 /* Le LP net sous le global : présent, mais clairement secondaire. */
 .plp b{font-weight:600;color:var(--ink);opacity:.72;font-variant-numeric:tabular-nums}
@@ -911,6 +918,30 @@ dialog.modal .form{margin-bottom:12px}
   border:1px solid color-mix(in srgb, var(--gold) 32%, transparent);
   font-family:"Barlow Semi Condensed",sans-serif;letter-spacing:.04em;
 }
+/* L'or gagné sur une partie, sous le récap. */
+.rowgold{display:flex;align-items:center;gap:5px;margin-top:5px;color:var(--gold)}
+.rowgold b{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12.5px;font-weight:700;
+  letter-spacing:.03em;font-variant-numeric:tabular-nums;
+}
+
+/* Le pécule, dans l'en-tête du suivi. */
+.goldchip{
+  display:inline-flex;align-items:center;gap:5px;margin-left:10px;
+  padding:2px 9px 2px 7px;border-radius:var(--pill);
+  background:color-mix(in srgb, var(--gold) 11%, transparent);
+  border:1px solid color-mix(in srgb, var(--gold) 30%, transparent);
+  color:var(--gold);
+}
+.goldchip b{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;font-weight:700;
+  letter-spacing:.04em;font-variant-numeric:tabular-nums;
+}
+.goldchip .coin{width:14px;height:14px}
+
+/* La bourse de la boutique : la pièce à la taille du chiffre. */
+.purse{display:flex;align-items:center;gap:10px}
+.purse .coin{width:26px;height:26px}
 .purse b{
   font-family:"Outfit",system-ui,sans-serif;font-size:27px;font-weight:600;
   color:var(--gold);font-variant-numeric:tabular-nums;letter-spacing:-.01em;
