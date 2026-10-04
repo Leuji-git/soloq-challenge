@@ -1416,7 +1416,19 @@ function initInfobulles(){
     const txt = el.getAttribute("data-tip");
     if(!txt) return;
     const [titre, ...reste] = txt.split("\n").filter(Boolean);
-    bulle.innerHTML = '<div class="tiptitre">' + esc(titre) + '</div>'
+
+    /* Qui a posé l'objet. On le montre même quand l'objet reste
+       inconnu : savoir qui t'a visé fait partie du jeu, c'est l'effet
+       qui doit rester secret. */
+    const qui = el.getAttribute("data-tip-who");
+    const par = qui ? S.players.find(p => p.id === qui) : null;
+    const soi = el.getAttribute("data-tip-self") === "1";
+
+    bulle.innerHTML =
+        (par ? '<div class="tipwho">' + avatarRing(par, { sm:true })
+             + '<span>' + esc(soi ? "posé par " + par.name : "lancé par " + par.name) + '</span></div>'
+             : "")
+      + '<div class="tiptitre">' + esc(titre) + '</div>'
       + reste.map(l => '<div class="tipcorps' + (l.startsWith("\u2192") ? " tipnote" : "") + '">'
           + esc(l) + '</div>').join("");
     bulle.hidden = false;
@@ -1469,7 +1481,12 @@ function chipsObjets(x, decouverts){
     const lp = r.lp_effect || 0;
     // Même règle que le journal : ni nom ni raison si l'objet est inconnu.
     const titre = infobulleObjet(it, vu && !!it, r.note);
-    return '<span class="objchip ' + (lp > 0 ? "up" : lp < 0 ? "down" : "flat") + '" data-tip="' + esc(titre) + '">'
+    // r.player_id : celui qui a posé l'objet. r.target_id : celui qui
+    // le subit. Les deux sont la même personne pour un bonus.
+    return '<span class="objchip ' + (lp > 0 ? "up" : lp < 0 ? "down" : "flat") + '"'
+      + ' data-tip="' + esc(titre) + '"'
+      + ' data-tip-who="' + esc(r.player_id) + '"'
+      + ' data-tip-self="' + (r.player_id === r.target_id ? "1" : "0") + '">'
       + '<span class="objico">' + (vu && it ? esc(it.icon) : "🔒") + '</span>'
       + signed(lp) + '</span>';
   }).join("") + '</div>';

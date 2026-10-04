@@ -205,6 +205,17 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
   background:color-mix(in srgb, var(--surface) 96%, transparent);
   backdrop-filter:blur(10px);box-shadow:0 14px 38px rgba(0,0,0,.5);
 }
+/* Qui a posé l'objet, au-dessus de son nom : photo Discord en petit
+   et pseudo, en retrait pour ne pas voler la vedette à l'effet. */
+.tipwho{
+  display:flex;align-items:center;gap:7px;margin-bottom:7px;
+  padding-bottom:7px;border-bottom:1px solid var(--line);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;
+  letter-spacing:.03em;color:var(--muted);
+}
+.tipwho .pav{width:18px;height:18px;border-width:1.5px;flex:none}
+.tipwho .pav i{font-size:8px}
+
 .tiptitre{font-weight:600;font-size:13.5px;color:var(--ink);line-height:1.3}
 .tipcorps{
   margin-top:5px;font-size:12.5px;line-height:1.45;color:var(--muted);
