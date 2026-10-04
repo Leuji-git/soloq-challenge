@@ -83,7 +83,6 @@ const lpDe = g => chartLp === "total" ? g.lp + (g.lp_items || 0) : g.lp;
 // Tracer les places au classement plutôt que les LP. N'a de sens qu'en
 // mode joueurs : une équipe n'a pas de rang parmi dix.
 let chartRank = false;
-const rangFr = r => r === 1 ? "1er" : r + "e";
 let hidden = new Set();
 
 const myPlayer = () => S.session ? S.players.find(p => p.claimed_by === S.session.user.id) || null : null;
@@ -532,38 +531,36 @@ function playerPoints(id){
   let run = 0;
   return gs.map(g => ({ t: tsOf(g), y: (run += lpDe(g)) }));
 }
-/* Places au classement dans le temps.
+/* Le rang LoL dans le temps : Fer, Bronze, … Challenger.
 
-   À chaque partie on recalcule le cumul de tout le monde, puis l'ordre.
-   On n'ajoute un palier à un joueur que si sa place a changé : sinon
-   dix joueurs × soixante parties donneraient six cents points pour
-   décrire une ligne plate.
+   On ne peut pas le lire directement — Riot ne donne que le rang
+   d'aujourd'hui. On part donc du rang actuel et on remonte le fil des
+   LP relevés : score au départ = score actuel moins tout ce qui a été
+   gagné depuis. Puis on redescend le fil en avant.
 
-   Le classement se lit au LP net, comme le tableau — on ne va pas
-   afficher un rang qui contredirait celui d'à côté. */
-function rangPoints(){
-  const ids = S.players.map(p => p.id);
-  const cum = {}, sortie = {}, dernier = {};
-  ids.forEach(id => { cum[id] = 0; sortie[id] = []; });
+   La reconstitution vaut ce que vaut le relevé : si une partie classée
+   a échappé au suivi, la courbe est décalée d'autant avant elle. Les
+   esquives et la décroissance sont enregistrées en « ajustement », donc
+   comptées elles aussi.
 
-  const evts = S.games
-    .filter(g => g.lp && cum[g.player_id] !== undefined)
-    .map(g => ({ t: tsOf(g), id: g.player_id, d: g.lp }))
-    .sort((a, b) => a.t - b.t);
+   Le score est absolu : 400 points par palier, 100 par division. C'est
+   la même échelle que le classement du tableau, d'où la lecture directe
+   des frontières de palier sur l'axe. */
+function scorePoints(id){
+  const p = S.players.find(x => x.id === id);
+  if(!p) return [];
+  const r = estRank(p);
+  const actuel = toScore(r.t, r.d, r.lp);
 
-  const classer = t => {
-    // À égalité, on départage par identifiant : le tri reste stable
-    // d'un relevé à l'autre, sinon des courbes sauteraient sans raison.
-    const ordre = ids.slice().sort((a, b) => cum[b] - cum[a] || (a < b ? -1 : 1));
-    ordre.forEach((id, i) => {
-      const r = i + 1;
-      if(dernier[id] !== r){ sortie[id].push({ t, y: r }); dernier[id] = r; }
-    });
-  };
+  const gs = gamesOf(id).slice().sort((a, b) => tsOf(a) - tsOf(b));
+  const total = gs.reduce((a, g) => a + g.lp, 0);
+  let run = Math.max(0, actuel - total);
 
-  if(evts.length) classer(evts[0].t - 1);     // l'état de départ, à égalité
-  evts.forEach(e => { cum[e.id] += e.d; classer(e.t); });
-  return sortie;
+  // Un palier au départ du challenge, sinon la courbe commencerait à
+  // la première partie et on ne verrait pas d'où le joueur vient.
+  const pts = [{ t: startDate().getTime(), y: run }];
+  gs.forEach(g => { run = Math.max(0, run + g.lp); pts.push({ t: tsOf(g), y: run }); });
+  return pts;
 }
 
 // Paliers cumulés d'une équipe.
@@ -682,12 +679,13 @@ function renderChart(){
 
   // Le mode rang ne vaut qu'en joueurs : la case est masquée ailleurs,
   // mais on ne s'y fie pas, on revérifie ici.
-  const rang = chartRank && chartMode === "players";
-  const rangs = rang ? rangPoints() : null;
+  // Le rang ne se trace qu'en joueurs ET en LP nets : un rang calculé
+  // sur des LP d'objets ne correspondrait à rien chez Riot.
+  const rang = chartRank && chartMode === "players" && chartLp === "net";
 
   const series = chartMode === "players"
     ? S.players.map(p => ({ key:p.id, label:p.name, color:TEAM_COLOR[p.team],
-                            pts: rang ? rangs[p.id] : playerPoints(p.id) }))
+                            pts: rang ? scorePoints(p.id) : playerPoints(p.id) }))
     : ["a","b"].map(tk => ({
         key: tk,
         label: tk === "a" ? S.challenge.team_a_name : S.challenge.team_b_name,
@@ -703,9 +701,18 @@ function renderChart(){
   const X = t => PL + ((t - t0) / (t1 - t0)) * (W - PL - PR);
 
   if(rang){
-    // Axe inversé : la première place en haut, comme on lit un podium.
-    lo = 1; hi = Math.max(2, S.players.length);
-    Y = v => PT + ((v - lo) / (hi - lo)) * (H - PT - PB);
+    // Bornes calées sur les divisions : l'axe tombe toujours juste.
+    const ys = [];
+    vis.forEach(sr => {
+      ys.push(valueAt(sr.pts, t0));
+      sr.pts.filter(p => p.t > t0 && p.t <= t1).forEach(p => ys.push(p.y));
+    });
+    if(!ys.length) ys.push(0, 400);
+    lo = Math.floor((Math.min(...ys) - 60) / 100) * 100;
+    hi = Math.ceil((Math.max(...ys) + 60) / 100) * 100;
+    lo = Math.max(0, lo);
+    if(hi - lo < 300) hi = lo + 300;
+    Y = v => PT + (1 - (v - lo) / (hi - lo)) * (H - PT - PB);
   }else{
     const ys = [0];
     vis.forEach(s => {
@@ -724,12 +731,23 @@ function renderChart(){
 
   let out = "";
   if(rang){
-    // Une graduation par place, et pas de ligne du zéro : il n'y a pas
-    // de zéro dans un classement.
-    for(let v = lo; v <= hi; v++){
+    // Un trait par division, franc aux frontières de palier. Les noms
+    // ne sont écrits qu'aux paliers quand la plage est large, sinon ils
+    // se chevaucheraient.
+    const serre = (hi - lo) <= 900;
+    for(let v = lo; v <= hi; v += 100){
       const y = Y(v);
-      out += '<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)+'" stroke="var(--line-soft)" stroke-width="1" opacity="'+(v===1?".9":".45")+'"/>'
-          +  '<text x="'+(PL-10)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" fill="var(--muted)" font-family="Barlow Semi Condensed" font-size="12">'+rangFr(v)+'</text>';
+      const frontiere = v % 400 === 0;
+      const r = fromScore(v);
+      const couleur = frontiere ? TIERS[TIDX[r.t]].c : "var(--line-soft)";
+      out += '<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)
+          +  '" stroke="'+couleur+'" stroke-width="1" opacity="'+(frontiere ? ".42" : ".2")+'"/>';
+      if(frontiere || serre){
+        out += '<text x="'+(PL-10)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" fill="'
+            +  (frontiere ? TIERS[TIDX[r.t]].c : "var(--muted)")
+            +  '" font-family="Barlow Semi Condensed" font-size="'+(frontiere ? 12 : 11)+'">'
+            +  esc(frontiere ? TIERS[TIDX[r.t]].fr : shortRank(r)) + '</text>';
+      }
     }
   }else{
     const grain = (hi - lo) > 400 ? 50 : (hi - lo) > 120 ? 20 : 10;
@@ -751,7 +769,7 @@ function renderChart(){
 
   const jour = new Date(t0).toLocaleDateString("fr-FR", { day:"numeric", month:"long" });
   out += '<text x="'+PL+'" y="'+(H-4)+'" text-anchor="start" fill="var(--muted)" font-family="Barlow Semi Condensed" font-size="11" letter-spacing="1.2">'
-       + (rang ? 'PLACE AU CLASSEMENT · '
+       + (rang ? 'RANG CHEZ RIOT · '
                : chartLp === "total" ? 'LP CUMULÉS, OBJETS COMPRIS · ' : 'LP NETS CUMULÉS · ')
        + esc(jour.toUpperCase()) + '</text>';
 
@@ -863,15 +881,23 @@ function majSurvol(clientX, clientY){
     pastilles += '<circle cx="' + x.toFixed(1) + '" cy="' + cy.toFixed(1)
       + '" r="4" fill="' + s.color + '" stroke="var(--surface)" stroke-width="2"/>';
     return { label: s.label, color: s.color, y };
-  }).sort((a, b) => c.rang ? a.y - b.y : b.y - a.y);
+  }).sort((a, b) => b.y - a.y);
   $("#chartDots").innerHTML = pastilles;
 
   bulle.innerHTML = '<div class="tiptime">'
       + new Date(t).toLocaleString("fr-FR", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })
       + '</div>'
-    + lignes.map(l => '<div class="tipline"><i style="background:' + l.color + '"></i>'
-        + '<span>' + esc(l.label) + '</span><b>'
-        + (c.rang ? rangFr(l.y) : signed(l.y)) + '</b></div>').join("");
+    + lignes.map(l => {
+        if(!c.rang){
+          return '<div class="tipline"><i style="background:' + l.color + '"></i>'
+            + '<span>' + esc(l.label) + '</span><b>' + signed(l.y) + '</b></div>';
+        }
+        // En rang : l'écusson du palier, puis « Or III · 44 LP ».
+        const r = fromScore(l.y);
+        return '<div class="tipline rank"><img src="' + esc(emblem(r.t)) + '" alt="" loading="lazy">'
+          + '<span>' + esc(l.label) + '</span>'
+          + '<b>' + esc(shortRank(r)) + '<em>' + r.lp + ' LP</em></b></div>';
+      }).join("");
 
   // L'infobulle suit la souris, et bascule à gauche près du bord droit.
   const dx = clientX - box.left, dy = clientY - box.top;
@@ -1851,19 +1877,27 @@ async function savePlayers(){
 =================================================================== */
 // Les deux boutons LP doivent refléter l'état réel après une bascule
 // de mode, sinon ils mentiraient sur ce qui est tracé.
-/* La case n'a de sens qu'en mode joueurs : une équipe n'a pas de place
-   parmi dix. On la masque plutôt que de la laisser sans effet. */
+/* Le rang ne se trace qu'à deux conditions : en mode joueurs, et en LP
+   nets. Une équipe n'a pas de rang chez Riot, et un rang reconstitué
+   sur des LP d'objets ne correspondrait à rien de réel.
+
+   Hors mode joueurs la case disparaît ; en LP globaux elle reste
+   visible mais éteinte, avec la raison en infobulle — la masquer
+   laisserait croire qu'elle a disparu pour de bon. */
 function majCaseRang(){
   const w = $("#rankWrap"), c = $("#rankMode");
   if(!w || !c) return;
+
   w.hidden = chartMode !== "players";
+  const possible = chartMode === "players" && chartLp === "net";
+  c.disabled = !possible;
+  w.classList.toggle("off", !possible);
+  w.title = possible
+    ? "Tracer le rang chez Riot — Fer, Bronze, Or… — plutôt que les LP cumulés"
+    : "Le rang ne se trace qu'en LP nets : un rang calculé avec les LP d'objets ne correspondrait à rien chez Riot.";
+
+  if(!possible) chartRank = false;
   c.checked = chartRank;
-  // En rang, l'axe des LP n'a plus cours : les deux boutons seraient
-  // trompeurs, on les éteint.
-  const n = $("#lpNet"), t = $("#lpTotal");
-  const off = chartRank && chartMode === "players";
-  if(n) n.disabled = off;
-  if(t) t.disabled = off;
 }
 
 function majSegLp(){
@@ -1962,8 +1996,9 @@ function initUI(){
   });
   majCaseRang();
   segment("#lpNet", "#lpTotal",
-    () => { chartLp = "net";   renderChart(); },
-    () => { chartLp = "total"; renderChart(); });
+    () => { chartLp = "net";   majCaseRang(); renderChart(); },
+    // Le rang n'a plus de sens en LP globaux : on le coupe en passant.
+    () => { chartLp = "total"; chartRank = false; majCaseRang(); renderChart(); });
 }
 
 async function boot(){
