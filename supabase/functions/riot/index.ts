@@ -149,6 +149,10 @@ function dureeMatch(min){
   return Math.floor(t / 60) + " min " + String(t % 60).padStart(2, "0") + " s";
 }
 
+/* Une clé Riot : RGAPI- suivi d'un UUID. Quarante-deux caractères en
+   tout. Sert au diagnostic, jamais à autoriser quoi que ce soit. */
+const FORME_CLE = /^RGAPI-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 const EFFETS = {
   // ---- bonus, posés sur soi ----
   pierre_garde: c => c.win
@@ -328,13 +332,30 @@ async function riot(url){
       // qui ne vit que 24 h). 401 = en-tête absent ou clé mal formée.
       // Jamais le moindre morceau de la clé ici : cette réponse est publique.
       // On décrit seulement sa forme, ce qui suffit à repérer un copier-coller raté.
+      /* Diagnostic de la clé. Jamais son contenu : cette réponse est
+         publique. On décrit sa forme, et surtout on ne l'accuse d'être
+         mal formée que si elle l'est réellement — un message qui dit
+         « mal formée » sur une clé impeccable envoie chercher pendant
+         une heure du côté des espaces et des guillemets. */
+      const defauts = [];
+      if(!RIOT_KEY.startsWith("RGAPI-"))        defauts.push("le préfixe RGAPI- manque");
+      if(RIOT_KEY !== RIOT_KEY.trim())          defauts.push("il y a un espace ou un retour à la ligne en bord");
+      if(/["']/.test(RIOT_KEY))                 defauts.push("la valeur contient des guillemets");
+      if(/\s/.test(RIOT_KEY))                   defauts.push("la valeur contient une espace ou un saut de ligne");
+      if(/[^\x20-\x7E]/.test(RIOT_KEY))         defauts.push("la valeur contient un caractère invisible ou non latin");
+      if(!FORME_CLE.test(RIOT_KEY.trim()) && RIOT_KEY.startsWith("RGAPI-"))
+        defauts.push("le corps ne ressemble pas à un identifiant hexadécimal (caractère remplacé au copier-coller ?)");
+
       const forme = "longueur " + RIOT_KEY.length
-        + (RIOT_KEY.startsWith("RGAPI-") ? ", préfixe RGAPI- présent" : ", PRÉFIXE RGAPI- ABSENT")
-        + (RIOT_KEY !== RIOT_KEY.trim() ? ", ESPACES EN BORD" : "")
-        + (/["']/.test(RIOT_KEY) ? ", GUILLEMETS DANS LA VALEUR" : "");
-      throw new RiotError(r.status, r.status === 403
-        ? "Clé API Riot refusée (403) : expirée ou révoquée. Une clé de développement meurt toutes les 24 h — regénère-la sur developer.riotgames.com, puis remplace le secret RIOT_API_KEY. Forme de la clé lue : " + forme
-        : "Clé API Riot refusée (401) : clé mal formée. Vérifie qu'il n'y a ni espace ni guillemet autour de la valeur du secret. Forme de la clé lue : " + forme);
+        + (defauts.length ? " — " + defauts.join(" ; ") : " — forme conforme");
+
+      throw new RiotError(r.status,
+        defauts.length
+          ? "Clé API Riot refusée (" + r.status + ") : la valeur du secret est abîmée. Recolle-la sans rien autour. Diagnostic : " + forme + "."
+          : "Clé API Riot refusée (" + r.status + ") alors que sa forme est irréprochable (" + forme + "). "
+            + "Ce n'est donc pas un problème de copier-coller : la clé est expirée, révoquée, ou vient d'un autre compte. "
+            + "Sur developer.riotgames.com, regénère la clé de développement et recolle CELLE QUI EST AFFICHÉE À CET INSTANT — "
+            + "en regénérer une nouvelle invalide la précédente sur-le-champ.");
     }
     if(!r.ok) throw new RiotError(r.status, "Riot a répondu " + r.status + ".");
     return r.json();
