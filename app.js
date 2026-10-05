@@ -626,18 +626,40 @@ function scorePoints(id){
   return pts;
 }
 
-// Paliers cumulés d'une équipe.
+/* Paliers cumulés d'une équipe, primes journalières comprises.
+
+   La prime de +80 LP ne tombe pas à minuit : elle tombe à l'instant
+   précis où l'équipe franchit les 150 LP du jour. On l'ajoute donc sur
+   la partie qui fait passer le seuil — la courbe montre un saut net,
+   au bon moment, et son point d'arrivée correspond au score affiché
+   dans la balance.
+
+   Uniquement en LP globaux : l'objectif se compte en globaux, et la
+   lecture « LP nets » doit rester du pur LP Riot, sans rien d'ajouté. */
 function teamPoints(tk){
+  const primeAuPassage = chartLp === "total";
   const evts = [];
   S.games.forEach(g => {
     const p = S.players.find(x => x.id === g.player_id);
     const d = lpDe(g);
     if(!p || p.team !== tk || !d) return;
-    evts.push({ t: tsOf(g), d });
+    evts.push({ t: tsOf(g), d, jour: dayOf(g.played_on), gain: Math.max(0, lpGlobal(g)) });
   });
   evts.sort((a,b) => a.t - b.t);
+
   let run = 0;
-  return evts.map(e => ({ t: e.t, y: (run += e.d) }));
+  const duJour = {}, acquise = {};
+  return evts.map(e => {
+    run += e.d;
+    if(primeAuPassage && !acquise[e.jour]){
+      duJour[e.jour] = (duJour[e.jour] || 0) + e.gain;
+      if(duJour[e.jour] >= OBJECTIF_JOUR){
+        acquise[e.jour] = true;
+        run += PRIME_OBJECTIF;
+      }
+    }
+    return { t: e.t, y: run };
+  });
 }
 
 // Valeur au temps t0, puis tracé en escalier jusqu'à t1.
@@ -824,7 +846,10 @@ function renderChart(){
   const jour = new Date(t0).toLocaleDateString("fr-FR", { day:"numeric", month:"long" });
   out += '<text x="'+PL+'" y="'+(H-4)+'" text-anchor="start" fill="var(--muted)" font-family="Barlow Semi Condensed" font-size="11" letter-spacing="1.2">'
        + (rang ? 'RANG CHEZ RIOT · '
-               : chartLp === "total" ? 'LP CUMULÉS, OBJETS COMPRIS · ' : 'LP NETS CUMULÉS · ')
+               : chartLp === "total"
+                   ? (chartMode === "teams" ? 'LP CUMULÉS, OBJETS ET PRIMES COMPRIS · '
+                                            : 'LP CUMULÉS, OBJETS COMPRIS · ')
+                   : 'LP NETS CUMULÉS · ')
        + esc(jour.toUpperCase()) + '</text>';
 
   /* Pas d'aire sous les courbes.
