@@ -691,15 +691,6 @@ function coursePath(pts, X, Y, t0, t1){
   return d;
 }
 
-/* La même marche d'escalier, refermée sur la ligne du zéro : c'est ce
-   qui donne l'aire teintée sous la courbe. On ne recalcule rien, on
-   prolonge le tracé — les deux ne peuvent donc pas diverger. */
-function aireSous(d, X, Y, t0, t1){
-  if(!d) return "";
-  return d + " L " + X(t1).toFixed(1) + " " + Y(0).toFixed(1)
-           + " L " + X(t0).toFixed(1) + " " + Y(0).toFixed(1) + " Z";
-}
-
 function stepPath(pts, X, Y, t0, t1){
   let y = valueAt(pts, t0);
   let d = "M " + X(t0).toFixed(1) + " " + Y(y).toFixed(1);
@@ -836,27 +827,22 @@ function renderChart(){
                : chartLp === "total" ? 'LP CUMULÉS, OBJETS COMPRIS · ' : 'LP NETS CUMULÉS · ')
        + esc(jour.toUpperCase()) + '</text>';
 
-  // Un dégradé par série, pour l'aire sous la courbe.
-  let defs = '<defs>';
-  vis.forEach((s, i) => {
-    defs += '<linearGradient id="grad'+i+'" x1="0" y1="0" x2="0" y2="1">'
-         +  '<stop offset="0" stop-color="'+s.color+'" stop-opacity=".22"/>'
-         +  '<stop offset="1" stop-color="'+s.color+'" stop-opacity="0"/></linearGradient>';
-  });
-  out = defs + '</defs>' + out;
+  /* Pas d'aire sous les courbes.
 
-  // En mode « joueurs » il y a dix courbes : l'aire les rendrait
-  // illisibles, on la réserve au duel d'équipes.
-  const avecAire = chartMode !== "players" && !rang;
+     Elle avait l'air d'une bonne idée, mais ici les séries traversent
+     le zéro : l'aire d'une équipe en négatif se referme SUR la ligne du
+     zéro et forme une dalle opaque qui recouvre l'autre courbe. Aucun
+     réglage d'opacité n'y change rien — c'est la forme même du
+     remplissage qui ne convient pas à des valeurs signées.
 
+     Des lignes nettes, un zéro bien marqué et la valeur en bout de
+     course se lisent mieux. */
   vis.forEach((s, i) => {
     const d = coursePath(s.pts, X, Y, t0, t1);
-    if(avecAire){
-      out += '<path d="'+aireSous(d, X, Y, t0, t1)+'" fill="url(#grad'+i+')" stroke="none"/>';
-    }
     out += '<path id="serie'+i+'" d="'+d+'" fill="none" stroke="'+s.color
-        +  '" stroke-width="'+(avecAire ? 2.4 : 1.8)+'" stroke-linejoin="round" stroke-linecap="round"'
-        +  ' opacity="'+(chartMode==="players" ? 0.9 : 1)+'"/>';
+        +  '" stroke-width="'+(chartMode === "players" ? 1.9 : 2.6)+'"'
+        +  ' stroke-linejoin="round" stroke-linecap="round"'
+        +  ' opacity="'+(chartMode==="players" ? 0.92 : 1)+'"/>';
 
     // Un point par partie, tant qu'ils ne se marchent pas dessus.
     const dedans = s.pts.filter(p => p.t >= t0 && p.t <= t1);
@@ -1627,6 +1613,56 @@ function infobulleObjet(it, connu, note){
     + (note ? "\n\n→ " + note : "");
 }
 
+/* ------------------------------------------------------------------
+   D'où vient l'or d'une partie
+
+   Le même barème que la fonction « riot » (OR_ROLES / orDeLaPartie).
+   Il vit donc à DEUX endroits : là-bas il calcule, ici il explique. Si
+   tu changes l'un, change l'autre — et le total affiché reste celui
+   enregistré en base, pas celui recalculé ici, pour qu'un barème qui
+   aurait bougé depuis ne réécrive pas l'histoire.
+------------------------------------------------------------------- */
+const OR_ROLES = {
+  TOP:     { kill: 20, mort: 10, assist: 5 },
+  MIDDLE:  { kill: 20, mort: 10, assist: 5 },
+  BOTTOM:  { kill: 20, mort: 10, assist: 5 },
+  JUNGLE:  { kill: 12, mort: 10, assist: 4, drake: 20, nashor: 40, vol: 30 },
+  UTILITY: { kill: 10, mort: 10, assist: 7, vision: 1.2 }
+};
+const OR_VICTOIRE = 50;
+const ROLE_FR = { TOP:"Top", JUNGLE:"Jungle", MIDDLE:"Mid", BOTTOM:"Bot", UTILITY:"Support" };
+
+function detailOr(g){
+  const b = OR_ROLES[g.role] || OR_ROLES.MIDDLE;
+  const l = [];
+  const pousse = (quoi, or) => { if(or) l.push({ quoi, or: Math.round(or) }); };
+
+  pousse((g.kills   || 0) + " kills",   b.kill   * (g.kills   || 0));
+  pousse((g.deaths  || 0) + " morts",  -b.mort   * (g.deaths  || 0));
+  pousse((g.assists || 0) + " assists", b.assist * (g.assists || 0));
+  if(b.drake)  pousse((g.dragons || 0) + " drakes",  b.drake  * (g.dragons || 0));
+  if(b.nashor) pousse((g.barons  || 0) + " nashors", b.nashor * (g.barons  || 0));
+  if(b.vision) pousse((g.vision  || 0) + " de vision", b.vision * (g.vision || 0));
+  if(g.win) pousse("victoire", OR_VICTOIRE);
+  return l;
+}
+
+// Le texte de l'infobulle : le total enregistré, puis le détail.
+function infobulleOr(g){
+  const detail = detailOr(g);
+  const somme = detail.reduce((a, x) => a + x.or, 0);
+  const lignes = [orFr(g.gold_gagne) + " or" + (g.role ? " \u00b7 " + (ROLE_FR[g.role] || g.role) : "")];
+  detail.forEach(x => lignes.push((x.or > 0 ? "+" : "\u2212") + orFr(Math.abs(x.or)) + "   " + x.quoi));
+  // Un barème qui aurait changé depuis : on le dit plutôt que de faire
+  // comme si le détail expliquait le total.
+  if(somme !== g.gold_gagne && Math.max(0, somme) !== g.gold_gagne){
+    lignes.push("\u2192 bar\u00e8me modifi\u00e9 depuis : le total fait foi");
+  }else if(somme < 0){
+    lignes.push("\u2192 jamais moins de 0 sur une partie");
+  }
+  return lignes.join("\n");
+}
+
 /* Les objets qui ont pesé sur cette partie, avec ce qu'ils ont fait. */
 function chipsObjets(x, decouverts){
   const rows = S.inventory.filter(r => r.applied_match && r.applied_match === x.match_id);
@@ -1866,7 +1902,7 @@ function renderFeed(t){
         + '<div class="rowmeta">' + esc(meta) + '</div>'
         + chipsObjets(x, decouvertsParMoi)
         + (x.gold_gagne
-            ? '<div class="rowgold" title="Or gagné sur cette partie, selon ton poste et ta performance">'
+            ? '<div class="rowgold" data-tip="' + esc(infobulleOr(x)) + '">'
               + PIECE_OR + '<b>+' + orFr(x.gold_gagne) + '</b></div>'
             : "")
       + '</div>'
