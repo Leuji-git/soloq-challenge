@@ -46,6 +46,9 @@ if(!SUPABASE_URL || SUPABASE_URL.includes("xxxxxxxx") || SUPABASE_ANON_KEY.inclu
 const isAdmin = () => !!(S.me && S.me.is_admin);
 const teamName = t => t === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
 const playerById = id => S.players.find(p => p.id === id);
+/* Les joueurs du challenge, sans les seconds comptes : une doublure
+   n'est pas un concurrent, elle n'a ni objets ni parties à elle. */
+const concurrents = () => S.players.filter(p => !p.alias_of);
 
 /* =================================================================== */
 async function loadAll(){
@@ -113,6 +116,76 @@ function render(){
   renderGames();
   renderAccounts();
   renderSandbox();
+  renderRattrapage();
+}
+
+
+/* ---------------------- rattrapage d'un second compte ----------------
+   Les parties jouées sur le second compte avant son rattachement. La
+   fonction les relit chez Riot et les enregistre au nom du joueur.
+
+   Pas de LP : Riot ne publie aucun historique de rang, donc rien ne
+   permet de savoir ce qu'une partie passée a rapporté. On n'invente
+   pas un chiffre qui irait dans le classement.
+-------------------------------------------------------------------- */
+function renderRattrapage(){
+  const sel = $("#rPlayer");
+  if(!sel) return;
+  const doublures = S.players.filter(p => p.alias_of);
+  const choisi = sel.value;
+
+  sel.innerHTML = doublures.length
+    ? doublures.map(p => '<option value="' + esc(p.id) + '">'
+        + esc(p.name + "#" + p.tag) + " \u2192 "
+        + esc((playerById(p.alias_of) || {}).name || p.alias_of)
+        + (p.puuid ? "" : " (pas encore rattach\u00e9 \u00e0 Riot)")
+        + '</option>').join("")
+    : '<option value="">\u2014 aucun second compte d\u00e9clar\u00e9 \u2014</option>';
+  if(choisi) sel.value = choisi;
+  sel.disabled = !doublures.length;
+  $("#rGo").disabled = !doublures.length;
+
+  const date = $("#rSince");
+  if(date && !date.value && S.challenge && S.challenge.start_date)
+    date.value = S.challenge.start_date;
+}
+
+async function rattraperCompte(){
+  const btn = $("#rGo"), player = champ("#rPlayer");
+  if(!player) return;
+  const depuis = champ("#rSince");
+  btn.disabled = true;
+  say("#rLog", "Lecture des parties chez Riot\u2026 une requ\u00eate par partie, compte une minute.");
+  try{
+    const { data, error } = await sb.functions.invoke("riot", {
+      body: { action: "rattrapage", player, depuis: depuis ? depuis + "T00:00:00+02:00" : null }
+    });
+    if(error){
+      let msg = error.message;
+      try{ const b = await error.context.json(); if(b && b.error) msg = b.error; }catch(_){}
+      throw new Error(msg);
+    }
+    if(data && data.error) throw new Error(data.error);
+
+    const bouts = [
+      data.ajoutees + " partie(s) ajout\u00e9e(s) \u00e0 " + data.credite,
+      data.or + " or cr\u00e9dit\u00e9"
+    ];
+    if(data.deja)    bouts.push(data.deja + " d\u00e9j\u00e0 connue(s)");
+    if(data.remakes) bouts.push(data.remakes + " remake(s) ignor\u00e9(s)");
+    if(data.hors)    bouts.push(data.hors + " hors challenge");
+    if(data.reste)   bouts.push("il en reste " + data.reste + " \u00e0 lire : relance");
+    say("#rLog", data.compte + " \u2014 " + bouts.join(" \u00b7 ")
+      + (data.parties && data.parties.length
+          ? " | " + data.parties.map(x => x.le + " " + (x.champion || "?")
+              + " " + x.resultat + " +" + x.or + " or").join(" \u00b7 ")
+          : ""));
+    await loadAll();
+  }catch(e){
+    say("#rLog", e.message || String(e), true);
+  }finally{
+    btn.disabled = false;
+  }
 }
 
 
@@ -148,7 +221,7 @@ function dessinerSandbox(force){
   const joueurs = $("#bPlayer");
   if(!joueurs) return;                   // section absente d'une page en cache
   const choisiJ = joueurs.value;
-  joueurs.innerHTML = S.players.map(p =>
+  joueurs.innerHTML = concurrents().map(p =>
     '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join("");
   if(choisiJ) joueurs.value = choisiJ;
 
@@ -166,7 +239,7 @@ function dessinerSandbox(force){
   const duo = champ("#bDuo", "solo");
   const part = $("#bPartner"), choisiP = part ? part.value : "";
   const possibles = !moi || duo === "solo" ? []
-    : S.players.filter(p => p.id !== moi.id
+    : concurrents().filter(p => p.id !== moi.id
         && (duo === "team" ? p.team === moi.team : p.team !== moi.team));
   if(part){
   part.disabled = duo === "solo";
@@ -190,7 +263,7 @@ function dessinerSandbox(force){
 
   const cibles = $("#bTarget"), choisiC = cibles ? cibles.value : "";
   if(cibles){
-    cibles.innerHTML = S.players.map(p =>
+    cibles.innerHTML = concurrents().map(p =>
       '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join("");
     if(choisiC) cibles.value = choisiC;
   }
@@ -393,7 +466,9 @@ function tierSelect(cls, sel){
 }
 
 function renderPlayers(){
-  $("#pCount").textContent = S.players.length + " joueurs";
+  const nDoublures = S.players.length - concurrents().length;
+  $("#pCount").textContent = concurrents().length + " joueurs"
+    + (nDoublures ? " \u00b7 " + nDoublures + " second compte" + (nDoublures > 1 ? "s" : "") : "");
   const teamSel = (sel) => '<select class="pteam">'
     + '<option value="a"'+(sel==="a"?" selected":"")+'>'+esc(teamName("a"))+'</option>'
     + '<option value="b"'+(sel==="b"?" selected":"")+'>'+esc(teamName("b"))+'</option></select>';
@@ -421,7 +496,11 @@ function renderPlayers(){
       + '<td>'+(riotOk
           ? '<span class="pill live">Riot rattaché</span>'
           : '<span class="pill">En attente</span><div class="wr">rattaché au prochain relevé si le pseudo est exact</div>')
-        + '<div style="margin-top:4px">'+discord+'</div></td>'
+        + '<div style="margin-top:4px">'
+          + (p.alias_of
+              ? '<span class="pill">Second compte de ' + esc((playerById(p.alias_of) || {}).name || p.alias_of) + '</span>'
+              : discord)
+        + '</div></td>'
       + '<td class="r"><div class="btnrow" style="justify-content:flex-end">'
         + (p.claimed_by ? '<button type="button" class="btn ghost sm release">Délier</button>' : '')
         + '<button type="button" class="btn ghost sm del">Supprimer</button>'
@@ -644,6 +723,7 @@ function initUI(){
   $("#pSave").addEventListener("click", savePlayers);
   $("#nAdd").addEventListener("click", addPlayer);
   $("#sForce").addEventListener("click", forceSync);
+  $("#rGo").addEventListener("click", rattraperCompte);
   $("#sKeyTest").addEventListener("click", forceSync);
   $("#bGive").addEventListener("click", giveItem);
   $("#bPlay").addEventListener("click", simGame);

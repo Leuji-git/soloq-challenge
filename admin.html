@@ -124,6 +124,42 @@
       </div>
     </section>
 
+    <!-- ---------- second compte ---------- -->
+    <section class="block">
+      <header><h2>Second compte</h2></header>
+      <div class="body">
+        <div class="sect">
+          <p class="hint">Un joueur qui joue sur deux comptes LoL. Les parties du second
+            comptent pour lui, et son rang est relevé séparément — chaque compte a sa
+            propre échelle de LP. Le rattachement se fait dans le SQL Editor
+            (<code>supabase/second-compte.sql</code>) ; ici on ne fait que rattraper les
+            parties jouées avant.</p>
+
+          <div class="form">
+            <div class="field">
+              <label for="rPlayer">Compte à rattraper</label>
+              <select id="rPlayer"></select>
+            </div>
+            <div class="field">
+              <label for="rSince">Depuis le</label>
+              <input type="date" id="rSince">
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button type="button" class="btn" id="rGo">Rattraper les parties</button>
+            </div>
+          </div>
+
+          <p class="hint">Les LP ne se rattrapent pas : Riot ne publie aucun historique de
+            rang, rien ne permet de savoir ce qu'une partie passée a rapporté. Ces parties
+            entrent donc à <b>0 LP</b>, marquées « estimées ». Elles comptent pour les
+            victoires, les statistiques et l'or. Pas de coffre non plus : personne n'en a
+            reçu pour ses parties d'avant les coffres.</p>
+          <div class="log" id="rLog"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- ---------- comptes ---------- -->
     <section class="block">
       <header><h2>Comptes connectés</h2></header>

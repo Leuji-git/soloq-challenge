@@ -584,7 +584,8 @@ async function releverEnDirect(joueurs){
 
       const moi = (g.participants || []).find(x => x.puuid === p.puuid);
       enJeu.push({
-        player_id: p.id,
+        // Un second compte joue au nom du joueur qu'il double.
+        player_id: p.alias_of || p.id,
         match_id: g.gameId ? String(g.gameId) : null,
         started_at: new Date(debut).toISOString(),
         champion: moi && moi.championId ? String(moi.championId) : null,
@@ -652,7 +653,7 @@ async function sync(force){
   try{
     const [ch, pl, sn, it, tb] = await Promise.all([
       db.from("challenge").select("*").eq("id", 1).single(),
-      db.from("players").select("id,name,tag,team,puuid,claimed_by"),
+      db.from("players").select("id,name,tag,team,puuid,claimed_by,alias_of"),
       db.from("rank_snapshots").select("*"),
       db.from("items").select("key,rarity,target,active"),
       db.from("team_boosts").select("team,until")
@@ -665,6 +666,14 @@ async function sync(force){
     const winEnd = winStart + ch.data.days * 86400000;
     const snapOf = Object.fromEntries((sn.data || []).map(s => [s.player_id, s]));
     const tous = pl.data || [];
+
+    /* Les seconds comptes. Une ligne « doublure » a son propre puuid et
+       son propre relevé de rang — chaque compte a son échelle de LP,
+       on ne peut pas les mélanger — mais tout ce qu'elle produit
+       (parties, or, coffres, objets, « en direct ») est écrit au nom du
+       joueur qu'elle double. compteDe() dit à qui créditer. */
+    const parId = Object.fromEntries(tous.map(p => [p.id, p]));
+    const compteDe = p => parId[p.alias_of] || p;
 
     // Profils créés avant le suivi automatique : on retrouve leur compte Riot
     // à partir du pseudo et du tag déjà connus, et on pose un premier relevé.
@@ -703,10 +712,12 @@ async function sync(force){
       bilan.errors.push("en direct : " + (e.message || e));
       if(e instanceof RiotError && (e.status === 401 || e.status === 403)) cleRefusee = true;
     }
-    const byPuuid = Object.fromEntries(tous.filter(x => x.puuid).map(p => [p.puuid, p]));
+    const byPuuid = Object.fromEntries(tous.filter(x => x.puuid).map(p => [p.puuid, compteDe(p)]));
 
     for(const p of players){
       bilan.players++;
+      // Le rang se lit sur le compte ; tout le reste s'écrit sur le joueur.
+      const cible = compteDe(p);
       try{
         const next = snapshotFromEntries(await riot(`${PLATFORM}/lol/league/v4/entries/by-puuid/${p.puuid}`));
         lus++;                                 // Riot a répondu : la clé vit
@@ -717,9 +728,9 @@ async function sync(force){
         if(cmp.type === "adjust"){
           if(now >= winStart && now <= winEnd){
             await db.from("games").insert({
-              player_id: p.id, lp: clampLp(cmp.delta), win: false, duo: "solo", stake: 0,
+              player_id: cible.id, lp: clampLp(cmp.delta), win: false, duo: "solo", stake: 0,
               kind: "adjust", match_id: "adjust-" + now, played_on: parisDate(now),
-              created_at: new Date(now).toISOString(), created_by: p.claimed_by
+              created_at: new Date(now).toISOString(), created_by: cible.claimed_by
             });
             bilan.adjusts++;
           }
@@ -732,7 +743,7 @@ async function sync(force){
         const since = Math.floor((prev.checkedAt - 3600e3) / 1000);
         const ids = await riot(`${REGION}/lol/match/v5/matches/by-puuid/${p.puuid}/ids?queue=${QUEUE_SOLO}&startTime=${since}&start=0&count=20`) || [];
         const known = ids.length
-          ? (await db.from("games").select("match_id").eq("player_id", p.id).in("match_id", ids)).data || []
+          ? (await db.from("games").select("match_id").eq("player_id", cible.id).in("match_id", ids)).data || []
           : [];
         const deja = new Set(known.map(k => k.match_id));
 
@@ -780,14 +791,14 @@ async function sync(force){
           });
 
           const { error } = await db.from("games").insert({
-            player_id: p.id, lp: clampLp(split.lps[i]), win: g.win, duo: g.duo, stake: 0,
+            player_id: cible.id, lp: clampLp(split.lps[i]), win: g.win, duo: g.duo, stake: 0,
             partner_id: g.partnerId, match_id: g.matchId, champion: g.champion,
             approx: split.approx || !!att.forced, kind: "game",
             role: g.role, kills: g.kills, deaths: g.deaths, assists: g.assists,
             vision: g.vision, dragons: g.dragons, barons: g.barons, cs: g.cs,
             gold_gagne: or,
             played_on: parisDate(g.end), created_at: new Date(g.end).toISOString(),
-            created_by: p.claimed_by
+            created_by: cible.claimed_by
           });
           if(error && !/duplicate/i.test(error.message)) throw error;
           if(!error){
@@ -804,7 +815,7 @@ async function sync(force){
                Le doublement vit dans le total global, jamais dans le
                net : le classement individuel reste ce que Riot a donné. */
             const net = clampLp(split.lps[i]);
-            const finBoost = boosts[p.team] || 0;
+            const finBoost = boosts[cible.team] || 0;
             let lpBoost = 0;
             if(net > 0 && finBoost && g.end <= finBoost) lpBoost = net;
             // L'index unique (player_id, match_id) du journal d'or rend
@@ -812,15 +823,15 @@ async function sync(force){
             // deux fois.
             if(or > 0){
               const { error: eOr } = await db.rpc("credit_gold", {
-                p_player: p.id, p_amount: or,
+                p_player: cible.id, p_amount: or,
                 p_raison: "partie " + (g.role || "poste inconnu"), p_match: g.matchId
               });
               if(!eOr) bilan.gold += or;
             }
-            const obj = await appliquerObjets(p, g, net, parCle);
+            const obj = await appliquerObjets(cible, g, net, parCle);
             if(obj.detail.length || lpBoost){
               await db.from("games").update({ lp_items: clampLp(obj.lp + lpBoost) })
-                .eq("player_id", p.id).eq("match_id", g.matchId);
+                .eq("player_id", cible.id).eq("match_id", g.matchId);
               bilan.objets += obj.detail.length;
               if(lpBoost) bilan.boost = (bilan.boost || 0) + lpBoost;
             }
@@ -836,7 +847,7 @@ async function sync(force){
           if(!error && peutLooter(g.duo, g.win)){
             {
               const { error: eLoot } = await db.from("player_boxes")
-                .insert({ player_id: p.id, source_match: g.matchId });
+                .insert({ player_id: cible.id, source_match: g.matchId });
               if(!eLoot) bilan.loot++;
             }
           }
@@ -1098,6 +1109,101 @@ async function recalculer(user, body){
 }
 
 
+/* ---------------------- rattrapage d'un compte ----------------------
+
+   Les parties déjà jouées sur un compte avant son rattachement.
+
+   Les LP, eux, ne se rattrapent pas : Riot ne publie aucun historique
+   de rang, et rien dans l'API ne permet de retrouver ce qu'une partie
+   passée a rapporté. Ces parties entrent donc à 0 LP, marquées
+   « estimées ». Elles comptent pour les victoires, les statistiques et
+   l'or ; le classement en LP nets ne contient que du LP réellement
+   relevé chez Riot, et on ne lui fait pas dire autre chose.
+
+   Pas de coffre non plus : personne n'en a reçu pour ses parties
+   d'avant les coffres, celui-là n'y aurait pas plus droit.
+-------------------------------------------------------------------- */
+const RATTRAPAGE_MAX = 35;          // par appel, pour tenir dans le quota Riot
+
+async function rattraper(user, body){
+  if(!user || !await isAdmin(user.id)) return json({ error: "Réservé à un administrateur." }, 403);
+  if(!body.player) return json({ error: "Compte attendu." }, 400);
+
+  const { data: cpt } = await db.from("players")
+    .select("id,name,tag,team,puuid,alias_of,claimed_by").eq("id", body.player).maybeSingle();
+  if(!cpt) return json({ error: "Compte inconnu." }, 400);
+  if(!cpt.puuid) return json({ error: "Ce compte n'est pas encore rattaché à Riot. Lance un relevé d'abord : il le retrouve tout seul." }, 400);
+
+  const { data: ch } = await db.from("challenge").select("*").eq("id", 1).single();
+  const winStart = parisMidnight(ch.start_date);
+  const winEnd = winStart + ch.days * 86400000;
+  const depuis = body.depuis ? Date.parse(body.depuis) : winStart;
+  if(!isFinite(depuis)) return json({ error: "Date de départ illisible." }, 400);
+
+  const { data: tous } = await db.from("players").select("id,name,team,puuid,alias_of,claimed_by");
+  const parId = Object.fromEntries((tous || []).map(p => [p.id, p]));
+  const cible = parId[cpt.alias_of] || cpt;
+  const byPuuid = Object.fromEntries((tous || []).filter(x => x.puuid)
+    .map(p => [p.puuid, parId[p.alias_of] || p]));
+
+  const ids = await riot(`${REGION}/lol/match/v5/matches/by-puuid/${cpt.puuid}/ids`
+    + `?queue=${QUEUE_SOLO}&startTime=${Math.floor(depuis / 1000)}&start=0&count=100`) || [];
+
+  const bilan = {
+    compte: cpt.name, credite: cible.name,
+    vues: ids.length, ajoutees: 0, deja: 0, hors: 0, remakes: 0,
+    or: 0, reste: Math.max(0, ids.length - RATTRAPAGE_MAX), parties: []
+  };
+
+  let lues = 0;
+  for(const id of ids){
+    if(lues >= RATTRAPAGE_MAX) break;
+    lues++;
+    // Une requête toutes les 1,3 s : le quota d'une clé de développement
+    // est de 100 sur 2 minutes, et le relevé en consomme déjà.
+    if(lues > 1) await new Promise(ok => setTimeout(ok, 1300));
+
+    const g = readMatch(await riot(`${REGION}/lol/match/v5/matches/${id}`), cpt.puuid, byPuuid, cible.team);
+    if(!g){ bilan.hors++; continue; }
+    if(g.remake){ bilan.remakes++; continue; }
+    if(g.end < winStart || g.end > winEnd){ bilan.hors++; continue; }
+
+    const or = orDeLaPartie({
+      role: g.role, win: g.win, kills: g.kills, deaths: g.deaths,
+      assists: g.assists, vision: g.vision, dragons: g.dragons,
+      barons: g.barons, voles: g.voles
+    });
+
+    const { error } = await db.from("games").insert({
+      player_id: cible.id, lp: 0, win: g.win, duo: g.duo, stake: 0,
+      partner_id: g.partnerId, match_id: g.matchId, champion: g.champion,
+      approx: true, kind: "game",
+      role: g.role, kills: g.kills, deaths: g.deaths, assists: g.assists,
+      vision: g.vision, dragons: g.dragons, barons: g.barons, cs: g.cs,
+      gold_gagne: or,
+      played_on: parisDate(g.end), created_at: new Date(g.end).toISOString(),
+      created_by: cible.claimed_by
+    });
+    if(error){ bilan.deja++; continue; }        // l'index unique a parlé
+    bilan.ajoutees++;
+
+    if(or > 0){
+      const { error: eOr } = await db.rpc("credit_gold", {
+        p_player: cible.id, p_amount: or,
+        p_raison: "partie rattrapée · " + cpt.name, p_match: g.matchId
+      });
+      if(!eOr) bilan.or += or;
+    }
+    bilan.parties.push({
+      match: g.matchId, le: parisDate(g.end), champion: g.champion,
+      resultat: g.win ? "victoire" : "défaite", or
+    });
+  }
+
+  return json(bilan);
+}
+
+
 /* ------------------------------ entrée ----------------------------- */
 Deno.serve(async (req) => {
   if(req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -1117,6 +1223,7 @@ Deno.serve(async (req) => {
       case "register":   return await register(user, body);
       case "sim":        return await simuler(user, body);
       case "recompute":  return await recalculer(user, body);
+      case "rattrapage": return await rattraper(user, body);
       default:           return json({ error: "Action inconnue." }, 400);
     }
   }catch(e){

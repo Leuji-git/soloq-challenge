@@ -153,8 +153,16 @@ async function loadAll(){
     return;
   }
   S.challenge = ch.data || { name:"SoloQ Challenge", start_date:iso(new Date()), days:21, team_a_name:"Équipe A", team_b_name:"Équipe B" };
-  // Nettoyés dès le chargement : liens, affichage et infobulles en profitent tous.
-  S.players = (pl.data || []).map(p => Object.assign({}, p, { name: cleanRiot(p.name), tag: cleanRiot(p.tag) }));
+  /* Nettoyés dès le chargement : liens, affichage et infobulles en
+     profitent tous.
+
+     Les seconds comptes sont écartés ici, une fois pour toutes : leurs
+     parties sont enregistrées au nom du joueur qu'ils doublent, donc
+     leur ligne est vide. La laisser passer afficherait un concurrent
+     fantôme à zéro partie dans l'équipe, le classement et la courbe. */
+  S.players = (pl.data || [])
+    .filter(p => !p.alias_of)
+    .map(p => Object.assign({}, p, { name: cleanRiot(p.name), tag: cleanRiot(p.tag) }));
   S.games   = gm.data || [];
   S.snaps    = Object.fromEntries((sn.data||[]).map(r => [r.player_id, r]));
   S.sync     = st.data || null;
@@ -1610,12 +1618,14 @@ function renderEntry(){
   renderInventaire(vu);
 }
 
-/* L'inventaire d'un joueur — le sien ou celui d'un autre.
+/* L'inventaire d'un joueur.
 
-   Un objet n'est nommé que si le VISITEUR l'a déjà obtenu, même quand
-   il regarde la réserve de quelqu'un d'autre : sinon il suffirait de
-   consulter les autres pour apprendre tout le catalogue. On voit donc
-   combien d'objets l'adversaire garde sous le coude, pas lesquels. */
+   Le sien : tout en détail. Celui d'un autre : le nombre, rien de plus.
+
+   Savoir qu'un adversaire garde une Pierre de Garde sous le coude, ce
+   n'est pas de la curiosité, c'est du renseignement — ça dit quoi
+   craindre et quand attaquer. On annonce donc la taille de la réserve,
+   et c'est tout. L'admin, lui, voit tout : c'est sa vue de travail. */
 function renderInventaire(t){
   const grille = $("#invGrid");
   if(!grille || !t) return;
@@ -1629,6 +1639,21 @@ function renderInventaire(t){
   if(!aLui.length){
     grille.innerHTML = '<div class="empty">'
       + esc(t.name) + " n'a aucun objet en réserve.</div>";
+    return;
+  }
+
+  // La réserve de quelqu'un d'autre : combien, pas lesquels.
+  if(!moi || (t.id !== moi.id && !isAdmin())){
+    const armes = aLui.filter(r => r.locked_at).length;
+    grille.innerHTML = '<div class="invblind">'
+      + '<span class="blindicon">\u{1F512}</span>'
+      + '<div class="blindtext">'
+        + '<div class="blindcount">' + aLui.length + ' objet'
+        + (aLui.length > 1 ? "s" : "") + ' en r\u00e9serve</div>'
+        + '<div class="blindnote">'
+        + (armes ? armes + (armes > 1 ? " d\u00e9j\u00e0 arm\u00e9s" : " d\u00e9j\u00e0 arm\u00e9") + " \u00b7 " : "")
+        + "lesquels, \u00e7a ne regarde que " + esc(t.name) + "</div>"
+      + '</div></div>';
     return;
   }
 
@@ -1763,7 +1788,12 @@ function initInfobulles(){
   const bulle = $("#floatTip");
   if(!bulle) return;
 
-  const montrer = el => {
+  // La dernière position connue du curseur : c'est elle qui place le
+  // panneau, pas la case survolée. Sur une ligne de partie large, une
+  // bulle centrée sur la case peut sortir à l'autre bout de l'écran.
+  const souris = { x: 0, y: 0 };
+
+  const montrer = (el, e) => {
     const txt = el.getAttribute("data-tip");
     if(!txt) return;
     const [titre, ...reste] = txt.split("\n").filter(Boolean);
@@ -1780,26 +1810,51 @@ function initInfobulles(){
              + '<span>' + esc(soi ? "posé par " + par.name : "lancé par " + par.name) + '</span></div>'
              : "")
       + '<div class="tiptitre">' + esc(titre) + '</div>'
-      + reste.map(l => '<div class="tipcorps' + (l.startsWith("\u2192") ? " tipnote" : "") + '">'
-          + esc(l) + '</div>').join("");
+      + reste.map(ligne).join("");
     bulle.hidden = false;
-    placer(el);
+    if(e){ souris.x = e.clientX; souris.y = e.clientY; }
+    placer();
   };
 
-  const placer = el => {
-    const r = el.getBoundingClientRect();
+  /* Une ligne de détail. Le texte arrive en « montant<tabulation>libellé »
+     quand il y a un chiffre à aligner : on en fait deux colonnes, le
+     montant à droite en chiffres de même largeur, pour qu'on lise la
+     colonne d'un coup d'œil au lieu de suivre des lignes de texte. */
+  const ligne = l => {
+    if(l.startsWith("\u2192"))
+      return '<div class="tipcorps tipnote">' + esc(l) + '</div>';
+    const coupe = l.indexOf("\t");
+    if(coupe < 0) return '<div class="tipcorps">' + esc(l) + '</div>';
+    const montant = l.slice(0, coupe), quoi = l.slice(coupe + 1);
+    return '<div class="tipdetail' + (montant.startsWith("\u2212") ? " moins" : "") + '">'
+      + '<span class="tipmontant">' + esc(montant) + '</span>'
+      + '<span class="tipquoi">' + esc(quoi) + '</span></div>';
+  };
+
+  const placer = () => {
     const b = bulle.getBoundingClientRect();
-    // On préfère au-dessus ; en haut d'écran on bascule en dessous.
-    const dessus = r.top > b.height + 12;
-    let x = r.left + r.width / 2 - b.width / 2;
-    x = Math.max(8, Math.min(x, window.innerWidth - b.width - 8));
+    const marge = 15;
+    // À droite du curseur, et à gauche quand on approche du bord.
+    let x = souris.x + marge;
+    if(x + b.width > window.innerWidth - 8) x = souris.x - marge - b.width;
+    x = Math.max(8, x);
+    // Au-dessus du curseur, et dessous quand il n'y a plus la place.
+    let y = souris.y - b.height - marge;
+    if(y < 8) y = souris.y + marge + 6;
+    y = Math.min(y, window.innerHeight - b.height - 8);
     bulle.style.left = x + "px";
-    bulle.style.top = (dessus ? r.top - b.height - 8 : r.bottom + 8) + "px";
+    bulle.style.top = y + "px";
   };
 
   document.addEventListener("mouseover", e => {
     const el = e.target.closest && e.target.closest("[data-tip]");
-    if(el) montrer(el);
+    if(el) montrer(el, e);
+  });
+  // Le panneau ne porte pas d'événements (pointer-events:none) : il peut
+  // suivre le curseur sans jamais se fuir lui-même.
+  document.addEventListener("mousemove", e => {
+    souris.x = e.clientX; souris.y = e.clientY;
+    if(!bulle.hidden) placer();
   });
   document.addEventListener("mouseout", e => {
     const el = e.target.closest && e.target.closest("[data-tip]");
@@ -1861,7 +1916,9 @@ function infobulleOr(g){
   const detail = detailOr(g);
   const somme = detail.reduce((a, x) => a + x.or, 0);
   const lignes = [orFr(g.gold_gagne) + " or" + (g.role ? " \u00b7 " + (ROLE_FR[g.role] || g.role) : "")];
-  detail.forEach(x => lignes.push((x.or > 0 ? "+" : "\u2212") + orFr(Math.abs(x.or)) + "   " + x.quoi));
+  // Tabulation : le panneau en fait deux colonnes alignées.
+  detail.forEach(x => lignes.push(
+    (x.or > 0 ? "+" : "\u2212") + orFr(Math.abs(x.or)) + "\t" + x.quoi));
   // Un barème qui aurait changé depuis : on le dit plutôt que de faire
   // comme si le détail expliquait le total.
   if(somme !== g.gold_gagne && Math.max(0, somme) !== g.gold_gagne){
