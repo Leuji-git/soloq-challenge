@@ -1506,6 +1506,21 @@ dialog.modal .form{margin-bottom:12px}
 .rolechip.editable:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .rolechip.editable .roles{margin-left:0}
 
+/* Sur la ligne d'équipe, tout est plus serré : la pastille suit le
+   rang sur la même ligne, en plus petit, sans pousser la mise en page. */
+.psub .roles{margin-left:7px;gap:2px}
+.psub .roleico.main{width:15px;height:15px}
+.psub .roleico.second{width:11px;height:11px}
+.psub .rolechip.editable{padding:0 3px}
+.roleadd{
+  margin-left:7px;padding:0 6px;cursor:pointer;
+  border-radius:var(--pill);border:1px dashed var(--line);background:none;
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;line-height:16px;
+  color:var(--muted);
+}
+.roleadd:hover{color:var(--accent);border-color:color-mix(in srgb, var(--accent) 45%, transparent)}
+.roleadd:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
 /* La fenêtre de choix. */
 .rolerow{
   display:grid;grid-template-columns:92px 1fr;align-items:center;gap:12px;
@@ -1536,3 +1551,7 @@ dialog.modal .form{margin-bottom:12px}
   .rolerow{grid-template-columns:1fr;gap:6px}
   .roleopt{width:56px}
 }
+
+/* Le bouton de sourdine, dans l'en-tête du volet des objets. */
+#soundBtn{font-size:15px;line-height:1}
+#soundBtn[aria-pressed="true"]{opacity:.45}

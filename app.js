@@ -524,7 +524,8 @@ function renderRosters(states){
           return '<li'+(mine && mine.id === s.player.id ? ' class="me"' : '')+'>'
             + avatarRing(s.player, { sm:true }) + crest(r)
             + '<div style="min-width:0">' + nameLink(s.player)
-            + '<div class="psub">'+esc(rankLabel(r))+(s.player.claimed_by ? "" : " · profil libre")+'</div></div>'
+            + '<div class="psub">'+esc(rankLabel(r))+(s.player.claimed_by ? "" : " · profil libre")
+              + roleChip(s.player, { compact:true })+'</div></div>'
             + '<div class="pright">'
               + '<span class="pmain">' + deltaHtml(s.global) + '<span class="u">LP</span>'
                 + '<span class="sep">·</span>'
@@ -1388,6 +1389,135 @@ function barreObjet(it, libre, arme, reste){
    parce qu'elle doit s'arrêter dessus. L'attente réseau se cache
    derrière la secousse.
 ------------------------------------------------------------------- */
+/* ------------------------------------------------------------------
+   Le son de l'ouverture
+
+   Tout est synthétisé ici, à la volée : aucun fichier audio, donc rien
+   à télécharger, rien à héberger, et la page reste jouable hors ligne.
+   C'est une composition à nous, elle ne reprend aucune musique
+   existante.
+
+   Le son n'est jamais indispensable : si le navigateur refuse l'audio,
+   tout le reste continue sans broncher.
+------------------------------------------------------------------- */
+const CLE_SON = "soloq.son";
+let audio = null;
+
+function sonActif(){
+  try{ return localStorage.getItem(CLE_SON) !== "0"; }catch(_){ return true; }
+}
+
+function majBoutonSon(){
+  const b = $("#soundBtn");
+  if(!b) return;
+  const on = sonActif();
+  b.textContent = on ? "\u{1F50A}" : "\u{1F507}";
+  b.title = on ? "Couper le son de l'ouverture" : "Remettre le son de l'ouverture";
+  b.setAttribute("aria-label", b.title);
+  b.setAttribute("aria-pressed", String(!on));
+}
+
+function basculerSon(){
+  const on = !sonActif();
+  try{ localStorage.setItem(CLE_SON, on ? "1" : "0"); }catch(_){}
+  majBoutonSon();
+  if(on) sonCoffre("commun");          // on entend tout de suite ce qu'on rallume
+}
+
+function contexteAudio(){
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if(!AC) return null;
+  audio = audio || new AC();
+  if(audio.state === "suspended") audio.resume();
+  return audio;
+}
+
+// Une note brève. `quand` est en secondes sur l'horloge audio.
+function note(ctx, freq, quand, duree, volume, forme){
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = forme || "triangle";
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, quand);
+  g.gain.exponentialRampToValueAtTime(volume, quand + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, quand + duree);
+  o.connect(g).connect(ctx.destination);
+  o.start(quand);
+  o.stop(quand + duree + 0.03);
+}
+
+/* Trois notes qui montent, une de plus à chaque palier de rareté, et
+   une tenue haute pour le légendaire : on sait ce qu'on a eu avant
+   d'avoir lu le nom. */
+const CARILLON = {
+  commun:     [523.25, 659.25, 783.99],
+  rare:       [523.25, 659.25, 783.99, 1046.50],
+  legendaire: [523.25, 659.25, 783.99, 1046.50, 1318.51]
+};
+
+function sonCoffre(rarete){
+  if(!sonActif()) return;
+  try{
+    const ctx = contexteAudio();
+    if(!ctx) return;
+    const t0 = ctx.currentTime + 0.02;
+    const air = CARILLON[rarete] || CARILLON.commun;
+    air.forEach((f, i) => note(ctx, f, t0 + i * 0.085, 0.42, 0.11));
+    if(rarete === "legendaire")
+      note(ctx, 1567.98, t0 + air.length * 0.085, 1.1, 0.06, "sine");
+  }catch(_){}
+}
+
+/* Le cliquetis de la roulette.
+
+   Une case passe sous l'aiguille, un tic. Comme la roulette ralentit
+   sur une courbe de Bézier, les tics doivent ralentir pareil : on
+   inverse la courbe pour savoir À QUEL INSTANT la bande a parcouru la
+   fraction qui amène la case k sous l'aiguille.
+
+   On cherche le paramètre s tel que By(s) = fraction, puis on lit
+   Bx(s) : c'est l'instant. Par dichotomie, trente tours, une seule
+   fois par ouverture. */
+function instantPour(f, x1, y1, x2, y2){
+  const B = (a, b, t) => { const u = 1 - t; return 3*u*u*t*a + 3*u*t*t*b + t*t*t; };
+  let lo = 0, hi = 1;
+  for(let i = 0; i < 30; i++){
+    const m = (lo + hi) / 2;
+    if(B(y1, y2, m) < f) lo = m; else hi = m;
+  }
+  return B(x1, x2, (lo + hi) / 2);
+}
+
+function tic(ctx, quand){
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = "square";
+  o.frequency.value = 1750;
+  g.gain.setValueAtTime(0.0001, quand);
+  g.gain.exponentialRampToValueAtTime(0.04, quand + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, quand + 0.05);
+  o.connect(g).connect(ctx.destination);
+  o.start(quand);
+  o.stop(quand + 0.07);
+}
+
+const TIC_MIN = 38;   // ms : en-deçà, les tics se fondent en bourdonnement
+
+function cliquetis(distance, pas, duree){
+  if(!sonActif() || !duree || !distance) return;
+  try{
+    const ctx = contexteAudio();
+    if(!ctx) return;
+    const t0 = ctx.currentTime + 0.02;
+    let precedent = -TIC_MIN;
+    const n = Math.floor(distance / pas);
+    for(let k = 1; k <= n; k++){
+      const t = instantPour(k * pas / distance, .08, .72, .1, 1) * duree;
+      if(t - precedent < TIC_MIN) continue;   // au départ ça file trop
+      precedent = t;
+      tic(ctx, t0 + t / 1000);
+    }
+  }catch(_){}
+}
+
 const MIN_SECOUSSE = 650;      // le coffre tremble au moins ce temps-là
 const DUREE_REEL   = 4200;     // le défilé, comme sur une caisse CS:GO
 const PAUSE_FIN    = 280;      // un souffle avant de lire ce qu'on a eu
@@ -1502,6 +1632,7 @@ function lancerReel(gagnant){
       strip.style.transition = duree
         ? "transform " + (duree / 1000) + "s cubic-bezier(.08,.72,.1,1)" : "none";
       strip.style.transform = "translateX(" + (-x) + "px)";
+      cliquetis(x, largeur + gap, duree);
       setTimeout(resolve, duree + (reduit ? 0 : PAUSE_FIN));
     };
     requestAnimationFrame(partir);
@@ -1536,6 +1667,7 @@ async function ouvrirCoffre(){
   await lancerReel(data);
 
   const rarete = esc(data.rarity || "");
+  sonCoffre(data.rarity);
   $("#reel").className = "reel fini " + rarete;
   $("#boxTitle").textContent = "Tu as trouv\u00e9";
   $("#boxHint").textContent = RARETES[data.rarity] || data.rarity || "";
@@ -1565,14 +1697,21 @@ async function ouvrirCoffre(){
    Seul le propriétaire du profil peut écrire les siens — c'est la
    policy players_update qui le garantit, pas ce bouton.
 ------------------------------------------------------------------- */
-function roleChip(t){
+/* La pastille des postes. Elle apparaît à deux endroits — le bandeau
+   du suivi et la ligne d'équipe — donc pas d'identifiant : une classe,
+   et un seul écouteur délégué posé une fois pour toutes. */
+function roleChip(t, opts){
+  opts = opts || {};
   const moi = myPlayer();
   const aMoi = !!(moi && moi.id === t.id);
   const pose = t.role_main || t.role_second;
 
   if(!aMoi) return pose ? '<span class="rolechip">' + rolesHtml(t) + '</span>' : "";
-  if(!pose) return '<button type="button" class="btn ghost sm" id="roleEdit">Choisir mes postes</button>';
-  return '<button type="button" class="rolechip editable" id="roleEdit" title="Modifier tes postes">'
+  if(!pose)
+    return opts.compact
+      ? '<button type="button" class="roleadd js-role-edit" title="Choisir tes postes">+ postes</button>'
+      : '<button type="button" class="btn ghost sm js-role-edit">Choisir mes postes</button>';
+  return '<button type="button" class="rolechip editable js-role-edit" title="Modifier tes postes">'
     + rolesHtml(t) + '</button>';
 }
 
@@ -2213,10 +2352,6 @@ function renderFeed(t){
     + '<span class="goldchip" title="Or en réserve">' + PIECE_OR + '<b>' + orFr(t.gold || 0) + '</b></span>'
     + roleChip(t);
 
-  // Le bandeau est reconstruit à chaque rendu : on rebranche le bouton.
-  const edit = $("#roleEdit");
-  if(edit) edit.addEventListener("click", ouvrirRoles);
-
   if(!g.length){
     const amoi = myPlayer() && myPlayer().id === t.id;
     box.innerHTML = '<div class="empty">Rien pour l\'instant. '
@@ -2744,6 +2879,14 @@ function initUI(){
     if(chaud) renderItems();
   }, 1000);
   $("#boxOpen").addEventListener("click", ouvrirCoffre);
+  $("#soundBtn").addEventListener("click", basculerSon);
+  majBoutonSon();
+  /* Délégué : la pastille est redessinée à chaque rendu, et elle existe
+     en plusieurs exemplaires. Un écouteur sur le document survit à
+     tout ça sans rien avoir à rebrancher. */
+  document.addEventListener("click", e => {
+    if(e.target.closest && e.target.closest(".js-role-edit")) ouvrirRoles();
+  });
   $("#roleSave").addEventListener("click", enregistrerRoles);
   $("#roleClose").addEventListener("click", () => $("#rolesDialog").close());
   $("#btnItems").addEventListener("click", () => openItems(true));
