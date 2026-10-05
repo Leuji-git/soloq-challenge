@@ -28,6 +28,16 @@
       </svg>
       <span id="refreshLbl">Actualiser</span>
     </button>
+    <button type="button" class="btn ghost sm iconbtn" id="btnItems" title="Tes coffres et le catalogue des objets">
+      <svg class="ico" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 9.5V8a9 9 0 0 1 18 0v1.5"/>
+        <rect x="2.6" y="9.5" width="18.8" height="10.5" rx="2"/>
+        <path d="M2.6 13.6h18.8"/>
+        <rect x="10.4" y="11.4" width="3.2" height="4.4" rx="1"/>
+      </svg>
+      <span>Objets</span><span class="boxbadge" id="itemsBadge" hidden></span>
+    </button>
     <button type="button" class="btn ghost sm iconbtn" id="btnWar" title="Journal de guerre">
       <svg class="ico" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none"
            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -53,28 +63,6 @@
     <button type="button" class="btn ghost sm" id="btnLogout" hidden>Déconnexion</button>
   </div>
 </div>
-
-<dialog id="boxDialog" class="modal boxmodal">
-  <div class="boxstage" id="boxStage">
-    <div class="boxhalo"></div>
-    <svg class="chest" viewBox="0 0 64 64" aria-hidden="true" fill="none"
-         stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round">
-      <path class="lid"  d="M7 26V21a25 25 0 0 1 50 0v5z"/>
-      <rect class="base" x="6" y="26" width="52" height="28" rx="4"/>
-      <path d="M6 37h52"/>
-      <rect x="27" y="32" width="10" height="11" rx="2.4"/>
-    </svg>
-    <div class="boxbeam"></div>
-  </div>
-  <h2 id="boxTitle">Un coffre t'attend</h2>
-  <p class="hint" id="boxHint">Tu ne sauras ce qu'il contient qu'en l'ouvrant.</p>
-  <div class="boxprize" id="boxPrize" hidden></div>
-  <div class="log" id="boxLog"></div>
-  <div class="btnrow">
-    <button type="button" class="btn" id="boxOpen">Ouvrir</button>
-    <button type="button" class="btn ghost" id="boxClose">Fermer</button>
-  </div>
-</dialog>
 
 <dialog id="targetDialog" class="modal">
   <h2 id="tgTitle">Sur qui&nbsp;?</h2>
@@ -129,6 +117,51 @@
   </div>
   <div class="purse" id="purse">—</div>
   <div class="drawerbody" id="shopBody"></div>
+</aside>
+
+<div class="scrim" id="itemsScrim" hidden></div>
+<aside class="drawer right wide" id="itemsDrawer" aria-hidden="true" aria-label="Objets">
+  <div class="drawerhead">
+    <h2>Objets</h2>
+    <button type="button" class="x" id="itemsClose" aria-label="Fermer les objets">✕</button>
+  </div>
+  <div class="drawerbody itemsbody">
+
+    <!-- L'ouverture : le coffre tremble, puis la roulette défile. -->
+    <section class="caseopen">
+      <div class="boxstage" id="boxStage">
+        <div class="boxhalo"></div>
+        <svg class="chest" viewBox="0 0 64 64" aria-hidden="true" fill="none"
+             stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round">
+          <path class="lid"  d="M7 26V21a25 25 0 0 1 50 0v5z"/>
+          <rect class="base" x="6" y="26" width="52" height="28" rx="4"/>
+          <path d="M6 37h52"/>
+          <rect x="27" y="32" width="10" height="11" rx="2.4"/>
+        </svg>
+        <div class="boxbeam"></div>
+      </div>
+
+      <div class="reel" id="reel" hidden>
+        <div class="reelmask"><div class="reelstrip" id="reelStrip"></div></div>
+        <div class="reelneedle"></div>
+      </div>
+
+      <h3 class="boxtitle" id="boxTitle">Un coffre t'attend</h3>
+      <p class="hint boxhint" id="boxHint">Tu ne sauras ce qu'il contient qu'en l'ouvrant.</p>
+      <div class="boxprize" id="boxPrize" hidden></div>
+      <div class="log" id="boxLog"></div>
+      <div class="btnrow">
+        <button type="button" class="btn" id="boxOpen">Ouvrir</button>
+      </div>
+    </section>
+
+    <!-- Le catalogue : ce qu'on a découvert, et ce qui reste à trouver. -->
+    <section class="catalog">
+      <h4>Catalogue <span class="pill" id="itemsCount">—</span></h4>
+      <p class="hint" id="itemsHint"></p>
+      <div class="itemgrid" id="itemGrid"></div>
+    </section>
+  </div>
 </aside>
 
 <div class="floattip" id="floatTip" hidden></div>
@@ -227,18 +260,6 @@
         <div class="feed" id="feed"></div>
         <div class="itemgrid" id="invGrid" hidden></div>
       </div>
-    </div>
-  </section>
-
-  <section class="block" id="itemsBlock">
-    <header>
-      <h2>Objets</h2>
-      <span class="pill" id="itemsCount">—</span>
-    </header>
-    <div class="body">
-      <div class="boxbanner" id="boxBanner" hidden></div>
-      <p class="hint" id="itemsHint"></p>
-      <div class="itemgrid" id="itemGrid"></div>
     </div>
   </section>
 

@@ -1289,18 +1289,7 @@ function renderItems(){
       + '</article>';
   }).join("");
 
-  // Les coffres en attente, en tête de l'onglet.
-  const banniere = $("#boxBanner");
-  if(banniere){
-    const n = mine ? S.boxes.filter(b => b.player_id === mine.id && !b.opened_at).length : 0;
-    banniere.hidden = !n;
-    if(n) banniere.innerHTML =
-        '<span class="boxcount">' + n + '</span>'
-      + '<span>' + (n > 1 ? "coffres t'attendent" : "coffre t'attend") + '</span>'
-      + '<button type="button" class="btn sm" id="boxGo">Ouvrir</button>';
-    const go = $("#boxGo");
-    if(go) go.addEventListener("click", () => openBox(true));
-  }
+  majCoffres();
 
   grille.querySelectorAll("[data-lock]").forEach(b =>
     b.addEventListener("click", () => ouvrirCible(b.dataset.lock)));
@@ -1354,11 +1343,19 @@ function barreObjet(it, libre, arme, reste){
    Les coffres
 
    Le contenu n'existe pas avant l'ouverture : c'est open_box, côté
-   serveur, qui tire. On lance donc l'appel EN MÊME TEMPS que
-   l'animation, et on révèle quand les deux sont finis — l'attente
-   réseau se cache derrière le spectacle au lieu de s'y ajouter.
+   serveur, qui tire. Le navigateur ne fait que montrer le résultat.
+
+   D'où l'ordre des choses : le coffre tremble pendant que l'appel
+   part, et la roulette ne se construit qu'une fois le gagnant connu,
+   parce qu'elle doit s'arrêter dessus. L'attente réseau se cache
+   derrière la secousse.
 ------------------------------------------------------------------- */
-const DUREE_OUVERTURE = 1500;
+const MIN_SECOUSSE = 650;      // le coffre tremble au moins ce temps-là
+const DUREE_REEL   = 4200;     // le défilé, comme sur une caisse CS:GO
+const PAUSE_FIN    = 280;      // un souffle avant de lire ce qu'on a eu
+
+// Une révélation est à l'écran : loadAll ne doit pas l'effacer.
+let reveleEnCours = false;
 
 function coffresEnAttente(){
   const moi = myPlayer();
@@ -1366,44 +1363,145 @@ function coffresEnAttente(){
   return S.boxes.filter(b => b.player_id === moi.id && !b.opened_at).length;
 }
 
-function openBox(open){
-  const dlg = $("#boxDialog");
-  if(!dlg) return;
-  if(!open){ dlg.close(); return; }
-
+/* Le compteur de la barre du haut et l'état au repos de la scène. */
+function majCoffres(){
   const n = coffresEnAttente();
+  const pastille = $("#itemsBadge");
+  if(pastille){ pastille.textContent = n; pastille.hidden = !n; }
+
+  const btn = $("#boxOpen");
+  if(!btn) return;
+  btn.hidden = !n;
+
+  if(reveleEnCours){
+    // Le butin reste sous les yeux, et la roulette garde la main sur
+    // le bouton : on ne touche ni à son état ni à la scène.
+    btn.textContent = n > 1 ? "Ouvrir le suivant (" + n + ")" : "Ouvrir le dernier";
+    return;
+  }
+  btn.disabled = false;
+
+  $("#boxStage").hidden = false;
   $("#boxStage").className = "boxstage";
+  $("#reel").hidden = true;
   $("#boxPrize").hidden = true;
   $("#boxLog").textContent = "";
-  $("#boxTitle").textContent = n > 1 ? n + " coffres t'attendent" : "Un coffre t'attend";
-  $("#boxHint").textContent = "Tu ne sauras ce qu'il contient qu'en l'ouvrant.";
-  $("#boxOpen").hidden = !n;
-  $("#boxOpen").disabled = false;
-  $("#boxOpen").textContent = "Ouvrir";
-  if(!dlg.open) dlg.showModal();
+  $("#boxTitle").textContent = n > 1 ? n + " coffres t'attendent"
+                             : n     ? "Un coffre t'attend"
+                             :         "Aucun coffre pour l'instant";
+  $("#boxHint").textContent = n
+    ? "Tu ne sauras ce qu'il contient qu'en l'ouvrant."
+    : "Chaque victoire en fait tomber un.";
+  btn.textContent = "Ouvrir";
+}
+
+function openItems(open){
+  if(open){ openShop(false); openWar(false); }   // un seul volet à la fois
+  $("#itemsDrawer").classList.toggle("open", open);
+  $("#itemsDrawer").setAttribute("aria-hidden", String(!open));
+  $("#itemsScrim").hidden = !open;
+  if(open){ reveleEnCours = false; renderItems(); }
+}
+
+/* La roulette.
+
+   On la construit APRÈS la réponse du serveur : la case d'arrêt doit
+   contenir l'objet gagné. Les autres cases sont tirées au hasard dans
+   le catalogue, et celles qu'on n'a jamais découvertes restent
+   masquées — défiler les noms de tout le catalogue reviendrait à le
+   révéler en entier. */
+function lancerReel(gagnant){
+  const reel = $("#reel"), strip = $("#reelStrip");
+  $("#boxStage").hidden = true;
+  reel.hidden = false;
+  reel.className = "reel";
+
+  const CASES = 54, ARRET = CASES - 7;
+  const pool = S.items.filter(i => i.active !== false);
+  const moi = myPlayer();
+  const vus = new Set(moi ? S.inventory.filter(r => r.player_id === moi.id).map(r => r.item_key) : []);
+  vus.add(gagnant.key);                    // on vient tout juste de le décrocher
+  const tout = isAdmin();
+
+  const carte = it => {
+    const vu = tout || vus.has(it.key);
+    return '<div class="rcell ' + esc(it.rarity || "commun") + (vu ? "" : " voile") + '">'
+      + '<span class="ricon">' + (vu ? esc(it.icon || "") : "?") + '</span>'
+      + '<span class="rname">' + esc(vu ? (it.name || "") : "Inconnu") + '</span>'
+      + '</div>';
+  };
+
+  let html = "";
+  for(let i = 0; i < CASES; i++)
+    html += carte(i === ARRET ? gagnant
+                              : (pool[Math.floor(Math.random() * pool.length)] || gagnant));
+  strip.innerHTML = html;
+  strip.style.transition = "none";
+  strip.style.transform = "translateX(0px)";
+
+  const reduit = window.matchMedia
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  return new Promise(resolve => {
+    /* On attend une image pour que les cases soient mesurables. Si
+       l'onglet est en arrière-plan, requestAnimationFrame ne se
+       déclenche pas du tout : le filet de sécurité évite une promesse
+       qui ne se résoudrait jamais, et donc un volet bloqué. */
+    let parti = false;
+    const partir = () => {
+      if(parti) return;
+      parti = true;
+      const cell = strip.querySelector(".rcell");
+      if(!cell){ resolve(); return; }
+      const largeur = cell.getBoundingClientRect().width;
+      const gap = parseFloat(getComputedStyle(strip).gap) || 0;
+      const vue = strip.parentElement.getBoundingClientRect().width;
+      // Un léger décalage au hasard : l'aiguille ne tombe pas toujours
+      // pile au milieu de la case, comme sur une vraie caisse.
+      const ecart = reduit ? 0 : (Math.random() - .5) * largeur * .56;
+      const x = ARRET * (largeur + gap) - (vue / 2 - largeur / 2) + ecart;
+      const duree = reduit ? 0 : DUREE_REEL;
+      strip.style.transition = duree
+        ? "transform " + (duree / 1000) + "s cubic-bezier(.08,.72,.1,1)" : "none";
+      strip.style.transform = "translateX(" + (-x) + "px)";
+      setTimeout(resolve, duree + (reduit ? 0 : PAUSE_FIN));
+    };
+    requestAnimationFrame(partir);
+    setTimeout(partir, 80);
+  });
 }
 
 async function ouvrirCoffre(){
   const btn = $("#boxOpen"), scene = $("#boxStage");
   btn.disabled = true;
+  reveleEnCours = true;
+  $("#boxPrize").hidden = true;
+  $("#boxLog").textContent = "";
+  $("#reel").hidden = true;
+  scene.hidden = false;
   scene.className = "boxstage secoue";
+  $("#boxTitle").textContent = "Le coffre s'ouvre\u2026";
+  $("#boxHint").textContent = "";
 
-  // L'appel part tout de suite, l'animation tourne pendant ce temps.
-  const appel = sb.rpc("open_box");
-  const attente = new Promise(r => setTimeout(r, DUREE_OUVERTURE));
-  const [{ data, error }] = await Promise.all([appel, attente]);
+  const [{ data, error }] = await Promise.all([
+    sb.rpc("open_box"),
+    new Promise(r => setTimeout(r, MIN_SECOUSSE))
+  ]);
 
   if(error){
-    scene.className = "boxstage";
-    btn.disabled = false;
+    reveleEnCours = false;
+    majCoffres();
     say("#boxLog", expliquerRpc(error), true);
     return;
   }
 
-  scene.className = "boxstage ouvert " + esc(data.rarity || "");
-  $("#boxTitle").textContent = "Tu as trouvé";
-  $("#boxHint").textContent = RARETES[data.rarity] || data.rarity;
-  $("#boxPrize").className = "boxprize " + esc(data.rarity || "");
+  await lancerReel(data);
+
+  const rarete = esc(data.rarity || "");
+  $("#reel").className = "reel fini " + rarete;
+  $("#boxTitle").textContent = "Tu as trouv\u00e9";
+  $("#boxHint").textContent = RARETES[data.rarity] || data.rarity || "";
+  $("#boxPrize").className = "boxprize " + rarete;
   $("#boxPrize").innerHTML =
       '<span class="prizeicon">' + esc(data.icon || "") + '</span>'
     + '<div class="prizetext">'
@@ -2150,7 +2248,7 @@ function boostEquipe(team){
 }
 
 function openShop(open){
-  if(open) openWar(false);                 // un seul volet à la fois
+  if(open){ openWar(false); openItems(false); }   // un seul volet à la fois
   $("#shopDrawer").classList.toggle("open", open);
   $("#shopDrawer").setAttribute("aria-hidden", String(!open));
   $("#shopScrim").hidden = !open;
@@ -2302,7 +2400,7 @@ function echangerEquipe(btn){
 
 /* Le journal s'ouvre et se ferme comme le règlement, mais par la droite. */
 function openWar(open){
-  if(open) openShop(false);                // un seul volet à la fois
+  if(open){ openShop(false); openItems(false); }  // un seul volet à la fois
   $("#warDrawer").classList.toggle("open", open);
   $("#warDrawer").setAttribute("aria-hidden", String(!open));
   $("#warScrim").hidden = !open;
@@ -2484,7 +2582,9 @@ function initUI(){
     if(chaud) renderItems();
   }, 1000);
   $("#boxOpen").addEventListener("click", ouvrirCoffre);
-  $("#boxClose").addEventListener("click", () => openBox(false));
+  $("#btnItems").addEventListener("click", () => openItems(true));
+  $("#itemsClose").addEventListener("click", () => openItems(false));
+  $("#itemsScrim").addEventListener("click", () => openItems(false));
   $("#tgClose").addEventListener("click", () => { objetAPoser = null; $("#targetDialog").close(); });
   $("#btnRefresh").addEventListener("click", refreshNow);
   // Plus de décompte : on repasse seulement après l'affichage du
@@ -2503,6 +2603,7 @@ function initUI(){
   $("#rulesClose").addEventListener("click", () => openRules(false));
   $("#rulesScrim").addEventListener("click", () => openRules(false));
   document.addEventListener("keydown", e => {
+    if(e.key === "Escape" && $("#itemsDrawer").classList.contains("open")) openItems(false);
     if(e.key === "Escape" && $("#shopDrawer").classList.contains("open")) openShop(false);
     if(e.key === "Escape" && $("#warDrawer").classList.contains("open")) openWar(false);
     if(e.key === "Escape" && $("#rulesDrawer").classList.contains("open")) openRules(false);
@@ -2583,3 +2684,7 @@ async function boot(){
   });
 }
 boot();
+
+// --- echafaudage de test, retire apres verification ---
+window.__reel = lancerReel;
+window.__items = () => S.items;
