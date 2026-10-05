@@ -63,6 +63,25 @@
   </div>
 </div>
 
+<dialog id="rolesDialog" class="modal">
+  <h2>Tes postes</h2>
+  <p class="hint">Ils s'affichent à côté de ton rang, dans le classement.
+     Reclique sur un poste choisi pour l'enlever.</p>
+  <div class="rolerow">
+    <span class="rolelbl">Principal</span>
+    <div class="roleopts" id="roleMain"></div>
+  </div>
+  <div class="rolerow">
+    <span class="rolelbl">Secondaire</span>
+    <div class="roleopts" id="roleSecond"></div>
+  </div>
+  <div class="log" id="roleLog"></div>
+  <div class="btnrow">
+    <button type="button" class="btn" id="roleSave">Enregistrer</button>
+    <button type="button" class="btn ghost" id="roleClose">Fermer</button>
+  </div>
+</dialog>
+
 <dialog id="targetDialog" class="modal">
   <h2 id="tgTitle">Sur qui&nbsp;?</h2>
   <p class="hint" id="tgHint"></p>

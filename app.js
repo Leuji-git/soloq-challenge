@@ -326,6 +326,36 @@ function estRank(p){
 /* ===================================================================
    Rendu
 =================================================================== */
+
+/* Les postes.
+
+   Les icônes viennent de Community Dragon, comme les emblèmes de rang
+   plus haut : ce sont celles du client, donc celles que tout le monde
+   reconnaît sans légende. Elles sont déjà à la bonne couleur (#c8aa6e),
+   on ne les reteint pas — le secondaire est seulement plus petit et
+   plus discret. */
+const ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
+const ROLE_FICHIER = { TOP:"top", JUNGLE:"jungle", MIDDLE:"middle", BOTTOM:"bottom", UTILITY:"utility" };
+const roleIcon = r =>
+  "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-champ-select/global/default/svg/position-"
+  + (ROLE_FICHIER[r] || "top") + ".svg";
+
+function roleImg(r, cls){
+  const nom = ROLE_FR[r] || r;
+  return '<img class="roleico ' + cls + '" src="' + roleIcon(r) + '" alt="' + esc(nom)
+    + '" title="' + esc(cls === "main" ? nom + " \u00b7 principal" : nom + " \u00b7 secondaire")
+    + '" loading="lazy" decoding="async">';
+}
+
+// Les postes d'un joueur, principal en grand, secondaire en petit.
+function rolesHtml(p){
+  if(!p || (!p.role_main && !p.role_second)) return "";
+  return '<span class="roles">'
+    + (p.role_main   ? roleImg(p.role_main,   "main")   : "")
+    + (p.role_second ? roleImg(p.role_second, "second") : "")
+    + '</span>';
+}
+
 function crest(r, opts){
   opts = opts || {};
   return '<span class="crest'+(opts.sm ? " sm" : "")+'" title="'+rankLabel(r)+'">'
@@ -561,7 +591,7 @@ function renderLadder(states){
       + '<td class="r"><span class="wl num">'+(avg===null ? "—" : signed(avg))+'</span></td>'
       + '<td class="r"><span class="wl num">'+(s.best ? signed(s.best.lp) : "—")+'</span><div class="wr">'+(s.best ? "J"+s.best.day : "")+'</div></td>'
       + '<td>'+sparkGames(s.games)+'</td>'
-      + '<td>'+crest(r, { sm:true, label:shortRank(r)+" · "+r.lp+" LP" })+'</td></tr>';
+      + '<td>'+crest(r, { sm:true, label:shortRank(r)+" · "+r.lp+" LP" })+rolesHtml(s.player)+'</td></tr>';
   }).join("");
 }
 
@@ -1526,6 +1556,76 @@ async function ouvrirCoffre(){
   await loadAll();
 }
 
+/* ------------------------------------------------------------------
+   Les postes, choisis par le joueur
+
+   On ne les déduit pas des parties : une partie en autofill support ne
+   fait pas de toi un support. C'est une déclaration, pas une mesure.
+
+   Seul le propriétaire du profil peut écrire les siens — c'est la
+   policy players_update qui le garantit, pas ce bouton.
+------------------------------------------------------------------- */
+function roleChip(t){
+  const moi = myPlayer();
+  const aMoi = !!(moi && moi.id === t.id);
+  const pose = t.role_main || t.role_second;
+
+  if(!aMoi) return pose ? '<span class="rolechip">' + rolesHtml(t) + '</span>' : "";
+  if(!pose) return '<button type="button" class="btn ghost sm" id="roleEdit">Choisir mes postes</button>';
+  return '<button type="button" class="rolechip editable" id="roleEdit" title="Modifier tes postes">'
+    + rolesHtml(t) + '</button>';
+}
+
+let roleChoix = { main: null, second: null };
+
+function ouvrirRoles(){
+  const moi = myPlayer();
+  if(!moi) return;
+  roleChoix = { main: moi.role_main || null, second: moi.role_second || null };
+  $("#roleLog").textContent = "";
+  dessinerRoles();
+  const d = $("#rolesDialog");
+  if(!d.open) d.showModal();
+}
+
+function dessinerRoles(){
+  const bouton = (r, quoi) => {
+    const actif = roleChoix[quoi] === r;
+    return '<button type="button" class="roleopt' + (actif ? " on" : "") + '"'
+      + ' data-role="' + r + '" data-quoi="' + quoi + '" aria-pressed="' + actif + '">'
+      + '<img src="' + roleIcon(r) + '" alt="" loading="lazy" decoding="async">'
+      + '<span>' + esc(ROLE_FR[r] || r) + '</span></button>';
+  };
+  $("#roleMain").innerHTML   = ROLES.map(r => bouton(r, "main")).join("");
+  $("#roleSecond").innerHTML = ROLES.map(r => bouton(r, "second")).join("");
+
+  $("#rolesDialog").querySelectorAll("[data-quoi]").forEach(b =>
+    b.addEventListener("click", () => {
+      const quoi = b.dataset.quoi, r = b.dataset.role;
+      roleChoix[quoi] = roleChoix[quoi] === r ? null : r;
+      // Le même poste ne peut pas être les deux à la fois : il prend sa
+      // nouvelle place et lâche l'ancienne.
+      const autre = quoi === "main" ? "second" : "main";
+      if(roleChoix[autre] && roleChoix[autre] === roleChoix[quoi]) roleChoix[autre] = null;
+      dessinerRoles();
+    }));
+}
+
+async function enregistrerRoles(){
+  const moi = myPlayer();
+  if(!moi) return;
+  const btn = $("#roleSave");
+  btn.disabled = true;
+  say("#roleLog", "Enregistrement\u2026");
+  const { error } = await sb.from("players")
+    .update({ role_main: roleChoix.main, role_second: roleChoix.second })
+    .eq("id", moi.id);
+  btn.disabled = false;
+  if(error){ say("#roleLog", expliquerRpc(error), true); return; }
+  await loadAll();
+  $("#rolesDialog").close();
+}
+
 /* ---------- choix de la cible ---------- */
 let objetAPoser = null;
 
@@ -2110,7 +2210,12 @@ function renderFeed(t){
   head.innerHTML = avatarRing(t, { lg:true })
     + '<span class="feedwho">' + esc(t.name) + '</span>' + pastilleLive(t.id)
     + '<span class="feedcount">' + (nb ? nb + (nb > 1 ? " parties relevées" : " partie relevée") : "aucune partie") + '</span>'
-    + '<span class="goldchip" title="Or en réserve">' + PIECE_OR + '<b>' + orFr(t.gold || 0) + '</b></span>';
+    + '<span class="goldchip" title="Or en réserve">' + PIECE_OR + '<b>' + orFr(t.gold || 0) + '</b></span>'
+    + roleChip(t);
+
+  // Le bandeau est reconstruit à chaque rendu : on rebranche le bouton.
+  const edit = $("#roleEdit");
+  if(edit) edit.addEventListener("click", ouvrirRoles);
 
   if(!g.length){
     const amoi = myPlayer() && myPlayer().id === t.id;
@@ -2639,6 +2744,8 @@ function initUI(){
     if(chaud) renderItems();
   }, 1000);
   $("#boxOpen").addEventListener("click", ouvrirCoffre);
+  $("#roleSave").addEventListener("click", enregistrerRoles);
+  $("#roleClose").addEventListener("click", () => $("#rolesDialog").close());
   $("#btnItems").addEventListener("click", () => openItems(true));
   $("#itemsClose").addEventListener("click", () => openItems(false));
   $("#itemsScrim").addEventListener("click", () => openItems(false));
