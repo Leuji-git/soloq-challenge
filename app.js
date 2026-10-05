@@ -2684,7 +2684,3 @@ async function boot(){
   });
 }
 boot();
-
-// --- echafaudage de test, retire apres verification ---
-window.__reel = lancerReel;
-window.__items = () => S.items;
