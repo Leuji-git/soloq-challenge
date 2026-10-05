@@ -348,8 +348,12 @@ function peutLooter(duo, win){
   return !!win;
 }
 
-// Tirage pondéré par la rareté. `alea` entre 0 et 1 : fourni par les tests,
-// tiré au sort en vrai.
+/* Tirage pondéré par la rareté.
+
+   PLUS APPELÉ PAR LE RELEVÉ depuis le passage aux coffres : le tirage
+   se fait maintenant à l'ouverture, dans draw_item() côté SQL. On le
+   garde ici parce qu'il reste la référence lisible et testée des poids
+   — si tu changes POIDS_RARETE, change item_weight() en SQL. */
 function tirerObjet(items, alea){
   const actifs = (items || []).filter(i => i && i.active !== false);
   if(!actifs.length) return null;
@@ -822,14 +826,17 @@ async function sync(force){
             }
           }
 
-          // Victoire en solo ou en duo allié : un objet tombe.
-          // L'index unique (player_id, source_match) empêche tout doublon
-          // si un relevé repasse sur la même partie.
+          /* Victoire : un COFFRE tombe. L'objet n'est pas tiré ici —
+             il le sera à l'ouverture, par open_box. Décider du contenu
+             maintenant le laisserait lisible en base avant même que le
+             joueur ouvre, et il n'y aurait plus de surprise.
+
+             L'index unique (player_id, source_match) empêche tout
+             doublon si un relevé repasse sur la même partie. */
           if(!error && peutLooter(g.duo, g.win)){
-            const objet = tirerObjet(catalogue);
-            if(objet){
-              const { error: eLoot } = await db.from("player_items")
-                .insert({ player_id: p.id, item_key: objet.key, source_match: g.matchId });
+            {
+              const { error: eLoot } = await db.from("player_boxes")
+                .insert({ player_id: p.id, source_match: g.matchId });
               if(!eLoot) bilan.loot++;
             }
           }
@@ -949,15 +956,13 @@ async function simuler(user, body){
       .eq("player_id", joueur.id).eq("match_id", g.matchId);
   }
 
-  // Le butin obéit à la même règle qu'en vrai (peutLooter).
+  // Le butin obéit à la même règle qu'en vrai (peutLooter) : un coffre,
+  // pas un objet.
   let butin = null;
   if(peutLooter(duo, win)){
-    const tire = tirerObjet(tous_objets.filter(i => i.active));
-    if(tire){
-      const { error: eL } = await db.from("player_items")
-        .insert({ player_id: joueur.id, item_key: tire.key, source_match: g.matchId });
-      if(!eL) butin = tire.key;
-    }
+    const { error: eL } = await db.from("player_boxes")
+      .insert({ player_id: joueur.id, source_match: g.matchId });
+    if(!eL) butin = "coffre";
   }
 
   /* L'autre côté du duo. Une vraie partie en duo produit DEUX lignes,
@@ -994,12 +999,9 @@ async function simuler(user, body){
       }
       let butinC = null;
       if(peutLooter(duo, winC)){
-        const tire = tirerObjet(tous_objets.filter(i => i.active));
-        if(tire){
-          const { error: eL2 } = await db.from("player_items")
-            .insert({ player_id: compagnon.id, item_key: tire.key, source_match: g.matchId });
-          if(!eL2) butinC = tire.key;
-        }
+        const { error: eL2 } = await db.from("player_boxes")
+          .insert({ player_id: compagnon.id, source_match: g.matchId });
+        if(!eL2) butinC = "coffre";
       }
       cote = { player: compagnon.id, name: compagnon.name, lp: lpC, win: winC,
                lp_items: objC.lp, objets: objC.detail, butin: butinC };

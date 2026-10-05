@@ -54,6 +54,28 @@
   </div>
 </div>
 
+<dialog id="boxDialog" class="modal boxmodal">
+  <div class="boxstage" id="boxStage">
+    <div class="boxhalo"></div>
+    <svg class="chest" viewBox="0 0 64 64" aria-hidden="true" fill="none"
+         stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round">
+      <path class="lid"  d="M7 26V21a25 25 0 0 1 50 0v5z"/>
+      <rect class="base" x="6" y="26" width="52" height="28" rx="4"/>
+      <path d="M6 37h52"/>
+      <rect x="27" y="32" width="10" height="11" rx="2.4"/>
+    </svg>
+    <div class="boxbeam"></div>
+  </div>
+  <h2 id="boxTitle">Un coffre t'attend</h2>
+  <p class="hint" id="boxHint">Tu ne sauras ce qu'il contient qu'en l'ouvrant.</p>
+  <div class="boxprize" id="boxPrize" hidden></div>
+  <div class="log" id="boxLog"></div>
+  <div class="btnrow">
+    <button type="button" class="btn" id="boxOpen">Ouvrir</button>
+    <button type="button" class="btn ghost" id="boxClose">Fermer</button>
+  </div>
+</dialog>
+
 <dialog id="targetDialog" class="modal">
   <h2 id="tgTitle">Sur qui&nbsp;?</h2>
   <p class="hint" id="tgHint"></p>
@@ -214,6 +236,7 @@
       <span class="pill" id="itemsCount">—</span>
     </header>
     <div class="body">
+      <div class="boxbanner" id="boxBanner" hidden></div>
       <p class="hint" id="itemsHint"></p>
       <div class="itemgrid" id="itemGrid"></div>
     </div>

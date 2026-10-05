@@ -83,6 +83,7 @@ const S = {
   ledger: [],       // journal des mouvements d'or
   live: {},         // id joueur -> partie en cours chez Riot
   boosts: {},       // équipe -> bonus « double LP » en cours
+  boxes: [],        // coffres lootés, ouverts ou non
   challenge: null,
   players: [],
   games: [],
@@ -132,7 +133,7 @@ if(!SUPABASE_URL || SUPABASE_URL.includes("xxxxxxxx") || SUPABASE_ANON_KEY.inclu
 =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv, tb] = await Promise.all([
+  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv, tb, bx] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at"),
@@ -143,7 +144,8 @@ async function loadAll(){
     sb.from("player_items").select("*").order("obtained_at"),
     sb.from("gold_ledger").select("*").order("at", { ascending:false }).limit(60),
     sb.from("live_games").select("*"),
-    sb.from("team_boosts").select("*")
+    sb.from("team_boosts").select("*"),
+    sb.from("player_boxes").select("*")
   ]);
   const err = ch.error || pl.error || gm.error || sn.error || pr.error || bt.error || st.error || pi.error;
   if(err){
@@ -167,6 +169,7 @@ async function loadAll(){
   // simplement ne rien afficher dans ce cas.
   S.live      = lv.error ? {} : Object.fromEntries((lv.data || []).map(r => [r.player_id, r]));
   S.boosts    = tb.error ? {} : Object.fromEntries((tb.data || []).map(r => [r.team, r]));
+  S.boxes     = bx.error ? [] : (bx.data || []);
   S.ready = true;
   $("#errBox").hidden = true;
   render();
@@ -1286,6 +1289,19 @@ function renderItems(){
       + '</article>';
   }).join("");
 
+  // Les coffres en attente, en tête de l'onglet.
+  const banniere = $("#boxBanner");
+  if(banniere){
+    const n = mine ? S.boxes.filter(b => b.player_id === mine.id && !b.opened_at).length : 0;
+    banniere.hidden = !n;
+    if(n) banniere.innerHTML =
+        '<span class="boxcount">' + n + '</span>'
+      + '<span>' + (n > 1 ? "coffres t'attendent" : "coffre t'attend") + '</span>'
+      + '<button type="button" class="btn sm" id="boxGo">Ouvrir</button>';
+    const go = $("#boxGo");
+    if(go) go.addEventListener("click", () => openBox(true));
+  }
+
   grille.querySelectorAll("[data-lock]").forEach(b =>
     b.addEventListener("click", () => ouvrirCible(b.dataset.lock)));
   grille.querySelectorAll("[data-unlock]").forEach(b =>
@@ -1332,6 +1348,76 @@ function barreObjet(it, libre, arme, reste){
       + '</div>';
   }
   return "";
+}
+
+/* ------------------------------------------------------------------
+   Les coffres
+
+   Le contenu n'existe pas avant l'ouverture : c'est open_box, côté
+   serveur, qui tire. On lance donc l'appel EN MÊME TEMPS que
+   l'animation, et on révèle quand les deux sont finis — l'attente
+   réseau se cache derrière le spectacle au lieu de s'y ajouter.
+------------------------------------------------------------------- */
+const DUREE_OUVERTURE = 1500;
+
+function coffresEnAttente(){
+  const moi = myPlayer();
+  if(!moi) return 0;
+  return S.boxes.filter(b => b.player_id === moi.id && !b.opened_at).length;
+}
+
+function openBox(open){
+  const dlg = $("#boxDialog");
+  if(!dlg) return;
+  if(!open){ dlg.close(); return; }
+
+  const n = coffresEnAttente();
+  $("#boxStage").className = "boxstage";
+  $("#boxPrize").hidden = true;
+  $("#boxLog").textContent = "";
+  $("#boxTitle").textContent = n > 1 ? n + " coffres t'attendent" : "Un coffre t'attend";
+  $("#boxHint").textContent = "Tu ne sauras ce qu'il contient qu'en l'ouvrant.";
+  $("#boxOpen").hidden = !n;
+  $("#boxOpen").disabled = false;
+  $("#boxOpen").textContent = "Ouvrir";
+  if(!dlg.open) dlg.showModal();
+}
+
+async function ouvrirCoffre(){
+  const btn = $("#boxOpen"), scene = $("#boxStage");
+  btn.disabled = true;
+  scene.className = "boxstage secoue";
+
+  // L'appel part tout de suite, l'animation tourne pendant ce temps.
+  const appel = sb.rpc("open_box");
+  const attente = new Promise(r => setTimeout(r, DUREE_OUVERTURE));
+  const [{ data, error }] = await Promise.all([appel, attente]);
+
+  if(error){
+    scene.className = "boxstage";
+    btn.disabled = false;
+    say("#boxLog", expliquerRpc(error), true);
+    return;
+  }
+
+  scene.className = "boxstage ouvert " + esc(data.rarity || "");
+  $("#boxTitle").textContent = "Tu as trouvé";
+  $("#boxHint").textContent = RARETES[data.rarity] || data.rarity;
+  $("#boxPrize").className = "boxprize " + esc(data.rarity || "");
+  $("#boxPrize").innerHTML =
+      '<span class="prizeicon">' + esc(data.icon || "") + '</span>'
+    + '<div class="prizetext">'
+      + '<div class="prizename">' + esc(data.name) + '</div>'
+      + '<div class="prizeeffect">' + esc(data.effect) + '</div>'
+    + '</div>';
+  $("#boxPrize").hidden = false;
+
+  const reste = data.restants || 0;
+  btn.hidden = !reste;
+  btn.disabled = false;
+  btn.textContent = reste > 1 ? "Ouvrir le suivant (" + reste + ")" : "Ouvrir le dernier";
+
+  await loadAll();
 }
 
 /* ---------- choix de la cible ---------- */
@@ -2397,6 +2483,8 @@ function initUI(){
       && Date.now() - new Date(r.locked_at).getTime() < FENETRE_ANNULE);
     if(chaud) renderItems();
   }, 1000);
+  $("#boxOpen").addEventListener("click", ouvrirCoffre);
+  $("#boxClose").addEventListener("click", () => openBox(false));
   $("#tgClose").addEventListener("click", () => { objetAPoser = null; $("#targetDialog").close(); });
   $("#btnRefresh").addEventListener("click", refreshNow);
   // Plus de décompte : on repasse seulement après l'affichage du
