@@ -301,6 +301,13 @@ const EFFETS = {
    Elle ne vaut donc rien si on perd : la poser, c'est parier sur soi. */
 const OR_VOLE = 150;
 const VOLEURS   = { bourse_coupee: c => !c.win ? OR_VOLE : 0 };
+
+/* Les malus dont les LP retirés à la victime ne s'évaporent pas : ils
+   partent au total global de celui qui a posé l'objet, donc au score de
+   son équipe. Le montant n'est pas relu dans le barème, il est pris sur
+   l'effet RÉELLEMENT appliqué — une Égide qui l'a repoussé ne doit rien
+   faire gagner à personne. */
+const PEAGEURS  = { peage: true };
 const BOUCLIERS = { egide_contre:  c => !!c.win };
 
 /* Résout les objets verrouillés sur une partie.
@@ -337,6 +344,12 @@ function resoudreObjets(armes, ctx){
       : "aucun malus à repousser";
   }
 
+  // Les LP de péage : qui encaisse, et combien.
+  const transferts = [];
+  appliques.forEach(o => {
+    if(PEAGEURS[o.itemKey] && o.lp < 0) transferts.push({ vers: o.owner, lp: -o.lp });
+  });
+
   // Les vols d'or : qui prend, à qui, combien.
   const vols = [];
   appliques.forEach(o => {
@@ -346,7 +359,7 @@ function resoudreObjets(armes, ctx){
   });
 
   return {
-    appliques, vols,
+    appliques, vols, transferts,
     reportes: tri.filter(o => gardes.indexOf(o) < 0).map(o => o.id),
     total: appliques.reduce((a, o) => a + o.lp, 0)
   };
@@ -571,6 +584,18 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
     }
   }
 
+  /* Les LP de péage. Une ligne de partie à lp = 0 et lp_items = +20,
+     exactement comme les 25 LP de la boutique : le score d'ÉQUIPE les
+     prend, le classement individuel ne bouge pas. L'index unique
+     (player_id, match_id) rend un relèvement rejoué sans effet. */
+  for(const t of (r.transferts || [])){
+    await db.from("games").insert({
+      player_id: t.vers, lp: 0, lp_items: t.lp, win: true, duo: "solo",
+      kind: "peage", match_id: g.matchId + "-peage",
+      played_on: parisDate(g.end), created_at: new Date(g.end).toISOString()
+    });
+  }
+
   // Les vols d'or. Deux écritures par vol, chacune tracée dans le
   // journal : on doit pouvoir expliquer à la victime où est passé son or.
   for(const v of (r.vols || [])){
@@ -580,7 +605,8 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
       p_raison: "bourse coupée sur " + v.de, p_match: g.matchId + "-gain" });
   }
 
-  return { lp: clampLp(r.total), detail: r.appliques, vols: r.vols || [] };
+  return { lp: clampLp(r.total), detail: r.appliques,
+           vols: r.vols || [], transferts: r.transferts || [] };
 }
 
 async function isAdmin(uid){

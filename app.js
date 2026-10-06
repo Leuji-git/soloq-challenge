@@ -220,7 +220,11 @@ function stateFor(p){
   // Le même total, objets compris : celui qui nourrit le score d'équipe.
   // Le classement individuel, lui, reste sur `net`.
   const global = games.reduce((a,g) => a + lpGlobal(g), 0);
-  const played = games.filter(g => g.kind !== "adjust");
+  /* Seules les VRAIES parties comptent en victoires, en défaites et au
+     nombre de parties. Les lignes de crédit — les 25 LP de la boutique,
+     un péage encaissé — portent des LP d'équipe, pas un résultat : les
+     compter gonflait le winrate de qui achetait. */
+  const played = games.filter(g => g.kind === "game");
   const w = played.filter(g => g.win).length;
   const byDay = {};
   games.forEach(g => { const d = dayOf(g.played_on); byDay[d] = (byDay[d]||0) + g.lp; });
@@ -2354,7 +2358,7 @@ function renderFeed(t){
   }
 
   const g = gamesOf(t.id).slice().reverse();
-  const nb = g.filter(x => x.kind !== "adjust").length;
+  const nb = g.filter(x => x.kind === "game").length;
   const mine = myPlayer();
   head.innerHTML = avatarRing(t, { lg:true })
     + '<span class="feedwho">' + esc(t.name) + '</span>' + pastilleLive(t.id)
@@ -2389,6 +2393,23 @@ function renderFeed(t){
         + '<span class="pavpair">' + avatarRing(t) + '</span>'
         + '<div class="rowmain"><div class="rowtitle">Hors partie<span class="tagchip solo">ajustement</span></div>'
         + '<div class="rowmeta">Esquive ou décroissance : des LP ont bougé sans partie jouée</div></div>'
+        + time + del + '</div>';
+    }
+
+    /* Les lignes de crédit : elles n'ont ni adversaire ni champion, les
+       afficher comme des parties donnait de fausses victoires solo. */
+    if(x.kind !== "game"){
+      const quoi = x.kind === "peage"
+        ? ["P\u00e9age encaiss\u00e9", "objet",
+           "Les LP arrach\u00e9s par ton P\u00e9age sont all\u00e9s au score de ton \u00e9quipe"]
+        : ["Bonus d'\u00e9quipe", "boutique",
+           "Achet\u00e9 en boutique : ces LP comptent pour l'\u00e9quipe, pas au classement individuel"];
+      return '<div class="row">'
+        + '<span class="delta up">' + signed(x.lp_items || 0) + '</span>'
+        + '<span class="pavpair">' + avatarRing(t) + '</span>'
+        + '<div class="rowmain">'
+          + '<div class="rowtitle">' + quoi[0] + '<span class="tagchip solo">' + quoi[1] + '</span></div>'
+          + '<div class="rowmeta">' + quoi[2] + '</div></div>'
         + time + del + '</div>';
     }
 
