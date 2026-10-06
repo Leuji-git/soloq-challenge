@@ -73,6 +73,8 @@ const emblemCD  = t => CD_EMBLEME + t.toLowerCase() + ".png";
 // onerror ne tire qu'une fois : on le coupe avant de changer la source,
 // sinon un CDN injoignable ferait boucler l'image.
 const emblemRepli = t => ' onerror="this.onerror=null;this.src=\'' + emblemCD(t) + '\'"';
+const emblemRepliSvg = t =>
+  ' onerror="this.onerror=null;this.setAttribute(\'href\',\'' + emblemCD(t) + '\')"';
 // Un pseudo copié depuis Discord traîne souvent des caractères de contrôle
 // bidirectionnels invisibles (U+2066–U+2069…) : encodés dans l'URL, ils
 // cassaient le lien dpm.lol (ex. « LEUJI-OIOIO%E2%81%A9 »).
@@ -988,11 +990,20 @@ function renderChart(){
       const couleur = frontiere ? TIERS[TIDX[r.t]].c : "var(--line-soft)";
       out += '<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)
           +  '" stroke="'+couleur+'" stroke-width="1" opacity="'+(frontiere ? ".42" : ".2")+'"/>';
-      if(frontiere || serre){
-        out += '<text x="'+(PL-10)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" fill="'
-            +  (frontiere ? TIERS[TIDX[r.t]].c : "var(--muted)")
-            +  '" font-family="Barlow Semi Condensed" font-size="'+(frontiere ? 12 : 11)+'">'
-            +  esc(frontiere ? TIERS[TIDX[r.t]].fr : shortRank(r)) + '</text>';
+      /* À chaque frontière de palier, son emblème plutôt que son nom :
+         on reconnaît un blason d'un coup d'œil, là où il fallait lire
+         « Émeraude ». Les divisions intermédiaires restent écrites, elles
+         n'ont pas d'image à elles. */
+      if(frontiere){
+        const T = 26;
+        out += '<image href="' + emblem(r.t) + '" x="' + (PL - 8 - T)
+            +  '" y="' + (y - T / 2).toFixed(1) + '" width="' + T + '" height="' + T
+            +  '" preserveAspectRatio="xMidYMid meet"' + emblemRepliSvg(r.t) + '>'
+            +  '<title>' + esc(TIERS[TIDX[r.t]].fr) + '</title></image>';
+      }else if(serre){
+        out += '<text x="'+(PL-10)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end"'
+            +  ' fill="var(--muted)" font-family="Barlow Semi Condensed" font-size="11">'
+            +  esc(shortRank(r)) + '</text>';
       }
     }
   }else{
