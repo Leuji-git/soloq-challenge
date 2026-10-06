@@ -1394,7 +1394,7 @@ const RARETES = { commun:"Commun", rare:"Rare", legendaire:"Légendaire" };
    la probabilité, c'est le serveur qui tire. */
 const POIDS_RARETE = { commun:60, rare:30, legendaire:10 };
 
-// Chance qu'un butin donné tombe sur cet objet précis.
+// Chance qu'un coffre ouvert tombe sur cet objet précis.
 function tauxDrop(it, items){
   const poids = x => POIDS_RARETE[x.rarity] || 1;
   const total = items.reduce((a, x) => a + poids(x), 0);
@@ -1426,11 +1426,11 @@ function renderItems(){
     ? decouverts.size + " / " + S.items.length + " découverts"
     : S.items.length + " objets";
   $("#itemsHint").textContent = admin
-    ? "Vue administrateur : tous les objets sont révélés, les joueurs ne voient que ceux qu'ils ont obtenus. Le pourcentage est la chance de tomber sur cet objet à chaque butin."
+    ? "Vue administrateur : tous les objets sont révélés, les joueurs ne voient que ceux qu'ils ont obtenus. Le pourcentage est la chance de tomber sur cet objet à chaque coffre ouvert."
     : mine
-      ? "Un objet tombe à chaque victoire, quelle que soit la compagnie. Tant que tu n'en as jamais obtenu un, tu n'en connais que la rumeur."
+      ? "Un coffre tombe à chaque victoire, quelle que soit la compagnie. Tant que tu n'as jamais obtenu un objet, tu n'en connais que la rumeur."
         + (total ? " Tu en as " + total + " en réserve." : "")
-      : "Connecte-toi pour voir ceux que tu as découverts. Un objet tombe à chaque victoire.";
+      : "Connecte-toi pour voir ceux que tu as découverts. Un coffre tombe à chaque victoire.";
 
   // Les exemplaires en main, par objet : libres d'un côté, armés de l'autre.
   const libres = {}, armes = {};
@@ -1461,7 +1461,7 @@ function renderItems(){
           + '<div class="itemtags">'
             + '<span class="rarity ' + esc(it.rarity) + '">' + esc(RARETES[it.rarity] || it.rarity) + '</span>'
             + '<span class="itemtarget">' + (it.target === "soi" ? "pour toi" : "sur un adversaire") + '</span>'
-            + '<span class="droprate" title="Chance de tomber sur cet objet a chaque butin">' + taux + '</span>'
+            + '<span class="droprate" title="Chance de tomber sur cet objet a chaque coffre ouvert">' + taux + '</span>'
           + '</div>'
         + '</div>'
         + (n > 1 ? '<span class="itemcount">×' + n + '</span>' : n === 1 ? '<span class="itemcount">×1</span>' : '')
@@ -2633,7 +2633,7 @@ function renderFeed(t){
     if(x.duo === "team")      meta = "Avec " + (partner ? partner.name : "un coéquipier");
     else if(x.duo === "enemy") meta = "Contre " + (partner ? partner.name : "un adversaire");
     else                       meta = "Partie solo";
-    if(aLoote) meta += " · un objet est tombé";
+    if(aLoote) meta += " · un coffre est tombé";
     if(x.champion) meta = x.champion + " · " + meta;
     if(x.approx) meta += " · LP estimés (plusieurs parties entre deux relevés)";
 
@@ -2720,11 +2720,13 @@ const RULES = [
   + "<p>L'API ne distingue pas un vrai duo de deux joueurs tombés ensemble par hasard : entre joueurs du même niveau, ça peut arriver.</p>" },
 
   { t:"Le duel d'équipes", h:
-    "<p>Le score d'une équipe est la somme des LP nets de ses membres.</p>"
+    "<p>Le score d'une équipe est la somme des <strong>LP globaux</strong> de ses membres : les LP rendus par Riot, plus ce que les objets, les primes et la boutique ont ajouté. Le classement individuel, lui, reste au <strong>LP net</strong>.</p>"
   + "<p>Une seule mauvaise soirée peut faire basculer la balance : personne n'est jamais à l'abri.</p>" },
 
   { t:"Les objets", h:
-    "<p><strong>Gagne une partie</strong> : un objet tombe. Solo, duo allié, duo adverse — toute victoire compte.</p>"
+    "<p><strong>Gagne une partie</strong> : un <strong>coffre</strong> tombe. Solo, duo allié, duo adverse — toute victoire compte.</p>"
+  + "<p>Le coffre ne dit pas ce qu'il contient : l'objet n'est tiré qu'au moment où tu l'ouvres, dans l'onglet <strong>Objets</strong>. Rien ne dort en base avant, il n'y a donc rien à espionner.</p>"
+  + "<p>Trois, cinq et sept parties dans la même journée donnent chacune un coffre de plus et de l'or — deux coffres pour la septième. Et la boutique en vend à 500 or.</p>"
   + "<p>Un objet est un <strong>bonus</strong> que tu poses sur toi, ou un <strong>malus</strong> que tu poses sur un adversaire.</p>"
   + "<p><strong>Il faut le verrouiller avant de jouer.</strong> Tu choisis l'objet, tu choisis la cible, et il agira sur la <strong>prochaine partie de cette personne</strong> — où qu'elle joue, avec qui qu'elle veuille. Tu n'as pas besoin d'être dans sa partie, ni même d'être connecté. Que sa condition soit remplie ou non, l'objet est consommé.</p>"
   + "<p>Sur une même partie, au plus <strong>un bonus et trois malus</strong> font effet. Les objets verrouillés en trop restent en réserve, intacts.</p>"
@@ -2889,7 +2891,7 @@ function renderShop(){
     + '<h4>Tes objets</h4>'
     + (rayon.length
         ? rayon.map(ligneObjet).join("")
-        : '<div class="empty">Tu ne peux acheter qu\'un objet que tu as déjà décroché en jeu. Gagne une partie pour en découvrir un.</div>')
+        : '<div class="empty">Tu ne peux acheter qu\'un objet que tu as déjà découvert. Ouvre un coffre pour en découvrir un.</div>')
     + '<h4>Pour ton équipe</h4>'
     + article("\u{1F4C8}", "25 LP", "cr\u00e9dit\u00e9s \u00e0 ton \u00e9quipe", PRIX.lp25, 'data-lp="25"', false)
     + article("\u26A1", "Double LP \u00b7 " + BOOST_HEURES + " h",
