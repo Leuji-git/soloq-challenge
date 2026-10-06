@@ -2609,10 +2609,15 @@ function renderFeed(t){
       const quoi = x.kind === "peage"
         ? ["P\u00e9age encaiss\u00e9", "objet",
            "Les LP arrach\u00e9s par ton P\u00e9age sont all\u00e9s au score de ton \u00e9quipe"]
+        : x.kind === "renvoi"
+        ? ["Malus renvoy\u00e9", "objet",
+           "Une \u00c9gide du Contre t'a retourn\u00e9 ce que tu avais pos\u00e9 : le co\u00fbt est pour ton \u00e9quipe"]
         : ["Bonus d'\u00e9quipe", "boutique",
            "Achet\u00e9 en boutique : ces LP comptent pour l'\u00e9quipe, pas au classement individuel"];
+      // Un renvoi co\u00fbte : la pastille doit virer au rouge.
+      const v = x.lp_items || 0;
       return '<div class="row">'
-        + '<span class="delta up">' + signed(x.lp_items || 0) + '</span>'
+        + '<span class="delta ' + (v >= 0 ? "up" : "down") + '">' + signed(v) + '</span>'
         + '<span class="pavpair">' + avatarRing(t) + '</span>'
         + '<div class="rowmain">'
           + '<div class="rowtitle">' + quoi[0] + '<span class="tagchip solo">' + quoi[1] + '</span></div>'

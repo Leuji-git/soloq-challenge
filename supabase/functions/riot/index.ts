@@ -346,20 +346,26 @@ function resoudreObjets(armes, ctx){
              lp: Math.round(r.lp) || 0, note: r.note };
   });
 
-  // Une égide qui tient annule TOUS les malus de la partie, elle-même
-  // comprise dans le compte des trois. Elle ne touche pas aux bonus :
-  // on se protège des autres, on ne se prive pas de soi.
+  /* Une égide qui tient annule TOUS les malus de la partie, elle-même
+     comprise dans le compte des trois, et les RENVOIE sur ceux qui les
+     ont posés. Elle ne touche pas aux bonus : on se protège des autres,
+     on ne se prive pas de soi.
+
+     Seuls les effets qui COÛTENT sont renvoyés. Un Pile ou Face tombé
+     du bon côté rapporte à sa cible : il n'y a rien à annuler, et le
+     renvoyer reviendrait à récompenser son auteur. */
   const egide = appliques.find(o => BOUCLIERS[o.itemKey] && BOUCLIERS[o.itemKey](ctx));
+  const renvois = [];
   if(egide){
-    let repousses = 0;
     appliques.forEach(o => {
-      if(o.cible === "adversaire" && o !== egide && o.lp !== 0){
-        o.lp = 0; o.note = "annulé par l'Égide du Contre"; repousses++;
-      }
+      if(o.cible !== "adversaire" || o === egide || o.lp >= 0) return;
+      renvois.push({ vers: o.owner, lp: o.lp, itemKey: o.itemKey });
+      o.lp = 0;
+      o.note = "renvoyé par l'Égide du Contre";
     });
-    egide.note = repousses
-      ? repousses + (repousses > 1 ? " malus repoussés" : " malus repoussé")
-      : "aucun malus à repousser";
+    egide.note = renvois.length
+      ? renvois.length + (renvois.length > 1 ? " malus renvoyés" : " malus renvoyé")
+      : "aucun malus à renvoyer";
   }
 
   // Les LP de péage : qui encaisse, et combien.
@@ -377,7 +383,7 @@ function resoudreObjets(armes, ctx){
   });
 
   return {
-    appliques, vols, transferts,
+    appliques, vols, transferts, renvois,
     reportes: tri.filter(o => gardes.indexOf(o) < 0).map(o => o.id),
     total: appliques.reduce((a, o) => a + o.lp, 0)
   };
@@ -639,6 +645,22 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
     }
   }
 
+  /* Les malus renvoyés par l'Égide. Ils ne touchent pas le classement
+     individuel de leur auteur — aucun objet ne le fait — mais ils
+     coûtent au score de son équipe, exactement comme ils auraient coûté
+     à celui de sa cible. Une ligne par auteur, et l'index unique
+     (player_id, match_id) la rend rejouable sans effet. */
+  const parAuteur = {};
+  (r.renvois || []).forEach(x => { parAuteur[x.vers] = (parAuteur[x.vers] || 0) + x.lp; });
+  for(const auteur of Object.keys(parAuteur)){
+    await db.from("games").insert({
+      player_id: auteur, lp: 0, lp_items: clampLp(parAuteur[auteur]),
+      win: false, duo: "solo", kind: "renvoi",
+      match_id: g.matchId + "-renvoi",
+      played_on: parisDate(g.end), created_at: new Date(g.end).toISOString()
+    });
+  }
+
   /* Les LP de péage. Une ligne de partie à lp = 0 et lp_items = +20,
      exactement comme les 25 LP de la boutique : le score d'ÉQUIPE les
      prend, le classement individuel ne bouge pas. L'index unique
@@ -661,7 +683,8 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
   }
 
   return { lp: clampLp(r.total), detail: r.appliques,
-           vols: r.vols || [], transferts: r.transferts || [] };
+           vols: r.vols || [], transferts: r.transferts || [],
+           renvois: r.renvois || [] };
 }
 
 async function isAdmin(uid){
