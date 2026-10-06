@@ -208,6 +208,9 @@ function orDeLaPartie(s){
    tout. Sert au diagnostic, jamais à autoriser quoi que ce soit. */
 const FORME_CLE = /^RGAPI-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
+// Ce que l'Ange Gardien peut rendre au maximum.
+const PLAFOND_ANGE = 50;
+
 const EFFETS = {
   // ---- bonus, posés sur soi ----
   pierre_garde: c => c.win
@@ -226,9 +229,19 @@ const EFFETS = {
     ? { lp: c.lp, note: "gain doublé" }
     : { lp: 0, note: "partie perdue" },
 
-  ange_gardien: c => c.win
-    ? { lp: 0, note: "partie gagnée" }
-    : { lp: Math.round(-c.lp / 2), note: "perte réduite de moitié" },
+  /* Il rend ce que la partie PRÉCÉDENTE a coûté, et seulement si
+     celle sur laquelle il est armé est gagnée.
+
+     Plafonné : une partie marquée « estimée » peut porter plusieurs
+     parties d'un coup quand le relevé en a raté, et sans plafond
+     l'objet rendrait d'un seul coup une soirée entière. */
+  ange_gardien: c => {
+    if(!c.win) return { lp: 0, note: "partie perdue" };
+    const perdu = Math.max(0, -(c.lpPrecedent || 0));
+    if(!perdu) return { lp: 0, note: "rien \u00e0 rattraper sur la partie pr\u00e9c\u00e9dente" };
+    const rendu = Math.min(PLAFOND_ANGE, perdu);
+    return { lp: rendu, note: "d\u00e9faite pr\u00e9c\u00e9dente rattrap\u00e9e (\u2212" + perdu + " LP)" };
+  },
 
   baron_nashor: c => c.win
     ? { lp: 25, note: "victoire" }
@@ -499,6 +512,17 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
   const { data: passees } = await db.from("games")
     .select("champion").eq("player_id", joueur.id).neq("match_id", g.matchId);
 
+  /* La partie d'avant, pour l'Ange Gardien. La partie courante est
+     déjà en base à cet instant — elle est insérée avant qu'on applique
+     les objets — d'où le « strictement avant » sur sa date de fin.
+     Les ajustements (esquives, décroissance) sont écartés : ce ne sont
+     pas des parties. */
+  const { data: avant } = await db.from("games")
+    .select("lp,created_at").eq("player_id", joueur.id).eq("kind", "game")
+    .lt("created_at", new Date(g.end).toISOString())
+    .order("created_at", { ascending: false }).limit(1);
+  const lpPrecedent = avant && avant.length ? avant[0].lp : 0;
+
   const r = resoudreObjets(
     armes.map(a => ({
       id: a.id,
@@ -511,6 +535,7 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
     {
       win: g.win, lp: lpNet, duo: g.duo, champion: g.champion,
       deaths: g.deaths, vision: g.vision, dureeMin: g.dureeMin,
+      lpPrecedent,
       cibleId: joueur.id,
       championsJoues: (passees || []).map(x => x.champion).filter(Boolean)
     });
@@ -1100,9 +1125,17 @@ async function recalculer(user, body){
   const { data: passees } = await db.from("games")
     .select("champion").eq("player_id", joueur.id).neq("match_id", jeu.match_id);
 
+  // La partie d'avant, comme au relèvement : sans elle, l'Ange Gardien
+  // se recalculerait à zéro.
+  const { data: avant } = await db.from("games")
+    .select("lp,created_at").eq("player_id", joueur.id).eq("kind", "game")
+    .lt("created_at", jeu.created_at)
+    .order("created_at", { ascending: false }).limit(1);
+
   const ctx = {
     win: g.win, lp: jeu.lp, duo: g.duo, champion: g.champion,
     deaths: g.deaths, vision: g.vision, dureeMin: g.dureeMin,
+    lpPrecedent: avant && avant.length ? avant[0].lp : 0,
     championsJoues: (passees || []).map(x => x.champion).filter(Boolean)
   };
 
