@@ -771,6 +771,103 @@ function stepPath(pts, X, Y, t0, t1){
   return d;
 }
 
+/* ------------------------------------------------------------------
+   L'axe du temps, resserré sur les trous
+
+   Une nuit sans partie occupait autant de largeur qu'une soirée à dix
+   parties : la courbe y traçait une longue ligne plate qui ne disait
+   rien, et écrasait tout le reste. On remplace donc le temps réel par
+   un temps « utile » : les périodes où quelqu'un a joué gardent leur
+   durée, les trous sont ramenés à une largeur fixe.
+
+   La transformation est monotone et continue par morceaux, donc
+   inversible : le zoom, le déplacement et le survol passent par son
+   inverse et continuent de raisonner en temps réel. Aucune date
+   affichée n'est faussée — seule la LARGEUR d'un trou l'est, et une
+   bande grisée dit à l'écran où on a coupé.
+
+   Décoché, l'axe redevient strictement linéaire.
+------------------------------------------------------------------- */
+const TROU_MIN   = 40 * 60e3;    // en deçà, ce n'est pas un temps mort
+const TROU_LARGE = 6 * 60e3;     // la largeur qu'on lui laisse
+
+let gapMode = (() => {
+  try{ return localStorage.getItem("soloq.gap") !== "0"; }catch(_){ return true; }
+})();
+
+let axeTemps = null;             // [{ t0, t1, u0, u1, trou }]
+
+function construireAxe(){
+  const f = fullSpan();
+  if(!gapMode){
+    axeTemps = [{ t0:f.t0, t1:f.t1, u0:0, u1:Math.max(1, f.t1 - f.t0), trou:false }];
+    return axeTemps;
+  }
+
+  const ts = S.games.map(tsOf)
+    .filter(t => Number.isFinite(t) && t >= f.t0 && t <= f.t1)
+    .sort((a, b) => a - b);
+
+  const segs = [];
+  let u = 0, debut = f.t0, prec = f.t0;
+  const ajouter = (a, b, largeur, trou) => {
+    if(b <= a) return;
+    segs.push({ t0:a, t1:b, u0:u, u1:u + largeur, trou:!!trou });
+    u += largeur;
+  };
+
+  for(const t of ts){
+    if(t - prec > TROU_MIN){
+      ajouter(debut, prec, prec - debut, false);   // le bloc joué qui précède
+      ajouter(prec, t, TROU_LARGE, true);          // le trou, resserré
+      debut = t;
+    }
+    if(t > prec) prec = t;
+  }
+  if(f.t1 - prec > TROU_MIN){
+    ajouter(debut, prec, prec - debut, false);
+    ajouter(prec, f.t1, TROU_LARGE, true);
+  }else{
+    ajouter(debut, f.t1, f.t1 - debut, false);
+  }
+  if(!segs.length) ajouter(f.t0, f.t1, Math.max(6e4, f.t1 - f.t0), false);
+
+  axeTemps = segs;
+  return segs;
+}
+
+// Le segment qui contient cet instant.
+function segDe(t){
+  const A = axeTemps;
+  let lo = 0, hi = A.length - 1;
+  while(lo < hi){ const m = (lo + hi) >> 1; if(A[m].t1 < t) lo = m + 1; else hi = m; }
+  return A[lo];
+}
+
+// Temps réel -> temps utile, et retour.
+function uDe(t){
+  const A = axeTemps;
+  if(!A || !A.length) return 0;
+  if(t <= A[0].t0) return A[0].u0;
+  const der = A[A.length - 1];
+  if(t >= der.t1) return der.u1;
+  const s = segDe(t);
+  const r = s.t1 > s.t0 ? (t - s.t0) / (s.t1 - s.t0) : 0;
+  return s.u0 + r * (s.u1 - s.u0);
+}
+function tDe(u){
+  const A = axeTemps;
+  if(!A || !A.length) return 0;
+  if(u <= A[0].u0) return A[0].t0;
+  const der = A[A.length - 1];
+  if(u >= der.u1) return der.t1;
+  let lo = 0, hi = A.length - 1;
+  while(lo < hi){ const m = (lo + hi) >> 1; if(A[m].u1 < u) lo = m + 1; else hi = m; }
+  const s = A[lo];
+  const r = s.u1 > s.u0 ? (u - s.u0) / (s.u1 - s.u0) : 0;
+  return s.t0 + r * (s.t1 - s.t0);
+}
+
 function pickStep(span){ const cible = span / 7; return PAS.find(v => v >= cible) || PAS[PAS.length-1]; }
 function axisTicks(t0, t1, pas){
   const out = [];
@@ -798,6 +895,8 @@ function renderChart(){
   if(!view) view = fullSpan();
   view = clampView(view);
   const { t0, t1 } = view;
+  construireAxe();
+  const u0 = uDe(t0), u1 = uDe(t1), du = (u1 - u0) || 1;
 
   // Le mode rang ne vaut qu'en joueurs : la case est masquée ailleurs,
   // mais on ne s'y fie pas, on revérifie ici.
@@ -820,7 +919,7 @@ function renderChart(){
   // L'axe vertical se recalcule sur ce qui est visible : c'est ce qui
   // donne du relief quand on zoome sur une soirée.
   let lo, hi, Y;
-  const X = t => PL + ((t - t0) / (t1 - t0)) * (W - PL - PR);
+  const X = t => PL + ((uDe(t) - u0) / du) * (W - PL - PR);
 
   if(rang){
     // Bornes calées sur les divisions : l'axe tombe toujours juste.
@@ -882,9 +981,31 @@ function renderChart(){
     out += '<line x1="'+PL+'" y1="'+Y(0).toFixed(1)+'" x2="'+(W-PR)+'" y2="'+Y(0).toFixed(1)+'" stroke="var(--line)" stroke-width="1.5"/>';
   }
 
+  /* Les bandes grisées : les heures sans aucune partie, ramenées à une
+     largeur fixe. On les montre, sinon le graphique laisserait croire
+     qu'une nuit dure six minutes. */
+  axeTemps.filter(sg => sg.trou && sg.t1 > t0 && sg.t0 < t1).forEach(sg => {
+    const xa = X(Math.max(sg.t0, t0)), xb = X(Math.min(sg.t1, t1));
+    if(xb - xa < 0.6) return;
+    out += '<rect x="'+xa.toFixed(1)+'" y="'+PT+'" width="'+(xb-xa).toFixed(1)
+        +  '" height="'+(H-PT-PB)+'" fill="var(--line-soft)" opacity=".5"/>'
+        +  '<line x1="'+xa.toFixed(1)+'" y1="'+PT+'" x2="'+xa.toFixed(1)+'" y2="'+(H-PB)
+        +  '" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 3" opacity=".9"/>'
+        +  '<line x1="'+xb.toFixed(1)+'" y1="'+PT+'" x2="'+xb.toFixed(1)+'" y2="'+(H-PB)
+        +  '" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 3" opacity=".9"/>';
+  });
+
+  /* Les repères gardent des heures rondes, mais on écarte ceux qui
+     tombent dans un temps mort — ils s'empileraient tous dans la même
+     bande de six minutes — et ceux qui se collent au précédent. */
   const pas = pickStep(t1 - t0);
+  let xPrec = -1e9;
   axisTicks(t0, t1, pas).forEach(t => {
+    const sg = segDe(t);
+    if(sg && sg.trou) return;
     const x = X(t);
+    if(x - xPrec < 54) return;
+    xPrec = x;
     out += '<line x1="'+x.toFixed(1)+'" y1="'+PT+'" x2="'+x.toFixed(1)+'" y2="'+(H-PB)+'" stroke="var(--line-soft)" stroke-width="1" opacity=".5"/>'
         +  '<text x="'+x.toFixed(1)+'" y="'+(H-20)+'" text-anchor="middle" fill="var(--muted)" font-family="Barlow Semi Condensed" font-size="12">'+esc(tickLabel(t, pas))+'</text>';
   });
@@ -1060,7 +1181,9 @@ function chartTimeAt(clientX){
   const PL = 58, PR = 20, W = 920;
   const x = ((clientX - box.left) / box.width) * W;
   const r = Math.max(0, Math.min(1, (x - PL) / (W - PL - PR)));
-  return view.t0 + r * (view.t1 - view.t0);
+  // L'inverse exact de X : on lit en temps utile, on rend du temps réel.
+  const u0 = uDe(view.t0), u1 = uDe(view.t1);
+  return tDe(u0 + r * (u1 - u0));
 }
 function initChartZoom(){
   const svg = $("#chart");
@@ -1079,9 +1202,12 @@ function initChartZoom(){
     e.preventDefault();
     const anchor = chartTimeAt(e.clientX);
     const facteur = e.deltaY > 0 ? 1.3 : 1/1.3;
-    const span = (view.t1 - view.t0) * facteur;
-    const r = (anchor - view.t0) / (view.t1 - view.t0);
-    view = clampView({ t0: anchor - r * span, t1: anchor + (1-r) * span });
+    // Le zoom se raisonne en temps utile : c'est lui qui correspond à
+    // ce que l'œil voit, donc le point sous le curseur ne bouge pas.
+    const u0 = uDe(view.t0), u1 = uDe(view.t1), ua = uDe(anchor);
+    const span = (u1 - u0) * facteur;
+    const r = (u1 - u0) ? (ua - u0) / (u1 - u0) : 0.5;
+    view = clampView({ t0: tDe(ua - r * span), t1: tDe(ua + (1-r) * span) });
     renderChart();
   }, { passive:false });
 
@@ -1095,13 +1221,26 @@ function initChartZoom(){
   svg.addEventListener("pointermove", e => {
     if(!drag) return;
     const box = svg.getBoundingClientRect();
-    const dt = ((e.clientX - drag.x) / box.width) * (drag.t1 - drag.t0) * (920 / (920 - 78));
-    view = clampView({ t0: drag.t0 - dt, t1: drag.t1 - dt });
+    const a0 = uDe(drag.t0), a1 = uDe(drag.t1);
+    const du = ((e.clientX - drag.x) / box.width) * (a1 - a0) * (920 / (920 - 78));
+    view = clampView({ t0: tDe(a0 - du), t1: tDe(a1 - du) });
     renderChart();
   });
   const stop = () => { drag = null; svg.classList.remove("grabbing"); };
   svg.addEventListener("pointerup", stop);
   svg.addEventListener("pointercancel", stop);
+  const gm = $("#gapMode");
+  if(gm){
+    gm.checked = gapMode;
+    gm.addEventListener("change", () => {
+      gapMode = gm.checked;
+      try{ localStorage.setItem("soloq.gap", gapMode ? "1" : "0"); }catch(_){}
+      // L'échelle change de nature : garder la vue en cours donnerait un
+      // cadrage incompréhensible. On repart de l'ensemble.
+      view = fullSpan();
+      renderChart();
+    });
+  }
   svg.addEventListener("dblclick", () => { view = fullSpan(); renderChart(); });
   $("#zoomReset").addEventListener("click", () => { view = fullSpan(); renderChart(); });
 }
