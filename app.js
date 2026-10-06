@@ -2350,15 +2350,19 @@ function quand(t){
 /* Les paliers du jour.
 
    Le serveur en est seul juge : il recompte les parties du jour au
-   moment où il en enregistre une, et pose coffre et or. Ce qui suit
-   n'est qu'un miroir — il ne donne rien, il montre où on en est. Les
-   chiffres doivent rester les mêmes que PALIERS_JOUR dans la fonction
-   « riot ». */
+   moment où il en enregistre une, et pose coffres et or. Ce qui suit
+   n'est qu'un miroir — il ne donne rien, il montre où on en est.
+
+   Ces chiffres doivent rester identiques à PALIERS_JOUR dans la
+   fonction « riot », sinon la page promet ce que le moteur ne tient
+   pas. */
 const PALIERS_JOUR = [
-  { parties: 3, or: 250 },
-  { parties: 5, or: 500 },
-  { parties: 7, or: 900 }
+  { parties: 3, coffres: 1, or: 250 },
+  { parties: 5, coffres: 1, or: 500 },
+  { parties: 7, coffres: 2, or: 900 }
 ];
+
+const coffreMot = n => n + (n > 1 ? " coffres" : " coffre");
 
 function renderPaliers(t){
   const box = $("#paliersJour");
@@ -2367,24 +2371,47 @@ function renderPaliers(t){
   const n = S.games.filter(g =>
     g.player_id === t.id && g.kind === "game" && dayOf(g.played_on) === auj).length;
 
+  const acquis = PALIERS_JOUR.filter(p => n >= p.parties);
   const suivant = PALIERS_JOUR.find(p => n < p.parties);
+  const dernier = PALIERS_JOUR[PALIERS_JOUR.length - 1].parties;
+  const coffres = acquis.reduce((a, p) => a + p.coffres, 0);
+  const or = acquis.reduce((a, p) => a + p.or, 0);
+
+  /* Une étape = un palier. Le titre dit QUAND, les deux lignes du
+     dessous disent QUOI : c'est la question à laquelle l'ancienne
+     version ne répondait pas, tout étant sur une seule ligne. */
+  const etape = p => {
+    const fait = n >= p.parties;
+    const vise = !fait && suivant && suivant.parties === p.parties;
+    return '<div class="palstep' + (fait ? " done" : vise ? " next" : "") + '">'
+      + '<div class="palwhen"><span class="palmark">' + (fait ? "\u2713" : p.parties)
+        + '</span>' + p.parties + ' parties</div>'
+      + '<div class="palgift">' + COFFRE_MINI + '<span>' + coffreMot(p.coffres) + '</span></div>'
+      + '<div class="palgift">' + PIECE_OR + '<span>' + orFr(p.or) + ' or</span></div>'
+      + '</div>';
+  };
+
   box.hidden = false;
   box.innerHTML =
-      '<span class="palierlbl">Aujourd\'hui \u00b7 <b>' + n + '</b> '
-      + (n > 1 ? "parties" : "partie") + '</span>'
-    + PALIERS_JOUR.map(p => {
-        const fait = n >= p.parties;
-        const vise = !fait && suivant && suivant.parties === p.parties;
-        return '<span class="palier' + (fait ? " done" : vise ? " next" : "") + '"'
-          + ' title="' + p.parties + ' parties jou\u00e9es dans la journ\u00e9e : un coffre et '
-          + orFr(p.or) + ' or">'
-          + '<b>' + p.parties + '</b>' + COFFRE_MINI + PIECE_OR + orFr(p.or)
-          + '</span>';
-      }).join("")
-    + (suivant
-        ? '<span class="paliernext">encore <b>' + (suivant.parties - n) + '</b> '
-          + (suivant.parties - n > 1 ? "parties" : "partie") + '</span>'
-        : '<span class="paliernext done">tout est tomb\u00e9</span>');
+      '<div class="palhead">'
+      + '<span class="palttl">R\u00e9compenses du jour</span>'
+      + '<span class="palcount"><b>' + n + '</b> '
+        + (n > 1 ? "parties jou\u00e9es" : "partie jou\u00e9e") + '</span>'
+      + (coffres || or
+          ? '<span class="palwon">d\u00e9j\u00e0 gagn\u00e9 \u00b7 ' + COFFRE_MINI + '<b>' + coffres + '</b>'
+            + PIECE_OR + '<b>' + orFr(or) + '</b></span>'
+          : '')
+    + '</div>'
+    + '<div class="palbar"><i style="width:'
+      + Math.min(100, Math.round(n / dernier * 100)) + '%"></i></div>'
+    + '<div class="palsteps">' + PALIERS_JOUR.map(etape).join("") + '</div>'
+    + '<div class="palnext' + (suivant ? "" : " done") + '">'
+      + (suivant
+          ? "Encore <b>" + (suivant.parties - n) + "</b> "
+            + (suivant.parties - n > 1 ? "parties" : "partie") + " pour <b>"
+            + coffreMot(suivant.coffres) + "</b> et <b>" + orFr(suivant.or) + " or</b>."
+          : "Tout est tomb\u00e9 pour aujourd'hui.")
+    + '</div>';
 }
 
 function renderFeed(t){
@@ -2604,7 +2631,7 @@ function renderRules(){
 /* Le rayon. Les prix vivent AUSSI dans boutique-v2.sql, qui seul
    décide : la page ne fait que les annoncer. Si tu changes l'un,
    change l'autre. */
-const PRIX = { coffre: 1000, lp25: 2000, boost: 5000, swap: 25000 };
+const PRIX = { coffre: 500, lp25: 2000, boost: 5000, swap: 25000 };
 
 /* Le coffre de la boutique, dessiné comme celui du volet : même forme,
    même couvercle plat, pour qu'on reconnaisse ce qu'on achète. */

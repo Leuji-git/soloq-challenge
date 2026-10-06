@@ -20,7 +20,7 @@
 
 create or replace function public.shop_buy_box()
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare moi public.players; prix int := 1000;
+declare moi public.players; prix int := 500;
 begin
   select * into moi from public.players where claimed_by = auth.uid();
   if not found then raise exception 'Connecte-toi avec ton profil joueur'; end if;

@@ -187,13 +187,16 @@ const OR_ROLES = {
 const OR_VICTOIRE = 50;
 
 /* Les paliers du jour, par JOUEUR (pas par équipe). Chacun tombe une
-   seule fois par jour, le jour où il est atteint, et donne un coffre
-   plus de l'or. Ils s'additionnent : sept parties, c'est trois coffres
-   et 1 650 or. */
+   seule fois par jour, le jour où il est atteint. Ils s'additionnent :
+   sept parties, c'est quatre coffres et 1 650 or.
+
+   Toute modification ici doit être reportée dans PALIERS_JOUR, dans
+   app.js : le site n'affiche que ce qu'on lui dit, c'est ce fichier
+   qui donne. */
 const PALIERS_JOUR = [
-  { parties: 3, or: 250 },
-  { parties: 5, or: 500 },
-  { parties: 7, or: 900 }
+  { parties: 3, coffres: 1, or: 250 },
+  { parties: 5, coffres: 1, or: 500 },
+  { parties: 7, coffres: 2, or: 900 }
 ];
 
 // Les paliers couverts par n parties dans la journée.
@@ -545,9 +548,13 @@ async function recompenserJour(joueur, quand, bilan){
   for(const p of paliersAtteints(count)){
     const cle = "palier-" + jour + "-" + p.parties;
 
-    const { error: eBox } = await db.from("player_boxes")
-      .insert({ player_id: joueur.id, source_match: cle });
-    if(!eBox) bilan.paliers = (bilan.paliers || 0) + 1;
+    // Un coffre par exemplaire, chacun sa clé : l'index unique fait le
+    // reste, et un palier à deux coffres n'en pose jamais trois.
+    for(let i = 1; i <= (p.coffres || 1); i++){
+      const { error: eBox } = await db.from("player_boxes")
+        .insert({ player_id: joueur.id, source_match: cle + "-" + i });
+      if(!eBox) bilan.paliers = (bilan.paliers || 0) + 1;
+    }
 
     const { error: eOr } = await db.rpc("credit_gold", {
       p_player: joueur.id, p_amount: p.or,
