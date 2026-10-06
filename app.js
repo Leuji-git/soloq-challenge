@@ -2552,6 +2552,28 @@ function openShop(open){
   if(open) renderShop();
 }
 
+/* Le libelle d'un mouvement d'or.
+
+   La ligne en base dit « partie UTILITY » : c'est le code de poste de
+   Riot, ecrit tel quel au moment du credit. On le traduit ici, et on
+   retrouve le champion dans la partie correspondante -- le journal ne
+   le porte pas, mais la partie, elle, l'a.
+
+   Traduire a l'affichage plutot qu'a l'ecriture a un avantage : les
+   lignes deja enregistrees en profitent aussi, sans rien reecrire en
+   base. Les autres motifs (achats, primes, rattrapages) passent tels
+   quels : le filtre ne reconnait qu'un code de poste. */
+function motifOr(r){
+  const m = /^partie (?:([A-Z_]+)|poste inconnu)$/.exec(r.raison || "");
+  if(!m) return r.raison;
+  const code = m[1] || null;
+  const g = r.match_id
+    ? S.games.find(x => x.match_id === r.match_id && x.player_id === r.player_id)
+    : null;
+  const poste = (code && ROLE_FR[code]) || (g && ROLE_FR[g.role]) || code || "poste inconnu";
+  return "Partie " + poste + (g && g.champion ? " · " + g.champion : "");
+}
+
 function renderShop(){
   const corps = $("#shopBody"), bourse = $("#purse");
   if(!corps) return;
@@ -2626,7 +2648,7 @@ function renderShop(){
         ? '<div class="ledger">' + mouvements.map(r =>
             '<div class="ledrow"><span class="delta ' + (r.delta > 0 ? "up" : "down") + '">'
             + (r.delta > 0 ? "+" : "\u2212") + orFr(Math.abs(r.delta)) + '</span>'
-            + '<span class="ledwhy">' + esc(r.raison) + '</span>'
+            + '<span class="ledwhy">' + esc(motifOr(r)) + '</span>'
             + '<span class="ledwhen">' + quand(r.at) + '</span></div>').join("") + '</div>'
         : '<div class="empty">Aucun mouvement pour l\'instant.</div>')
     + '<div class="log" id="shopLog"></div>';
