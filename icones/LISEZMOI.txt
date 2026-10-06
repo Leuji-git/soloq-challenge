@@ -1,0 +1,24 @@
+Les icones des cinq postes, telles que le client les dessine.
+
+A deposer ici, sous ces noms exacts :
+
+    position-top.svg
+    position-jungle.svg
+    position-middle.svg
+    position-bottom.svg
+    position-utility.svg
+
+Elles s'attrapent sur Community Dragon, deux kilo-octets chacune :
+
+    https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-champ-select/global/default/svg/position-top.svg
+    https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-champ-select/global/default/svg/position-jungle.svg
+    https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-champ-select/global/default/svg/position-middle.svg
+    https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-champ-select/global/default/svg/position-bottom.svg
+    https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-champ-select/global/default/svg/position-utility.svg
+
+Tant qu'un fichier manque, le site va le chercher sur le CDN tout seul :
+rien ne casse, c'est juste plus lent et parfois vide le temps que ca
+arrive. Une fois les cinq fichiers ici, plus rien ne sort du depot.
+
+Ce sont des images du jeu : elles restent la propriete de Riot, et
+n'ont leur place ici que parce que le site est prive.

@@ -1492,10 +1492,10 @@ dialog.modal .form{margin-bottom:12px}
    Principal en grand, secondaire en plus petit et plus discret : la
    hiérarchie se lit sans légende. Les icônes arrivent déjà dorées du
    client, on ne les reteint pas. */
-.roles{display:inline-flex;align-items:center;gap:4px;vertical-align:middle;margin-left:9px}
-.roleico{display:block;flex:none;color:var(--accent)}
+.roles{display:inline-flex;align-items:center;gap:3px;vertical-align:middle;margin-left:9px}
+.roleico{display:block;object-fit:contain;flex:none}
 .roleico.main{width:19px;height:19px}
-.roleico.second{width:14px;height:14px;opacity:.6}
+.roleico.second{width:13px;height:13px;opacity:.55}
 
 .rolechip{
   display:inline-flex;align-items:center;
@@ -1537,14 +1537,14 @@ dialog.modal .form{margin-bottom:12px}
   border-radius:var(--r-md);border:1px solid var(--line);background:var(--surface-2);
   color:var(--muted);font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;
 }
-.roleopt-ico{width:24px;height:24px;opacity:.55;transition:opacity .15s}
+.roleopt img{width:24px;height:24px;object-fit:contain;opacity:.5;transition:opacity .15s}
 .roleopt:hover{border-color:color-mix(in srgb, var(--accent) 40%, transparent)}
-.roleopt:hover .roleopt-ico{opacity:.9}
+.roleopt:hover img{opacity:.85}
 .roleopt.on{
   border-color:var(--accent);color:var(--ink);
   background:color-mix(in srgb, var(--accent) 13%, transparent);
 }
-.roleopt.on .roleopt-ico{opacity:1}
+.roleopt.on img{opacity:1}
 .roleopt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 @media (max-width:480px){
