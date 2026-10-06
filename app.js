@@ -2347,6 +2347,46 @@ function quand(t){
   return "le " + new Date(t).toLocaleDateString("fr-FR", { day:"numeric", month:"short" });
 }
 
+/* Les paliers du jour.
+
+   Le serveur en est seul juge : il recompte les parties du jour au
+   moment où il en enregistre une, et pose coffre et or. Ce qui suit
+   n'est qu'un miroir — il ne donne rien, il montre où on en est. Les
+   chiffres doivent rester les mêmes que PALIERS_JOUR dans la fonction
+   « riot ». */
+const PALIERS_JOUR = [
+  { parties: 3, or: 250 },
+  { parties: 5, or: 500 },
+  { parties: 7, or: 900 }
+];
+
+function renderPaliers(t){
+  const box = $("#paliersJour");
+  if(!box) return;
+  const auj = currentDay();
+  const n = S.games.filter(g =>
+    g.player_id === t.id && g.kind === "game" && dayOf(g.played_on) === auj).length;
+
+  const suivant = PALIERS_JOUR.find(p => n < p.parties);
+  box.hidden = false;
+  box.innerHTML =
+      '<span class="palierlbl">Aujourd\'hui \u00b7 <b>' + n + '</b> '
+      + (n > 1 ? "parties" : "partie") + '</span>'
+    + PALIERS_JOUR.map(p => {
+        const fait = n >= p.parties;
+        const vise = !fait && suivant && suivant.parties === p.parties;
+        return '<span class="palier' + (fait ? " done" : vise ? " next" : "") + '"'
+          + ' title="' + p.parties + ' parties jou\u00e9es dans la journ\u00e9e : un coffre et '
+          + orFr(p.or) + ' or">'
+          + '<b>' + p.parties + '</b>' + COFFRE_MINI + PIECE_OR + orFr(p.or)
+          + '</span>';
+      }).join("")
+    + (suivant
+        ? '<span class="paliernext">encore <b>' + (suivant.parties - n) + '</b> '
+          + (suivant.parties - n > 1 ? "parties" : "partie") + '</span>'
+        : '<span class="paliernext done">tout est tomb\u00e9</span>');
+}
+
 function renderFeed(t){
   const box = $("#feed");
   const head = $("#feedTitle");
@@ -2365,6 +2405,7 @@ function renderFeed(t){
     + '<span class="feedcount">' + (nb ? nb + (nb > 1 ? " parties relevées" : " partie relevée") : "aucune partie") + '</span>'
     + '<span class="goldchip" title="Or en réserve">' + PIECE_OR + '<b>' + orFr(t.gold || 0) + '</b></span>'
     + roleChip(t);
+  renderPaliers(t);
 
   if(!g.length){
     const amoi = myPlayer() && myPlayer().id === t.id;
@@ -2563,7 +2604,17 @@ function renderRules(){
 /* Le rayon. Les prix vivent AUSSI dans boutique-v2.sql, qui seul
    décide : la page ne fait que les annoncer. Si tu changes l'un,
    change l'autre. */
-const PRIX = { lp25: 2000, boost: 5000, swap: 25000 };
+const PRIX = { coffre: 1000, lp25: 2000, boost: 5000, swap: 25000 };
+
+/* Le coffre de la boutique, dessiné comme celui du volet : même forme,
+   même couvercle plat, pour qu'on reconnaisse ce qu'on achète. */
+const COFFRE_MINI =
+    '<svg class="coffreico" viewBox="0 0 24 24" aria-hidden="true" fill="none"'
+  + ' stroke="currentColor" stroke-width="1.9" stroke-linejoin="round">'
+  + '<rect x="2.7" y="5.2" width="18.6" height="5.8" rx="1.6"/>'
+  + '<rect x="2.7" y="11" width="18.6" height="8.4" rx="1.6"/>'
+  + '<rect x="10.3" y="12.7" width="3.4" height="3.8" rx="1.1"/>'
+  + '</svg>';
 const BOOST_HEURES = 2;
 const orFr = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, "\u202f");
 
@@ -2659,8 +2710,17 @@ function renderShop(){
 
   const mouvements = S.ledger.filter(r => r.player_id === moi.id).slice(0, 12);
 
+  const enAttente = S.boxes.filter(b => b.player_id === moi.id && !b.opened_at).length;
+
   corps.innerHTML =
-      '<h4>Tes objets</h4>'
+      '<h4>Au comptoir</h4>'
+    + article(COFFRE_MINI, "Un coffre",
+        enAttente
+          ? "un objet au hasard \u00b7 <b>" + enAttente
+            + (enAttente > 1 ? " en attente</b>" : " en attente</b>")
+          : "un objet au hasard, \u00e0 ouvrir dans l'onglet Objets",
+        PRIX.coffre, 'data-box="1"', false)
+    + '<h4>Tes objets</h4>'
     + (rayon.length
         ? rayon.map(ligneObjet).join("")
         : '<div class="empty">Tu ne peux acheter qu\'un objet que tu as déjà décroché en jeu. Gagne une partie pour en découvrir un.</div>')
@@ -2686,6 +2746,8 @@ function renderShop(){
 
   corps.querySelectorAll("[data-buy]").forEach(b =>
     b.addEventListener("click", () => acheterObjet(b.dataset.buy, b)));
+  corps.querySelectorAll("[data-box]").forEach(b =>
+    b.addEventListener("click", () => acheterCoffre(b)));
   corps.querySelectorAll("[data-lp]").forEach(b =>
     b.addEventListener("click", () => acheterLp(Number(b.dataset.lp), b)));
   corps.querySelectorAll("[data-boost]").forEach(b =>
@@ -2707,6 +2769,12 @@ async function acheter(fn, args, btn, dire){
     say("#shopLog", e.message || String(e), true);
     btn.disabled = false;
   }
+}
+
+function acheterCoffre(btn){
+  acheter("shop_buy_box", {}, btn,
+    d => "Coffre ajout\u00e9 \u00b7 " + (d && d.restants ? d.restants : 1)
+       + " \u00e0 ouvrir dans l'onglet Objets.");
 }
 
 function acheterObjet(cle, btn){

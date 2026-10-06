@@ -186,6 +186,21 @@ const OR_ROLES = {
 };
 const OR_VICTOIRE = 50;
 
+/* Les paliers du jour, par JOUEUR (pas par équipe). Chacun tombe une
+   seule fois par jour, le jour où il est atteint, et donne un coffre
+   plus de l'or. Ils s'additionnent : sept parties, c'est trois coffres
+   et 1 650 or. */
+const PALIERS_JOUR = [
+  { parties: 3, or: 250 },
+  { parties: 5, or: 500 },
+  { parties: 7, or: 900 }
+];
+
+// Les paliers couverts par n parties dans la journée.
+function paliersAtteints(n){
+  return PALIERS_JOUR.filter(p => n >= p.parties);
+}
+
 // Un poste que Riot n'a pas su nommer : barème carry, le plus neutre.
 const bareme = role => OR_ROLES[role] || OR_ROLES.MIDDLE;
 
@@ -510,6 +525,39 @@ async function whoIs(req){
    N'est appelée qu'après l'insertion réussie de la partie : si un
    relevé repasse dessus, l'index unique (player_id, match_id) refuse
    l'insertion et les objets ne sont pas consommés deux fois.          */
+/* Les récompenses du jour.
+
+   On ne tient aucun compteur : on recompte les parties du jour et on
+   repose tous les paliers couverts. Les deux index uniques — sur les
+   coffres et sur le journal d'or — refusent le doublon, donc un relèvement
+   qui repasse sur la journée ne paye rien de plus. C'est plus sûr qu'un
+   compteur, qui se désynchronise dès qu'une partie est supprimée.
+
+   Conséquence assumée : une partie effacée par un administrateur ne
+   reprend pas le palier qu'elle avait débloqué. */
+async function recompenserJour(joueur, quand, bilan){
+  const jour = parisDate(quand);
+  const { count } = await db.from("games")
+    .select("id", { count: "exact", head: true })
+    .eq("player_id", joueur.id).eq("kind", "game").eq("played_on", jour);
+  if(!count) return;
+
+  for(const p of paliersAtteints(count)){
+    const cle = "palier-" + jour + "-" + p.parties;
+
+    const { error: eBox } = await db.from("player_boxes")
+      .insert({ player_id: joueur.id, source_match: cle });
+    if(!eBox) bilan.paliers = (bilan.paliers || 0) + 1;
+
+    const { error: eOr } = await db.rpc("credit_gold", {
+      p_player: joueur.id, p_amount: p.or,
+      p_raison: "palier du jour : " + p.parties + " parties", p_match: cle
+    });
+    if(!eOr) bilan.gold += p.or;
+  }
+}
+
+
 async function appliquerObjets(joueur, g, lpNet, parCle){
   // Seuls les objets verrouillés AVANT le début de la partie comptent :
   // sinon on armerait en connaissant déjà le résultat.
@@ -727,7 +775,7 @@ async function sync(force){
   const { data: go } = await db.rpc("riot_try_start_sync", { p_force: force });
   if(!go) return { skipped: true };
 
-  const bilan = { players: 0, games: 0, adjusts: 0, loot: 0, objets: 0, gold: 0, live: 0, waiting: [], errors: [] };
+  const bilan = { players: 0, games: 0, adjusts: 0, loot: 0, paliers: 0, objets: 0, gold: 0, live: 0, waiting: [], errors: [] };
   let cleRefusee = false, lus = 0;
   try{
     const [ch, pl, sn, it, tb] = await Promise.all([
@@ -930,6 +978,9 @@ async function sync(force){
               if(!eLoot) bilan.loot++;
             }
           }
+
+          // Les paliers du jour : 3, 5 et 7 parties.
+          if(!error) await recompenserJour(cible, g.end, bilan);
         }
         await saveSnap(p.id, next, now);
 
