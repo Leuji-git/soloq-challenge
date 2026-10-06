@@ -339,16 +339,39 @@ function estRank(p){
    on ne les reteint pas — le secondaire est seulement plus petit et
    plus discret. */
 const ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
-const ROLE_FICHIER = { TOP:"top", JUNGLE:"jungle", MIDDLE:"middle", BOTTOM:"bottom", UTILITY:"utility" };
-const roleIcon = r =>
-  "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-champ-select/global/default/svg/position-"
-  + (ROLE_FICHIER[r] || "top") + ".svg";
+/* Les cinq postes, dessin\u00e9s ici.
+
+   Ils venaient d'un CDN ext\u00e9rieur : une image par ic\u00f4ne, \u00e0 charger \u00e0
+   chaque affichage. C'\u00e9tait fragile pour trois raisons \u2014 un bloqueur
+   de publicit\u00e9s coupe volontiers ce genre de domaine tiers, une panne
+   du CDN laissait des cases vides, et surtout le Top et le Bot y sont
+   deux \u00e9querres sym\u00e9triques qu'on ne distingue plus \u00e0 treize pixels.
+
+   Ce sont maintenant des trac\u00e9s \u00e0 nous, dans la page : rien \u00e0
+   t\u00e9l\u00e9charger, rien \u00e0 bloquer, la couleur suit le texte, et les cinq
+   silhouettes sont franchement diff\u00e9rentes. Fl\u00e8che haute, pousse,
+   diagonale, fl\u00e8che basse, bouclier. */
+const ROLE_TRACE = {
+  TOP:     '<path d="M12 20.5V5"/><path d="M5.5 11.5L12 5l6.5 6.5"/>',
+  JUNGLE:  '<path d="M12 21v-6.6"/>'
+         + '<path d="M12 14.4C12 10.2 9 7.2 4.8 7.2c0 4.2 3 7.2 7.2 7.2z"/>'
+         + '<path d="M12 14.4c0-3.5 2.6-6.2 6.2-6.2 0 3.5-2.6 6.2-6.2 6.2z"/>',
+  MIDDLE:  '<path d="M5.8 18.2L18.2 5.8"/><path d="M18.2 11.4V5.8h-5.6"/>'
+         + '<path d="M5.8 12.6v5.6h5.6"/>',
+  BOTTOM:  '<path d="M12 3.5V19"/><path d="M5.5 12.5L12 19l6.5-6.5"/>',
+  UTILITY: '<path d="M12 3.2l6.8 2.9v5.3c0 4.1-2.8 7.5-6.8 8.4-4-.9-6.8-4.3-6.8-8.4V6.1z"/>'
+         + '<path d="M12 9.3v4.4"/><path d="M9.8 11.5h4.4"/>'
+};
 
 function roleImg(r, cls){
   const nom = ROLE_FR[r] || r;
-  return '<img class="roleico ' + cls + '" src="' + roleIcon(r) + '" alt="' + esc(nom)
-    + '" title="' + esc(cls === "main" ? nom + " \u00b7 principal" : nom + " \u00b7 secondaire")
-    + '" loading="lazy" decoding="async">';
+  const quoi = cls === "main" ? nom + " \u00b7 principal" : nom + " \u00b7 secondaire";
+  return '<svg class="roleico ' + cls + '" viewBox="0 0 24 24" role="img"'
+    + ' aria-label="' + esc(quoi) + '" fill="none" stroke="currentColor"'
+    + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    + '<title>' + esc(quoi) + '</title>'
+    + (ROLE_TRACE[r] || ROLE_TRACE.TOP)
+    + '</svg>';
 }
 
 // Les postes d'un joueur, principal en grand, secondaire en petit.
@@ -1885,7 +1908,9 @@ function dessinerRoles(){
     const actif = roleChoix[quoi] === r;
     return '<button type="button" class="roleopt' + (actif ? " on" : "") + '"'
       + ' data-role="' + r + '" data-quoi="' + quoi + '" aria-pressed="' + actif + '">'
-      + '<img src="' + roleIcon(r) + '" alt="" loading="lazy" decoding="async">'
+      + '<svg class="roleopt-ico" viewBox="0 0 24 24" aria-hidden="true" fill="none"'
+        + ' stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        + (ROLE_TRACE[r] || ROLE_TRACE.TOP) + '</svg>'
       + '<span>' + esc(ROLE_FR[r] || r) + '</span></button>';
   };
   $("#roleMain").innerHTML   = ROLES.map(r => bouton(r, "main")).join("");

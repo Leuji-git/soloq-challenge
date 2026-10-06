@@ -1492,10 +1492,10 @@ dialog.modal .form{margin-bottom:12px}
    Principal en grand, secondaire en plus petit et plus discret : la
    hiérarchie se lit sans légende. Les icônes arrivent déjà dorées du
    client, on ne les reteint pas. */
-.roles{display:inline-flex;align-items:center;gap:3px;vertical-align:middle;margin-left:9px}
-.roleico{display:block;object-fit:contain;flex:none}
+.roles{display:inline-flex;align-items:center;gap:4px;vertical-align:middle;margin-left:9px}
+.roleico{display:block;flex:none;color:var(--accent)}
 .roleico.main{width:19px;height:19px}
-.roleico.second{width:13px;height:13px;opacity:.55}
+.roleico.second{width:14px;height:14px;opacity:.6}
 
 .rolechip{
   display:inline-flex;align-items:center;
@@ -1509,8 +1509,8 @@ dialog.modal .form{margin-bottom:12px}
 /* Sur la ligne d'équipe, tout est plus serré : la pastille suit le
    rang sur la même ligne, en plus petit, sans pousser la mise en page. */
 .psub .roles{margin-left:7px;gap:2px}
-.psub .roleico.main{width:15px;height:15px}
-.psub .roleico.second{width:11px;height:11px}
+.psub .roleico.main{width:16px;height:16px}
+.psub .roleico.second{width:12px;height:12px}
 .psub .rolechip.editable{padding:0 3px}
 .roleadd{
   margin-left:7px;padding:0 6px;cursor:pointer;
@@ -1537,14 +1537,14 @@ dialog.modal .form{margin-bottom:12px}
   border-radius:var(--r-md);border:1px solid var(--line);background:var(--surface-2);
   color:var(--muted);font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;
 }
-.roleopt img{width:24px;height:24px;object-fit:contain;opacity:.5;transition:opacity .15s}
+.roleopt-ico{width:24px;height:24px;opacity:.55;transition:opacity .15s}
 .roleopt:hover{border-color:color-mix(in srgb, var(--accent) 40%, transparent)}
-.roleopt:hover img{opacity:.85}
+.roleopt:hover .roleopt-ico{opacity:.9}
 .roleopt.on{
   border-color:var(--accent);color:var(--ink);
   background:color-mix(in srgb, var(--accent) 13%, transparent);
 }
-.roleopt.on img{opacity:1}
+.roleopt.on .roleopt-ico{opacity:1}
 .roleopt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 @media (max-width:480px){
