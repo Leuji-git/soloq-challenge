@@ -218,7 +218,9 @@ const EFFETS = {
     ? { lp: 20, note: "victoire en " + dureeMatch(c.dureeMin) }
     : { lp: 0, note: c.win ? "victoire trop longue (" + dureeMatch(c.dureeMin) + ")" : "partie perdue" },
 
-  larme_deesse: c => ({ lp: 5, note: "quoi qu'il arrive" }),
+  // Trois LP par partie, mais sur cinq parties : la ligne consommée en
+  // réarme une neuve tant qu'il reste des charges (voir charges.sql).
+  larme_deesse: c => ({ lp: 3, note: "quoi qu'il arrive" }),
 
   elixir_rage: c => c.win
     ? { lp: c.lp, note: "gain doublé" }
@@ -302,6 +304,7 @@ function resoudreObjets(armes, ctx){
     const f = EFFETS[o.itemKey];
     const r = f ? f(ctx) : { lp: 0, note: "effet inconnu" };
     return { id: o.id, itemKey: o.itemKey, owner: o.owner, cible: o.cible,
+             restantes: o.restantes,
              lp: Math.round(r.lp) || 0, note: r.note };
   });
 
@@ -485,7 +488,7 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
   // Seuls les objets verrouillés AVANT le début de la partie comptent :
   // sinon on armerait en connaissant déjà le résultat.
   const { data: armes } = await db.from("player_items")
-    .select("id,item_key,player_id,locked_at")
+    .select("id,item_key,player_id,locked_at,restantes")
     .eq("target_id", joueur.id)
     .is("used_at", null)
     .not("locked_at", "is", null)
@@ -501,6 +504,7 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
       id: a.id,
       itemKey: a.item_key,
       owner: a.player_id,                 // qui a posé l'objet
+      restantes: a.restantes,             // parties encore couvertes
       lockedAt: new Date(a.locked_at).getTime(),
       cible: (parCle[a.item_key] || {}).target
     })),
@@ -516,6 +520,30 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
       used_at: new Date(g.end).toISOString(),
       applied_match: g.matchId, lp_effect: a.lp, note: a.note
     }).eq("id", a.id);
+
+    /* Les objets à plusieurs charges se reposent tout seuls.
+
+       On consomme bien la ligne — c'est elle qui porte le détail de
+       CETTE partie dans le récap, et c'est ce qui permet d'expliquer
+       chaque LP affiché — puis on en réarme une neuve sur la même
+       cible pour la suivante.
+
+       Elle est datée de la FIN de la partie qui vient de se jouer :
+       donc antérieure au début de la prochaine, ce qu'exige la règle
+       « armé avant le début ». Son matricule commence par « charge- »,
+       ce qui suffit à unlock_item pour refuser de la rendre : on ne
+       décroche pas en route pour libérer la place de bonus. */
+    const reste = (a.restantes || 1) - 1;
+    if(reste > 0){
+      await db.from("player_items").insert({
+        player_id: a.owner,
+        item_key: a.itemKey,
+        source_match: "charge-" + g.matchId + "-" + a.id,
+        locked_at: new Date(g.end).toISOString(),
+        target_id: joueur.id,
+        restantes: reste
+      });
+    }
   }
 
   // Les vols d'or. Deux écritures par vol, chacune tracée dans le

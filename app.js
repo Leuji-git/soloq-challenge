@@ -1346,12 +1346,22 @@ const PLAFOND_ARME = { soi: 1, adversaire: 3 };
 const FENETRE_ANNULE = 120e3;
 
 /* Un objet en main se verrouille sur une cible AVANT la partie. */
+/* Un objet à plusieurs charges dure plusieurs parties : on dit
+   lesquelles restent, sinon on croit qu'il s'est consommé pour rien. */
+function chargesTexte(arme){
+  const n = arme && arme.restantes;
+  if(!n || n <= 1) return "";
+  return ' <span class="charges" title="Cet objet agira sur chacune de ces parties">'
+    + n + ' parties</span>';
+}
+
 function barreObjet(it, libre, arme, reste){
   if(arme){
     const cible = S.players.find(p => p.id === arme.target_id);
     const encore = FENETRE_ANNULE - (Date.now() - new Date(arme.locked_at).getTime());
     return '<div class="itemact armed">'
-      + '<span class="armedon">Armé sur <b>' + esc(cible ? cible.name : "?") + '</b></span>'
+      + '<span class="armedon">Armé sur <b>' + esc(cible ? cible.name : "?") + '</b>'
+        + chargesTexte(arme) + '</span>'
       + (encore > 0
           ? '<button type="button" class="btn ghost sm" data-unlock="' + esc(arme.id) + '">'
             + 'Annuler (' + Math.ceil(encore / 1000) + ' s)</button>'
@@ -1924,7 +1934,7 @@ function renderInventaire(t){
         + esc(connu && it ? it.effect : (it ? it.teaser : "")) + '</p>'
       + (arme
           ? '<div class="itemact armed"><span class="armedon">Armé sur <b>'
-            + esc(cible ? cible.name : "?") + '</b></span></div>'
+            + esc(cible ? cible.name : "?") + '</b>' + chargesTexte(arme) + '</span></div>'
           : "")
       + '</article>';
   }).join("");

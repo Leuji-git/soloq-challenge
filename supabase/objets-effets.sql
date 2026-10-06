@@ -185,7 +185,10 @@ grant  execute on function public.unlock_item(uuid)     to authenticated, servic
 update public.items set effect = v.effect from (values
   ('pierre_garde',      'Si tu perds cette partie, elle ne te coûte aucun LP.'),
   ('bottes_celerite',   'Si tu gagnes cette partie en moins de 25 minutes : +20 LP.'),
-  ('larme_deesse',      '+5 LP sur cette partie, quoi qu''il arrive.'),
+  -- La Larme de la Déesse n'est plus dans cette liste : elle dure cinq
+  -- parties depuis charges.sql, et c'est là-bas qu'est écrit son texte.
+  -- La remettre ici la ramènerait à son ancienne version d'une seule
+  -- partie à chaque fois qu'on rejoue ce script.
   ('elixir_rage',       'Si tu gagnes cette partie, ton gain est doublé.'),
   ('ange_gardien',      'Si tu perds cette partie, tu ne perds que la moitié des LP.'),
   ('baron_nashor',      'Si tu gagnes cette partie : +25 LP.'),
