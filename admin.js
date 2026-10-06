@@ -23,7 +23,16 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt
 const cleanRiot = v => String(v ?? "").replace(/[​-‏‪-‮⁠-⁩﻿]/g, "").trim();
 const signed = n => (n>0 ? "+" : n<0 ? "−" : "±") + Math.abs(n);
 const iso = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-const emblem = t => "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-shared-components/global/default/" + t.toLowerCase() + ".png";
+/* Servis depuis le d\u00e9p\u00f4t, comme les ic\u00f4nes de poste. Le repli garde
+   le CDN pour les paliers dont le fichier n'est pas encore l\u00e0 : tant
+   qu'il en manque, le site les affiche quand m\u00eame. */
+const CD_EMBLEME =
+  "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-shared-components/global/default/";
+const emblem    = t => "icones/" + t.toLowerCase() + ".png";
+const emblemCD  = t => CD_EMBLEME + t.toLowerCase() + ".png";
+// onerror ne tire qu'une fois : on le coupe avant de changer la source,
+// sinon un CDN injoignable ferait boucler l'image.
+const emblemRepli = t => ' onerror="this.onerror=null;this.src=\'' + emblemCD(t) + '\'"';
 
 const S = { challenge:null, players:[], games:[], profiles:[], snaps:{}, sync:null, items:[], inventory:[], session:null, me:null };
 let gameFilter = "all";
@@ -482,7 +491,7 @@ function renderPlayers(){
       : '<span class="wr">aucun compte Discord</span>';
     const riotOk = !!p.puuid;
     const rang = snap && snap.ranked && snap.tier
-      ? '<img class="minicrest" src="'+emblem(snap.tier)+'" alt=""> <span class="wl">'
+      ? '<img class="minicrest" src="'+emblem(snap.tier)+'" alt=""'+emblemRepli(snap.tier)+'> <span class="wl">'
         + esc(TIERS[TIDX[snap.tier]][1] + (TIDX[snap.tier] >= APEX ? "" : " " + ROMAN[snap.division]) + " · " + snap.lp + " LP")
         + '</span><div class="wr">'+snap.wins+'V '+snap.losses+'D</div>'
       : '<span class="wr">'+(riotOk ? "non classé" : "—")+'</span>';

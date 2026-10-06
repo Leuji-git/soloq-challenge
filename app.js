@@ -63,7 +63,16 @@ const shortRank = r => TIDX[r.t] >= APEX ? TIERS[TIDX[r.t]].fr : TIERS[TIDX[r.t]
 // Ce jeu-ci est en 500x500 cadré sur l'écusson et couvre les 10 paliers,
 // Émeraude compris — contrairement à `ranked-emblem` (visuel 2560x1440,
 // illisible en petit) et à `ranked-mini-crests` (Émeraude manquant).
-const emblem = t => "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-shared-components/global/default/" + t.toLowerCase() + ".png";
+/* Servis depuis le d\u00e9p\u00f4t, comme les ic\u00f4nes de poste. Le repli garde
+   le CDN pour les paliers dont le fichier n'est pas encore l\u00e0 : tant
+   qu'il en manque, le site les affiche quand m\u00eame. */
+const CD_EMBLEME =
+  "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-shared-components/global/default/";
+const emblem    = t => "icones/" + t.toLowerCase() + ".png";
+const emblemCD  = t => CD_EMBLEME + t.toLowerCase() + ".png";
+// onerror ne tire qu'une fois : on le coupe avant de changer la source,
+// sinon un CDN injoignable ferait boucler l'image.
+const emblemRepli = t => ' onerror="this.onerror=null;this.src=\'' + emblemCD(t) + '\'"';
 // Un pseudo copié depuis Discord traîne souvent des caractères de contrôle
 // bidirectionnels invisibles (U+2066–U+2069…) : encodés dans l'URL, ils
 // cassaient le lien dpm.lol (ex. « LEUJI-OIOIO%E2%81%A9 »).
@@ -379,7 +388,7 @@ function rolesHtml(p){
 function crest(r, opts){
   opts = opts || {};
   return '<span class="crest'+(opts.sm ? " sm" : "")+'" title="'+rankLabel(r)+'">'
-    + '<img src="'+emblem(r.t)+'" alt="'+esc(TIERS[TIDX[r.t]].fr)+'" loading="lazy" decoding="async">'
+    + '<img src="'+emblem(r.t)+'" alt="'+esc(TIERS[TIDX[r.t]].fr)+'" decoding="async"'+emblemRepli(r.t)+'>'
     + (opts.label ? '<span class="rk">'+esc(opts.label)+'</span>' : '')
     + '</span>';
 }
@@ -1170,7 +1179,7 @@ function majSurvol(clientX, clientY){
         // réelle, c'est-à-dire énorme.
         const r = fromScore(l.y);
         return '<div class="tipline rank"><img src="' + esc(emblem(r.t))
-          + '" alt="" width="22" height="22" decoding="async">'
+          + '" alt="" width="22" height="22" decoding="async"' + emblemRepli(r.t) + '>'
           + '<span>' + esc(l.label) + '</span>'
           + '<b>' + esc(shortRank(r)) + '<em>' + r.lp + ' LP</em></b></div>';
       }).join("");

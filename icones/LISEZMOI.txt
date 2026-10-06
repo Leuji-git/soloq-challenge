@@ -22,3 +22,26 @@ arrive. Une fois les cinq fichiers ici, plus rien ne sort du depot.
 
 Ce sont des images du jeu : elles restent la propriete de Riot, et
 n'ont leur place ici que parce que le site est prive.
+
+
+-------------------------------------------------------------------
+Les emblemes de rang
+
+Dix paliers, en PNG, sous ces noms :
+
+    iron.png        bronze.png      silver.png      gold.png
+    platinum.png    emerald.png     diamond.png     master.png
+    grandmaster.png challenger.png
+
+Meme source, autre dossier :
+
+    https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-shared-components/global/default/<palier>.png
+
+Ils pesent environ 140 Ko piece alors qu'ils s'affichent entre 22 et
+40 pixels : c'est beaucoup pour ce qu'on en fait, mais ce sont les
+memes fichiers qu'avant, qui venaient du CDN a chaque visite. Les
+avoir en local ne coute donc rien de plus au visiteur, et lui evite
+un aller-retour vers un serveur lent.
+
+Comme pour les postes, un palier absent est cherche sur le CDN : le
+site n'attend pas que les dix soient la.
