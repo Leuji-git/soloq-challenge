@@ -192,3 +192,33 @@
 
 @media (max-width:1180px){ .grille{grid-template-columns:1fr} }
 @media (max-width:560px){ .desk{padding:12px 12px 32px} }
+
+/* ====================== le tutoriel ======================
+   Une notion par écran. Qui découvre la bourse n'a pas besoin d'un
+   manuel, il a besoin qu'on lui montre une chose à la fois. */
+.tuto{max-width:560px}
+.tutohead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
+.tutoetape{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--accent);
+}
+.tuto h2{margin:0 0 12px;font-size:21px}
+.tutocorps{font-size:14.5px;line-height:1.65;color:var(--ink-2)}
+.tutocorps p{margin:0 0 11px}
+.tutocorps p:last-child{margin-bottom:0}
+.tutocorps b{color:var(--ink)}
+.tutocorps .exemple{
+  margin:12px 0;padding:11px 13px;border-radius:var(--r-md);
+  background:var(--surface-2);border-left:3px solid var(--accent);
+  font-size:13.5px;color:var(--ink-2);
+}
+.tutocorps .exemple b{color:var(--accent)}
+.tutocorps .vert{color:var(--up);font-weight:600}
+.tutocorps .rouge{color:var(--down);font-weight:600}
+.tutopoints{display:flex;gap:5px;justify-content:center;margin:18px 0 4px}
+.tutopoints i{
+  width:7px;height:7px;border-radius:50%;background:var(--surface-3);
+  transition:background .2s, transform .2s;
+}
+.tutopoints i.on{background:var(--accent);transform:scale(1.25)}
+.tuto .btnrow{justify-content:space-between;margin-top:14px}

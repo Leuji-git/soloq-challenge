@@ -369,6 +369,162 @@ async function passer(fn, mot){
   rendre();
 }
 
+/* ===================================================================
+   LE TUTORIEL
+
+   Écrit pour quelqu'un qui n'a jamais vu une bourse. Une notion par
+   écran, dans l'ordre où on en a besoin : ce qu'on achète, comment lire
+   un prix, puis seulement ensuite comment passer un ordre.
+
+   Il s'ouvre tout seul à la première visite, et jamais plus ensuite —
+   le bouton reste là pour y revenir.
+=================================================================== */
+const CLE_TUTO = "soloq.bourse.tuto";
+
+const TUTO = [
+  { t:"\u00c0 quoi sert cette page",
+    h:"<p>Tu as de l'<b>or</b>, gagn\u00e9 en jouant tes parties. Jusqu'ici il ne servait "
+     +"qu'\u00e0 acheter des objets et des coffres. Ici, tu peux le <b>placer</b>.</p>"
+     +"<p>Dix soci\u00e9t\u00e9s sont cot\u00e9es. Tu ach\u00e8tes des parts, leur prix monte ou "
+     +"descend, et tu revends \u2014 plus cher si tu as eu du nez, moins cher sinon.</p>"
+     +"<div class='exemple'>C'est le <b>m\u00eame or</b> que celui du Commerce. Ce que tu "
+     +"places ici, tu ne peux pas le d\u00e9penser en objets tant que tu ne l'as pas "
+     +"r\u00e9cup\u00e9r\u00e9.</div>" },
+
+  { t:"Lire un prix",
+    h:"<p>Chaque soci\u00e9t\u00e9 affiche son <b>cours</b> : ce que vaut une part en ce "
+     +"moment. En dessous, le pourcentage dit combien elle a bougé <b>depuis douze "
+     +"heures</b>.</p>"
+     +"<div class='exemple'>Piltover Tech \u00b7 <b>184,2</b> \u00b7 <span class='vert'>+6,10 %</span><br>"
+     +"Une part co\u00fbte 184 or, et elle en valait environ 174 ce matin.</div>"
+     +"<p><span class='vert'>Vert</span>, \u00e7a monte. <span class='rouge'>Rouge</span>, "
+     +"\u00e7a descend. C'est tout.</p>" },
+
+  { t:"Le graphique",
+    h:"<p>Chaque petite barre est un <b>rel\u00e8vement de cinq minutes</b>. Elle raconte "
+     +"quatre choses : le prix au d\u00e9but, \u00e0 la fin, le plus haut et le plus bas "
+     +"atteints pendant ces cinq minutes.</p>"
+     +"<p>Le <b>corps</b> \u00e9pais va du prix de d\u00e9part au prix de fin. S'il est "
+     +"<span class='vert'>vert</span>, le prix a fini plus haut qu'il n'avait commenc\u00e9. "
+     +"Les <b>traits fins</b> au-dessus et en dessous sont les extr\u00eames.</p>"
+     +"<p>Les boutons <b>3 h</b>, <b>12 h</b> et <b>Tout</b> changent la p\u00e9riode "
+     +"regard\u00e9e.</p>" },
+
+  { t:"Le niveau de risque",
+    h:"<p>Chaque soci\u00e9t\u00e9 porte une \u00e9tiquette. C'est l'information la plus "
+     +"importante de la page.</p>"
+     +"<p><b>Prudente</b> \u00b7 bouge lentement. On ne s'enrichit pas vite, on ne perd "
+     +"pas gros.</p>"
+     +"<p><b>\u00c9quilibr\u00e9e</b> \u00b7 le milieu.</p>"
+     +"<p><b>Sp\u00e9culative</b> \u00b7 bouge <b>cinq fois plus</b> qu'une prudente. Dans "
+     +"les deux sens.</p>"
+     +"<div class='exemple'>Quand le march\u00e9 s'effondre, une prudente perd quelques "
+     +"pour cent l\u00e0 o\u00f9 une sp\u00e9culative en perd la moiti\u00e9. Le risque n'est pas "
+     +"une d\u00e9coration&nbsp;: c'est un multiplicateur.</div>" },
+
+  { t:"Le lien avec le challenge",
+    h:"<p>Six soci\u00e9t\u00e9s sur dix sont <b>li\u00e9es \u00e0 une \u00e9quipe</b>. Leur cours suit les "
+     +"LP que cette \u00e9quipe gagne ou perd dans l'heure.</p>"
+     +"<p>Acheter une soci\u00e9t\u00e9 li\u00e9e aux Pitoyables, c'est <b>parier sur leur "
+     +"soir\u00e9e</b>. Les quatre autres ne dépendent que du march\u00e9, et bougent m\u00eame "
+     +"quand personne ne joue.</p>" },
+
+  { t:"Passer un ordre",
+    h:"<p>Choisis une soci\u00e9t\u00e9 dans la liste de gauche, tape une <b>quantit\u00e9</b>, "
+     +"puis <b>Acheter</b>. Pour r\u00e9cup\u00e9rer ton or, <b>Vendre</b>.</p>"
+     +"<p>Il y a <b>1 % de frais</b> \u00e0 l'achat comme \u00e0 la vente. Acheter puis "
+     +"revendre aussit\u00f4t te co\u00fbte donc 2 % : il faut que le prix ait bougé plus "
+     +"que \u00e7a pour que l'aller-retour vaille le coup.</p>"
+     +"<div class='exemple'>Le prix qui te sera factur\u00e9 est celui du <b>serveur au "
+     +"moment du clic</b>, pas celui affich\u00e9 \u00e0 l'\u00e9cran. Entre les deux, le cours a "
+     +"pu bouger. Le message sous le bouton te dit toujours ce qui a r\u00e9ellement "
+     +"\u00e9t\u00e9 pr\u00e9lev\u00e9.</div>" },
+
+  { t:"Ton portefeuille",
+    h:"<p><b>PRU</b> veut dire prix de revient unitaire&nbsp;: ce que t'a co\u00fbt\u00e9 une "
+     +"part en moyenne. Si le cours est au-dessus, tu es gagnant.</p>"
+     +"<p>La <b>plus-value</b> est ce que tu gagnerais en vendant tout maintenant. "
+     +"Elle monte et descend toute seule.</p>"
+     +"<div class='exemple'>Tant que tu n'as pas vendu, <b>tu n'as ni gagn\u00e9 ni "
+     +"perdu</b>. Une plus-value de \u2212800 or redevient z\u00e9ro si le cours remonte. "
+     +"Elle ne devient vraie qu'au moment o\u00f9 tu vends.</div>" },
+
+  { t:"Les d\u00e9p\u00eaches",
+    h:"<p>\u00c0 droite, le fil des nouvelles. Une usine qui ouvre, un directeur qui "
+     +"d\u00e9missionne, une enqu\u00eate&nbsp;: chacune pousse une soci\u00e9t\u00e9 dans un sens "
+     +"pour un relev\u00e9 ou deux.</p>"
+     +"<p>De loin en loin tombe une d\u00e9p\u00eache <b>exceptionnelle</b>, sur fond color\u00e9. "
+     +"Krach, euphorie, crise de l'\u00e9nergie. Elles renversent tout pendant une "
+     +"demi-heure.</p>"
+     +"<div class='exemple'><b>Personne ne les d\u00e9clenche.</b> Ni l'administrateur, "
+     +"ni moi. Elles ont une chance sur deux mille \u00e0 chaque relev\u00e9, et on les "
+     +"d\u00e9couvre en m\u00eame temps que tout le monde.</div>" },
+
+  { t:"Le Commerce suit la bourse",
+    h:"<p>En bas de page, le prix des objets. Il n'est <b>pas fixe</b>&nbsp;: il suit "
+     +"l'indice g\u00e9n\u00e9ral.</p>"
+     +"<p>Le march\u00e9 monte, tout co\u00fbte plus cher. Le march\u00e9 s'effondre, les rayons "
+     +"passent en <b>solde</b>.</p>"
+     +"<p>Plus un objet est rare, plus il bouge&nbsp;: un l\u00e9gendaire encaisse deux "
+     +"fois et demie plus qu'un commun.</p>"
+     +"<div class='exemple'>C'est l\u00e0 qu'un krach devient une occasion. Il ruine ceux "
+     +"qui ont tout plac\u00e9, et il offre un l\u00e9gendaire \u00e0 moiti\u00e9 prix \u00e0 celui qui a "
+     +"gard\u00e9 de l'or de c\u00f4t\u00e9.</div>" },
+
+  { t:"Trois conseils pour finir",
+    h:"<p><b>Ne place pas tout.</b> Sans or disponible, tu ne peux ni profiter des "
+     +"soldes ni acheter un objet au bon moment.</p>"
+     +"<p><b>Une perte n'existe qu'une fois vendue.</b> Vendre dans la panique, "
+     +"c'est transformer une mauvaise journ\u00e9e en perte d\u00e9finitive.</p>"
+     +"<p><b>Le risque se choisit.</b> Si tu d\u00e9couvres, commence par une prudente&nbsp;: "
+     +"tu verras le m\u00e9canisme sans y laisser ta r\u00e9serve.</p>"
+     +"<div class='exemple'>Et souviens-toi que cet or ach\u00e8te des LP et des objets. "
+     +"Ce que tu perds ici, tu le perds <b>dans le challenge</b>.</div>" }
+];
+
+let tutoPage = 0;
+
+function rendreTuto(){
+  const e = TUTO[tutoPage];
+  $("#tutoEtape").textContent = "\u00c9tape " + (tutoPage + 1) + " sur " + TUTO.length;
+  $("#tutoTitre").textContent = e.t;
+  $("#tutoCorps").innerHTML = e.h;
+  $("#tutoPoints").innerHTML = TUTO.map((_, i) =>
+    '<i class="' + (i === tutoPage ? "on" : "") + '"></i>').join("");
+  $("#tutoPrec").disabled = tutoPage === 0;
+  $("#tutoSuiv").textContent = tutoPage === TUTO.length - 1 ? "J'ai compris" : "Suivant";
+}
+
+function ouvrirTuto(page){
+  tutoPage = page || 0;
+  rendreTuto();
+  const d = $("#tutoDialog");
+  if(!d.open) d.showModal();
+}
+
+function brancherTuto(){
+  $("#btnTuto").addEventListener("click", () => ouvrirTuto(0));
+  $("#tutoClose").addEventListener("click", () => $("#tutoDialog").close());
+  $("#tutoPrec").addEventListener("click", () => { if(tutoPage > 0){ tutoPage--; rendreTuto(); } });
+  $("#tutoSuiv").addEventListener("click", () => {
+    if(tutoPage < TUTO.length - 1){ tutoPage++; rendreTuto(); }
+    else $("#tutoDialog").close();
+  });
+  // Les fl\u00e8ches du clavier : on feuillette comme un livre.
+  $("#tutoDialog").addEventListener("keydown", ev => {
+    if(ev.key === "ArrowRight" && tutoPage < TUTO.length - 1){ tutoPage++; rendreTuto(); }
+    if(ev.key === "ArrowLeft"  && tutoPage > 0){ tutoPage--; rendreTuto(); }
+  });
+  // Une fois vu, on ne le rouvre plus de force.
+  $("#tutoDialog").addEventListener("close", () => {
+    try{ localStorage.setItem(CLE_TUTO, "vu"); }catch(_){}
+  });
+}
+
+function tutoDejaVu(){
+  try{ return localStorage.getItem(CLE_TUTO) === "vu"; }catch(_){ return false; }
+}
+
 /* ---------------- démarrage ---------------- */
 function brancher(){
   $("#bAchat").addEventListener("click", () => passer("bourse_acheter", "Achat de"));
@@ -400,8 +556,13 @@ async function boot(){
   sb.auth.onAuthStateChange(async (_e, s) => { S.session = s; await charger(); rendre(); });
 
   brancher();
+  brancherTuto();
   await charger();
   rendre();
+
+  // Première visite : on explique avant de laisser quelqu'un engager
+  // son or sans savoir ce qu'il fait.
+  if(!tutoDejaVu()) ouvrirTuto(0);
 
   /* Le cron relève les cours toutes les cinq minutes. On pousse quand
      même à l'ouverture de la page : si pg_cron est indisponible sur le

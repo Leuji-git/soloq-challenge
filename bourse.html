@@ -19,6 +19,7 @@
   <div class="deskhead">
     <div class="deskname">PLACE <span>DE RUNETERRA</span></div>
     <a class="btn ghost sm retour" href="index.html">← Le challenge</a>
+    <button type="button" class="btn ghost sm" id="btnTuto">Comment ça marche ?</button>
     <span class="etatmarche" id="etat"><i></i>CHARGEMENT</span>
     <span class="horloge" id="horloge">—</span>
     <div class="indice">
@@ -112,6 +113,20 @@
   </div>
 
 </div>
+
+<dialog id="tutoDialog" class="modal tuto">
+  <div class="tutohead">
+    <span class="tutoetape" id="tutoEtape">—</span>
+    <button type="button" class="x" id="tutoClose" aria-label="Fermer">✕</button>
+  </div>
+  <h2 id="tutoTitre">—</h2>
+  <div class="tutocorps" id="tutoCorps"></div>
+  <div class="tutopoints" id="tutoPoints"></div>
+  <div class="btnrow">
+    <button type="button" class="btn ghost" id="tutoPrec">Précédent</button>
+    <button type="button" class="btn" id="tutoSuiv">Suivant</button>
+  </div>
+</dialog>
 
 <script type="module" src="bourse.js"></script>
 </body>

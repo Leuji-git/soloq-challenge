@@ -211,6 +211,7 @@ declare
   forme_b     numeric;
   soc         record;
   ouv numeric; clo numeric; amp numeric; rend numeric; choc numeric;
+  forme_du_tick numeric;
   n_dep       int := 0;
   n_maj       int := 0;
   op          record;
@@ -259,13 +260,37 @@ begin
         end * public.bourse_vol(soc.risque) * (0.6 + random() * 0.8);
       end if;
 
-      rend := (coalesce(case soc.lien when 'a' then forme_a when 'b' then forme_b end, 0) * 0.9
+      /* La forme d'une équipe décrit L'HEURE QUI VIENT DE S'ÉCOULER.
+         L'appliquer à un créneau rattrapé reviendrait à rejouer cette
+         même heure autant de fois qu'il y a de créneaux en retard —
+         et c'est exactement ce qui s'est produit au premier amorçage :
+         deux cents créneaux d'un coup, la même dérive répétée deux
+         cents fois, et les six sociétés liées sont parties à ±98 %
+         pendant que les quatre indépendantes ne bougeaient presque
+         pas. On ne l'applique donc qu'aux créneaux récents. */
+      forme_du_tick := case when s >= viser - 2
+        then coalesce(case soc.lien when 'a' then forme_a when 'b' then forme_b end, 0)
+        else 0 end;
+
+      rend := (forme_du_tick * 0.9
                + humeur
                + (random() - 0.5) * 0.026
                + soc.derive) * public.bourse_vol(soc.risque)
               + choc;
 
+      -- Un filet, pas un réglage : aucun relevé ne doit pouvoir bouger
+      -- un cours de plus de douze pour cent. Même un krach reste dans
+      -- cette limite, et une erreur de calcul ne peut plus emporter la
+      -- cote en une seule passe.
+      rend := greatest(-0.12, least(0.12, rend));
+
       clo := greatest(4, ouv * (1 + rend));
+
+      /* Second filet, sur le niveau cette fois : une société reste
+         entre le sixième et le sextuple de son prix d'introduction.
+         Sur trois semaines, personne n'a besoin de plus, et au-delà
+         c'est un bug, pas un marché. */
+      clo := greatest(soc.prix_base / 6, least(soc.prix_base * 6, clo));
       amp := abs(ouv - clo) + ouv * (0.002 + random() * 0.009) * public.bourse_vol(soc.risque);
 
       insert into public.bourse_cours (code, slot, at, o, h, b, c)
