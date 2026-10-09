@@ -8,13 +8,13 @@
   =====================================================================
    MAQUETTE. Rien ici ne touche à la base ni au vrai site.
 
-   Les cours sont simulés dans la page : au chargement on fabrique un
-   historique plausible, puis une bougie tombe toutes les deux secondes.
-   Le but est de juger l'INTERFACE et les MÉCANIQUES avant d'écrire la
-   vraie version.
+   Dix sociétés cotées, chacune avec son niveau de risque. Les cours
+   bougent à chaque relevé ; des opérations de marché tombent sans
+   arrêt, et de loin en loin un événement exceptionnel renverse tout.
 
-   Les trois boutons du bas déclenchent les scénarios dont on a parlé :
-   un krach, une bulle, une panique sur une seule équipe.
+   PERSONNE NE LES DÉCLENCHE. Ils arrivent tout seuls, y compris pour
+   celui qui a écrit le code : la maquette tourne en accéléré pour que
+   tu en voies un en une minute au lieu d'attendre trois jours.
   =====================================================================
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,10 +22,6 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&family=Outfit:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="styles.css">
 <style>
-/* ------------------------------------------------------------------
-   Le poste de trading. Tout ce qui suit est propre à la maquette ;
-   les couleurs et les rayons viennent des variables du site.
-------------------------------------------------------------------- */
 body{padding:0}
 .desk{max-width:1340px;margin:0 auto;padding:18px 20px 40px}
 
@@ -53,82 +49,98 @@ body{padding:0}
   background:color-mix(in srgb, var(--up) 14%, transparent);color:var(--up);
   font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;font-weight:700;letter-spacing:.06em;
 }
-.etatmarche i{width:7px;height:7px;border-radius:50%;background:var(--up);animation:bat 1.6s ease-in-out infinite}
+.etatmarche.secousse{background:color-mix(in srgb, var(--down) 16%, transparent);color:var(--down)}
+.etatmarche i{width:7px;height:7px;border-radius:50%;background:currentColor;animation:bat 1.6s ease-in-out infinite}
 @keyframes bat{0%,100%{opacity:1}50%{opacity:.3}}
 
-/* Le bandeau défilant : c'est lui qui donne le ton. */
 .tape{
   overflow:hidden;border-radius:var(--r-lg);border:1px solid var(--line);
   background:var(--surface-2);margin-bottom:12px;padding:9px 0;
   -webkit-mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent);
   mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent);
 }
-.tapein{display:flex;gap:30px;width:max-content;animation:defile 38s linear infinite}
+.tapein{display:flex;gap:30px;width:max-content;animation:defile 42s linear infinite}
 .tape:hover .tapein{animation-play-state:paused}
 @keyframes defile{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-.tapeitem{
-  display:flex;align-items:baseline;gap:7px;white-space:nowrap;
-  font-family:"Barlow Semi Condensed",sans-serif;font-size:13px;
-}
+.tapeitem{display:flex;align-items:baseline;gap:7px;white-space:nowrap;
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:13px}
 .tapenom{color:var(--ink-2);font-weight:600}
 .tapeval{font-variant-numeric:tabular-nums;color:var(--ink)}
 
-.grille{display:grid;grid-template-columns:272px 1fr 300px;gap:12px;align-items:start}
-.carte{
-  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-xl);
-  padding:14px 16px;
-}
+.grille{display:grid;grid-template-columns:304px 1fr 300px;gap:12px;align-items:start}
+.carte{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-xl);padding:14px 16px}
 .cartetitre{
   font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;font-weight:700;
   letter-spacing:.13em;text-transform:uppercase;color:var(--muted);margin:0 0 10px;
   display:flex;align-items:center;justify-content:space-between;gap:8px;
 }
 
-/* --- la liste des valeurs --- */
-.valeurs{display:flex;flex-direction:column;gap:1px}
+/* --- le niveau de risque, lisible d'un coup --- */
+.risque{
+  display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:var(--pill);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:10.5px;font-weight:700;letter-spacing:.05em;
+}
+.risque i{width:4px;height:9px;border-radius:1px;background:currentColor;opacity:.3}
+.risque i.on{opacity:1}
+.risque.prudente{background:color-mix(in srgb, var(--up) 13%, transparent);color:var(--up)}
+.risque.equilibree{background:color-mix(in srgb, var(--accent) 15%, transparent);color:var(--accent)}
+.risque.speculative{background:color-mix(in srgb, var(--down) 14%, transparent);color:var(--down)}
+
+.filtres{display:flex;gap:3px;margin-bottom:9px;background:var(--surface-2);padding:2px;border-radius:var(--pill)}
+.filtres button{
+  flex:1;border:0;background:none;cursor:pointer;padding:5px 4px;border-radius:var(--pill);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;color:var(--muted);
+}
+.filtres button[aria-pressed="true"]{background:var(--surface-3);color:var(--ink)}
+
+.valeurs{display:flex;flex-direction:column;gap:1px;max-height:430px;overflow-y:auto}
 .valeur{
-  display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;
-  padding:7px 9px;border-radius:var(--r-sm);cursor:pointer;border:1px solid transparent;
+  display:grid;grid-template-columns:1fr auto;gap:9px;align-items:center;
+  padding:8px 9px;border-radius:var(--r-sm);cursor:pointer;border:1px solid transparent;
 }
 .valeur:hover{background:var(--surface-2)}
 .valeur.on{background:var(--surface-3);border-color:color-mix(in srgb, var(--accent) 40%, transparent)}
-.jeton{
-  width:26px;height:26px;border-radius:7px;flex:none;display:grid;place-items:center;
+.vhaut{display:flex;align-items:center;gap:7px}
+.vcode{
   font-family:"Outfit",system-ui,sans-serif;font-size:11px;font-weight:700;color:#0B0E14;
+  padding:1px 6px;border-radius:5px;
 }
 .vnom{font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.vsub{font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;color:var(--muted)}
+.vsub{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;color:var(--muted);
+  margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+}
+.lien{display:inline-flex;align-items:center;gap:4px}
+.lien i{width:6px;height:6px;border-radius:50%}
 .vdroite{text-align:right}
 .vcours{font-size:13px;font-variant-numeric:tabular-nums;color:var(--ink)}
 
-/* --- le graphique --- */
-.chartzone{position:relative}
-.chartbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.chartbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px}
 .chartnom{font-family:"Outfit",system-ui,sans-serif;font-size:19px;font-weight:600}
 .chartcours{font-family:"Outfit",system-ui,sans-serif;font-size:27px;font-weight:700;font-variant-numeric:tabular-nums}
+.chartsub{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;color:var(--muted);
+  margin-bottom:8px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+}
 .seg2{display:flex;gap:2px;margin-left:auto;background:var(--surface-2);padding:2px;border-radius:var(--pill)}
 .seg2 button{
   border:0;background:none;cursor:pointer;padding:4px 11px;border-radius:var(--pill);
   font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;color:var(--muted);
 }
 .seg2 button[aria-pressed="true"]{background:var(--surface-3);color:var(--ink)}
-#chandelles{display:block;width:100%;height:296px}
+#chandelles{display:block;width:100%;height:286px}
 
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
 .stat{background:var(--surface-2);border-radius:var(--r-md);padding:8px 10px}
-.statlbl{
-  font-family:"Barlow Semi Condensed",sans-serif;font-size:10.5px;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--muted);
-}
+.statlbl{font-family:"Barlow Semi Condensed",sans-serif;font-size:10.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted)}
 .statval{font-size:15px;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--ink)}
 
-/* --- passer un ordre --- */
 .ordre{margin-top:12px;background:var(--surface-2);border-radius:var(--r-lg);padding:12px 14px}
 .ordrelig{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
 .qte{
   width:104px;background:var(--surface);border:1px solid var(--line);color:var(--ink);
-  border-radius:var(--r-sm);padding:7px 10px;font-family:inherit;font-size:14px;
-  font-variant-numeric:tabular-nums;
+  border-radius:var(--r-sm);padding:7px 10px;font-family:inherit;font-size:14px;font-variant-numeric:tabular-nums;
 }
 .qterap{display:flex;gap:4px}
 .qterap button{
@@ -142,55 +154,41 @@ body{padding:0}
 }
 .bachat{background:var(--up)} .bvente{background:var(--down)}
 .bachat:disabled,.bvente:disabled{opacity:.35;cursor:not-allowed}
-.ordrenote{
-  margin-top:8px;font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;color:var(--muted);
-}
+.ordrenote{margin-top:8px;font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;color:var(--muted)}
 .ordrenote b{color:var(--ink-2);font-variant-numeric:tabular-nums}
-.interdit{color:var(--down)}
 
-/* --- portefeuille --- */
 .pf{display:flex;flex-direction:column;gap:7px}
-.pfhaut{
-  background:var(--surface-2);border-radius:var(--r-lg);padding:11px 13px;
-  display:grid;grid-template-columns:1fr 1fr;gap:9px;
-}
-.pfcase .statlbl{margin-bottom:2px}
+.pfhaut{background:var(--surface-2);border-radius:var(--r-lg);padding:11px 13px;
+  display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .pfval{font-family:"Outfit",system-ui,sans-serif;font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
-.ligne{
-  display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;
-  padding:7px 9px;border-radius:var(--r-sm);background:var(--surface-2);
-}
+.ligne{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;
+  padding:7px 9px;border-radius:var(--r-sm);background:var(--surface-2)}
 .lnom{font-size:12.5px;color:var(--ink)}
 .lsub{font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;color:var(--muted)}
 .lpl{text-align:right;font-size:12.5px;font-variant-numeric:tabular-nums}
 
-/* --- dépêches --- */
-.depeches{display:flex;flex-direction:column;gap:6px;max-height:258px;overflow-y:auto}
-.dep{
-  border-left:2px solid var(--line);padding:6px 0 6px 10px;
-  font-family:"Barlow Semi Condensed",sans-serif;font-size:12.5px;color:var(--ink-2);line-height:1.45;
-}
+.depeches{display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto}
+.dep{border-left:2px solid var(--line);padding:6px 0 6px 10px;
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12.5px;color:var(--ink-2);line-height:1.45}
 .dep b{color:var(--ink)}
-.dep.krach{border-left-color:var(--down)}
-.dep.bulle{border-left-color:var(--up)}
+.dep.baisse{border-left-color:var(--down)}
+.dep.hausse{border-left-color:var(--up)}
 .dep.info{border-left-color:var(--accent)}
-.deph{
-  display:block;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
-  color:var(--muted);margin-bottom:2px;
+.dep.majeur{
+  border-left-width:3px;background:color-mix(in srgb, var(--down) 7%, transparent);
+  border-radius:0 var(--r-sm) var(--r-sm) 0;padding-right:9px;
 }
+.dep.majeur.hausse{background:color-mix(in srgb, var(--up) 7%, transparent)}
+.deph{display:block;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:2px}
 
-/* --- la régie des scénarios --- */
-.regie{
-  margin-top:12px;background:var(--surface);border:1px dashed color-mix(in srgb, var(--accent) 40%, transparent);
-  border-radius:var(--r-xl);padding:14px 16px;
+.note{
+  margin-top:12px;background:var(--surface);border:1px dashed color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius:var(--r-xl);padding:13px 16px;font-size:12.5px;color:var(--muted);line-height:1.6;
 }
-.regierow{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
-.regierow .btn{cursor:pointer}
-.regienote{margin-top:9px;font-size:12.5px;color:var(--muted);line-height:1.5}
+.note b{color:var(--ink-2)}
 
-@media (max-width:1180px){
-  .grille{grid-template-columns:1fr}
-}
+@media (max-width:1180px){ .grille{grid-template-columns:1fr} }
 </style>
 </head>
 <body>
@@ -198,8 +196,8 @@ body{padding:0}
 <div class="desk">
 
   <div class="deskhead">
-    <div class="deskname">NEXUS <span>EXCHANGE</span></div>
-    <span class="etatmarche"><i></i>MARCHÉ OUVERT</span>
+    <div class="deskname">PLACE <span>DE RUNETERRA</span></div>
+    <span class="etatmarche" id="etat"><i></i>MARCHÉ OUVERT</span>
     <span class="horloge" id="horloge">—</span>
     <div class="indice">
       <span class="indicelbl">Indice</span>
@@ -212,14 +210,18 @@ body{padding:0}
 
   <div class="grille">
 
-    <!-- ---------------- les valeurs ---------------- -->
     <div class="carte">
-      <h3 class="cartetitre">Les valeurs <span id="nbValeurs"></span></h3>
+      <h3 class="cartetitre">Les sociétés <span id="nbValeurs"></span></h3>
+      <div class="filtres" role="group">
+        <button type="button" data-f="tout" aria-pressed="true">Toutes</button>
+        <button type="button" data-f="prudente" aria-pressed="false">Prudentes</button>
+        <button type="button" data-f="equilibree" aria-pressed="false">Équilibrées</button>
+        <button type="button" data-f="speculative" aria-pressed="false">Spéculatives</button>
+      </div>
       <div class="valeurs" id="valeurs"></div>
     </div>
 
-    <!-- ---------------- le graphique et l'ordre ---------------- -->
-    <div class="carte chartzone">
+    <div class="carte">
       <div class="chartbar">
         <span class="chartnom" id="chartNom">—</span>
         <span class="chartcours" id="chartCours">—</span>
@@ -230,14 +232,15 @@ body{padding:0}
           <button type="button" data-vue="200" aria-pressed="false">Tout</button>
         </div>
       </div>
+      <div class="chartsub" id="chartSub">—</div>
 
-      <svg id="chandelles" viewBox="0 0 900 296" preserveAspectRatio="none" aria-label="Cours de la valeur"></svg>
+      <svg id="chandelles" viewBox="0 0 900 286" preserveAspectRatio="none" aria-label="Cours de la valeur"></svg>
 
       <div class="stats">
         <div class="stat"><div class="statlbl">Ouverture</div><div class="statval" id="sOuv">—</div></div>
         <div class="stat"><div class="statlbl">Plus haut</div><div class="statval" id="sHaut">—</div></div>
         <div class="stat"><div class="statlbl">Plus bas</div><div class="statval" id="sBas">—</div></div>
-        <div class="stat"><div class="statlbl">Volume</div><div class="statval" id="sVol">—</div></div>
+        <div class="stat"><div class="statlbl">Amplitude</div><div class="statval" id="sAmp">—</div></div>
       </div>
 
       <div class="ordre">
@@ -256,42 +259,34 @@ body{padding:0}
       </div>
     </div>
 
-    <!-- ---------------- portefeuille et dépêches ---------------- -->
     <div>
       <div class="carte" style="margin-bottom:12px">
         <h3 class="cartetitre">Ton portefeuille</h3>
         <div class="pf">
           <div class="pfhaut">
-            <div class="pfcase"><div class="statlbl">Or disponible</div><div class="pfval" id="pfOr">—</div></div>
-            <div class="pfcase"><div class="statlbl">Valeur totale</div><div class="pfval" id="pfTotal">—</div></div>
-            <div class="pfcase"><div class="statlbl">Investi</div><div class="pfval" id="pfInv">—</div></div>
-            <div class="pfcase"><div class="statlbl">Plus-value</div><div class="pfval" id="pfPl">—</div></div>
+            <div><div class="statlbl">Or disponible</div><div class="pfval" id="pfOr">—</div></div>
+            <div><div class="statlbl">Valeur totale</div><div class="pfval" id="pfTotal">—</div></div>
+            <div><div class="statlbl">Investi</div><div class="pfval" id="pfInv">—</div></div>
+            <div><div class="statlbl">Plus-value</div><div class="pfval" id="pfPl">—</div></div>
           </div>
           <div id="positions"></div>
         </div>
       </div>
 
       <div class="carte">
-        <h3 class="cartetitre">Dépêches</h3>
+        <h3 class="cartetitre">Dépêches <span id="nbDep"></span></h3>
         <div class="depeches" id="depeches"></div>
       </div>
     </div>
   </div>
 
-  <!-- ---------------- la régie ---------------- -->
-  <div class="regie">
-    <div class="regierow">
-      <strong style="font-family:Outfit,sans-serif;font-size:14px">Régie des scénarios</strong>
-      <button type="button" class="btn ghost sm" data-evt="krach">Déclencher un krach</button>
-      <button type="button" class="btn ghost sm" data-evt="bulle">Déclencher une bulle</button>
-      <button type="button" class="btn ghost sm" data-evt="panique">Panique sur Les Pitoyables</button>
-      <button type="button" class="btn ghost sm" data-evt="annonce">Rumeur sur une valeur</button>
-    </div>
-    <p class="regienote">
-      Dans la vraie version, ces scénarios se programment à l'avance depuis la console admin
-      (« krach le 12 octobre à 21 h, −38 % sur six relevés ») ou se déclenchent sur-le-champ.
-      Les joueurs ne les voient pas venir : ils ne lisent que la dépêche, une fois le mouvement commencé.
-    </p>
+  <div class="note">
+    <b>Le marché tourne tout seul.</b> Personne ne décide des mouvements, ni toi ni moi :
+    les opérations tombent au hasard à chaque relevé, et les événements exceptionnels ont
+    une chance sur deux mille d'arriver, avec un délai minimum entre deux.
+    Cette maquette tourne <b>en accéléré</b> — un relevé toutes les deux secondes au lieu de
+    cinq minutes, et des secousses bien plus fréquentes — pour que tu en voies une en une
+    minute au lieu d'attendre trois jours.
   </div>
 </div>
 
@@ -300,71 +295,89 @@ body{padding:0}
    SIMULATION — tout est faux, rien n'est enregistré.
 =================================================================== */
 
-/* Les valeurs : une par joueur du challenge. Le cours d'une action
-   suit la forme de son joueur ; ici elle est tirée au sort, dans la
-   vraie version elle viendra des LP relevés chez Riot. */
-const VALEURS = [
-  { code:"NMD", nom:"NamelessDivnity", equipe:"a", base:118 },
-  { code:"TNK", nom:"Tankiste",        equipe:"a", base:142 },
-  { code:"BIG", nom:"Le Big Mat",      equipe:"a", base:76  },
-  { code:"LEU", nom:"LEUJI",           equipe:"a", base:94  },
-  { code:"MTX", nom:"Metaxou",         equipe:"a", base:61  },
-  { code:"SNZ", nom:"Snoozenlaw31",    equipe:"b", base:168 },
-  { code:"RGM", nom:"RageMachala",     equipe:"b", base:133 },
-  { code:"RNA", nom:"Runailen",        equipe:"b", base:105 },
-  { code:"FLK", nom:"FlinkiiS",        equipe:"b", base:69  },
-  { code:"MVP", nom:"monvraipseudo2",  equipe:"b", base:58  },
-  { code:"ARM", nom:"Aria Math",       equipe:"b", base:47  }
+/* Les sociétés cotées. Le NIVEAU DE RISQUE est le cœur du choix : une
+   prudente rapporte peu et ne fait pas peur, une spéculative peut
+   doubler ou s'effondrer. Il multiplie toute la volatilité, y compris
+   celle des secousses — un krach ne fait pas le même mal partout.
+
+   Le LIEN rattache certaines sociétés à une équipe du challenge : leur
+   cours suit alors les LP de cette équipe. Les indépendantes ne
+   dépendent que du marché. */
+const RISQUES = {
+  prudente:    { vol:0.40, barres:1, nom:"Prudente" },
+  equilibree:  { vol:1.00, barres:2, nom:"Équilibrée" },
+  speculative: { vol:2.20, barres:3, nom:"Spéculative" }
+};
+
+const SOCIETES = [
+  { code:"PLT", nom:"Piltover Tech",        secteur:"Technologie",  risque:"speculative", lien:"a",  base:184 },
+  { code:"ZAU", nom:"Zaun Chimie",          secteur:"Chimie",       risque:"speculative", lien:null, base:96  },
+  { code:"DEM", nom:"Demacia Acier",        secteur:"Industrie",    risque:"prudente",    lien:"a",  base:212 },
+  { code:"NOX", nom:"Noxus Armement",       secteur:"Armement",     risque:"equilibree",  lien:"b",  base:158 },
+  { code:"ION", nom:"Ionia Jardins",        secteur:"Agroalimentaire", risque:"prudente", lien:null, base:134 },
+  { code:"FRE", nom:"Freljord Énergie",     secteur:"Énergie",      risque:"equilibree",  lien:"b",  base:121 },
+  { code:"BIL", nom:"Bilgewater Fret",      secteur:"Transport",    risque:"speculative", lien:null, base:78  },
+  { code:"SHU", nom:"Shurima Mines",        secteur:"Minier",       risque:"equilibree",  lien:"a",  base:167 },
+  { code:"TRG", nom:"Targon Observatoire",  secteur:"Recherche",    risque:"prudente",    lien:null, base:243 },
+  { code:"IXT", nom:"Ixtal Botanique",      secteur:"Pharmacie",    risque:"equilibree",  lien:"b",  base:109 }
 ];
 
 const COULEUR = { a:"#2E9BE0", b:"#E33B3B" };
-const N_HISTO = 200;                 // bougies fabriquées au départ
-const MOI = "LEU";                   // on joue LEUJI : sa valeur est interdite
+const EQUIPE  = { a:"Les Médiocres", b:"Les Pitoyables" };
+const N_HISTO = 200;
 
-/* Un choc en cours : il pousse tous les cours pendant quelques bougies,
-   puis s'épuise. C'est ce qui donne au krach sa forme de chute et pas
-   de marche d'escalier. */
-let choc = null;
-let argent = 8400;                   // or disponible
-const sac = {};                      // code -> { nb, pru }
-let selection = "SNZ";
+/* Rythme de la maquette. En vrai : un relevé toutes les 5 minutes,
+   P_OPERATION autour de 0,30 et P_EXCEPTIONNEL à 1/2000. */
+const MS_TICK        = 2000;
+const P_OPERATION    = 0.42;    // une dépêche ordinaire, très souvent
+const P_EXCEPTIONNEL = 0.022;   // une secousse majeure, rarement
+const REPOS_MIN      = 14;      // ticks d'accalmie imposés entre deux
+
+let argent = 8400;
+const sac = {};
+let selection = "PLT";
 let fenetre = 40;
+let filtre = "tout";
+let secousse = null;            // l'événement majeur en cours
+let reposRestant = 0;
 
 const alea = (a, b) => a + Math.random() * (b - a);
+const pioche = t => t[Math.floor(Math.random() * t.length)];
 const orFr = n => Math.round(n).toLocaleString("fr-FR").replace(/ /g, " ");
 const pctFr = p => (p >= 0 ? "+" : "−") + Math.abs(p).toFixed(2) + " %";
 
-/* Une bougie : ouverture, plus haut, plus bas, clôture, volume. */
+/* La forme des deux équipes. Dans la vraie version, ces deux nombres
+   viendront des LP relevés chez Riot ; ici ils dérivent tout seuls. */
+const forme = { a: 0, b: 0 };
+
+let humeurMarche = 0;
+
 function bougieSuivante(v){
   const der = v.histo[v.histo.length - 1];
   const ouv = der ? der.c : v.base;
+  const vol = RISQUES[v.risque].vol;
 
-  // Trois forces : la forme du joueur, le marché, le bruit. Plus le
-  // choc, quand il y en a un.
-  const forme   = v.tendance;                       // dérive propre au joueur
-  const marche  = marcheDuTick;                     // commun à tout le monde
-  const bruit   = alea(-0.016, 0.016);
-  const secousse = choc ? choc.force(v) : 0;
+  const duJoueur  = v.lien ? forme[v.lien] * 0.9 : 0;   // la part « joueurs »
+  const duMarche  = humeurMarche;                        // la part « non joueurs »
+  const bruit     = alea(-0.013, 0.013);
+  const propre    = v.derive;
+  const choc      = secousse ? secousse.force(v) : 0;
 
-  const rendement = forme + marche + bruit + secousse;
+  const rendement = (duJoueur + duMarche + bruit + propre) * vol + choc;
   const clot = Math.max(4, ouv * (1 + rendement));
-  const amp = Math.abs(ouv - clot) + ouv * alea(0.002, 0.012);
+  const amp = Math.abs(ouv - clot) + ouv * alea(0.002, 0.011) * vol;
   return {
     o: ouv, c: clot,
     h: Math.max(ouv, clot) + amp * alea(0, .6),
-    b: Math.max(2, Math.min(ouv, clot) - amp * alea(0, .6)),
-    v: Math.round(alea(40, 400) * (choc ? 3.2 : 1))
+    b: Math.max(2, Math.min(ouv, clot) - amp * alea(0, .6))
   };
 }
 
-let marcheDuTick = 0;
-
-// Historique de départ, pour que le graphique ne naisse pas vide.
-VALEURS.forEach(v => {
-  v.tendance = alea(-0.004, 0.005);
+SOCIETES.forEach(v => {
+  v.derive = alea(-0.002, 0.003);
   v.histo = [];
   for(let i = 0; i < N_HISTO; i++){
-    marcheDuTick = alea(-0.008, 0.008);
+    humeurMarche = alea(-0.006, 0.006);
     v.histo.push(bougieSuivante(v));
   }
 });
@@ -372,61 +385,104 @@ VALEURS.forEach(v => {
 const cours = v => v.histo[v.histo.length - 1].c;
 const veille = v => v.histo[Math.max(0, v.histo.length - 41)].c;
 const variation = v => (cours(v) / veille(v) - 1) * 100;
-const indice = () => VALEURS.reduce((a, v) => a + cours(v), 0) / VALEURS.length * 7.4;
-
-let indiceVeille = indice();
+const indice = () => SOCIETES.reduce((a, v) => a + cours(v), 0) / SOCIETES.length * 7.1;
+const indiceVeille = indice();
 
 /* ---------------- les dépêches ---------------- */
 const depeches = [];
-function depeche(genre, titre, texte){
+function depeche(genre, titre, texte, majeur){
   const d = new Date();
-  depeches.unshift({ genre, titre, texte,
+  depeches.unshift({ genre, titre, texte, majeur,
     h: d.getHours() + ":" + String(d.getMinutes()).padStart(2, "0") });
-  if(depeches.length > 40) depeches.pop();
-  rendreDepeches();
+  if(depeches.length > 60) depeches.pop();
 }
 
-/* ---------------- les scénarios ---------------- */
-function lancerEvenement(type){
-  if(type === "krach"){
-    choc = { reste: 7, force: () => alea(-0.085, -0.035) };
-    depeche("krach", "Krach sur le NEXUS",
-      "Les ventes s'enchaînent sur toutes les valeurs. Aucune n'est épargnée.");
-  }
-  if(type === "bulle"){
-    choc = { reste: 6, force: () => alea(0.03, 0.08) };
-    depeche("bulle", "Euphorie générale",
-      "L'indice s'envole : tout le monde achète, personne ne sait vraiment pourquoi.");
-  }
-  if(type === "panique"){
-    choc = { reste: 6, force: v => v.equipe === "b" ? alea(-0.09, -0.04) : alea(0, 0.015) };
-    depeche("krach", "Panique sur Les Pitoyables",
-      "Les valeurs d'une seule équipe décrochent. Les Médiocres tiennent bon.");
-  }
-  if(type === "annonce"){
-    const v = VALEURS[Math.floor(Math.random() * VALEURS.length)];
-    const hausse = Math.random() < .5;
-    choc = { reste: 4, force: x => x.code === v.code
-      ? (hausse ? alea(0.07, 0.14) : alea(-0.13, -0.06)) : 0 };
-    depeche("info", (hausse ? "Rumeur favorable sur " : "Doute sur ") + v.nom,
-      hausse ? "Le marché parie sur une remontée. " + v.code + " s'envole."
-             : "Les vendeurs prennent le dessus. " + v.code + " dévisse.");
-  }
+/* Les opérations ordinaires : du bruit raconté. Elles touchent une
+   société, parfois deux, et ne durent qu'un relevé ou deux. C'est ce
+   qui fait qu'il se passe TOUJOURS quelque chose. */
+const OPERATIONS = [
+  { h:1, t:"décroche un contrat",        d:"Le carnet de commandes se remplit pour le trimestre." },
+  { h:1, t:"publie de bons résultats",   d:"Les marges dépassent ce que le marché attendait." },
+  { h:1, t:"ouvre une nouvelle usine",   d:"La production doit doubler d'ici la fin du challenge." },
+  { h:1, t:"rachète un concurrent",      d:"L'opération est financée sans dette nouvelle." },
+  { h:0, t:"rappelle un lot défectueux", d:"La direction parle d'un incident isolé. Le marché doute." },
+  { h:0, t:"perd un marché important",   d:"Le concurrent a cassé les prix. La note est salée." },
+  { h:0, t:"voit son directeur démissionner", d:"Aucun remplaçant n'est annoncé." },
+  { h:0, t:"reporte ses livraisons",     d:"Un fournisseur fait défaut, la chaîne est à l'arrêt." },
+  { h:1, t:"signe à l'export",           d:"Un débouché s'ouvre loin de ses bases." },
+  { h:0, t:"est visée par une enquête",  d:"Les autorités s'intéressent à ses comptes." }
+];
+
+function operation(){
+  const v = pioche(SOCIETES);
+  const o = pioche(OPERATIONS);
+  const force = alea(0.005, 0.018) * RISQUES[v.risque].vol;
+  v.derive += o.h ? force : -force;
+  // Bornée : sans plafond, deux bonnes nouvelles d'affilée lançaient la
+  // valeur dans une spirale dont elle ne redescendait plus.
+  v.derive = Math.max(-0.03, Math.min(0.03, v.derive));
+  depeche(o.h ? "hausse" : "baisse", v.nom + " " + o.t, o.d + " " + v.code
+    + (o.h ? " monte." : " recule."));
+}
+
+/* Les événements exceptionnels. Rares, non annoncés, et d'autant plus
+   violents que la société est spéculative : c'est là que le choix du
+   risque se paie ou se récompense. */
+const MAJEURS = [
+  { g:"baisse", titre:"Krach sur la Place",
+    texte:"Les ventes s'enchaînent sur toutes les valeurs. Les spéculatives dévissent deux fois plus vite.",
+    duree:9,  force:v => alea(-0.075, -0.03) * RISQUES[v.risque].vol },
+  { g:"hausse", titre:"Euphorie générale",
+    texte:"L'indice s'envole. Personne ne sait vraiment dire pourquoi, et tout le monde achète.",
+    duree:7,  force:v => alea(0.025, 0.065) * RISQUES[v.risque].vol },
+  { g:"baisse", titre:"Crise de l'énergie",
+    texte:"L'industrie et les transports encaissent. Les valeurs de recherche résistent.",
+    duree:8,  force:v => (["Industrie","Transport","Énergie","Minier"].indexOf(v.secteur) >= 0
+                          ? alea(-0.08, -0.035) : alea(-0.01, 0.012)) * RISQUES[v.risque].vol },
+  { g:"hausse", titre:"Ruée sur la technologie",
+    texte:"Les capitaux se déversent sur la tech et la chimie. Le reste stagne.",
+    duree:7,  force:v => (["Technologie","Chimie","Pharmacie"].indexOf(v.secteur) >= 0
+                          ? alea(0.05, 0.11) : alea(-0.008, 0.008)) * RISQUES[v.risque].vol },
+  { g:"baisse", titre:"Défaut d'un grand créancier",
+    texte:"La défiance gagne les sociétés endettées. Les prudentes servent de refuge.",
+    duree:8,  force:v => (v.risque === "prudente" ? alea(0, 0.02) : alea(-0.07, -0.025))
+                         * (v.risque === "prudente" ? 1 : RISQUES[v.risque].vol) }
+];
+
+function declencherMajeur(){
+  const m = pioche(MAJEURS);
+  secousse = { reste: m.duree, force: m.force, genre: m.g };
+  depeche(m.g, m.titre, m.texte, true);
 }
 
 /* ---------------- le temps qui passe ---------------- */
 function tick(){
-  marcheDuTick = alea(-0.009, 0.009);
-  VALEURS.forEach(v => {
+  humeurMarche = alea(-0.007, 0.007);
+
+  // La forme des équipes dérive doucement : elle fera bouger les
+  // sociétés qui leur sont liées.
+  ["a","b"].forEach(t => {
+    forme[t] += alea(-0.004, 0.004);
+    forme[t] = Math.max(-0.02, Math.min(0.02, forme[t]));
+  });
+
+  SOCIETES.forEach(v => {
     v.histo.push(bougieSuivante(v));
     if(v.histo.length > 400) v.histo.shift();
-    // La tendance d'un joueur dérive lentement : sa forme change.
-    if(Math.random() < .06) v.tendance = alea(-0.004, 0.005);
+    v.derive *= 0.74;                       // une opération s'épuise vite
+    if(Math.random() < .05) v.derive += alea(-0.003, 0.003);
   });
-  if(choc && --choc.reste <= 0){
-    choc = null;
-    depeche("info", "Le marché se stabilise", "Les cours reprennent leur cours normal.");
+
+  if(secousse && --secousse.reste <= 0){
+    secousse = null;
+    reposRestant = REPOS_MIN;
+    depeche("info", "Le marché se stabilise", "Les cours reprennent leur rythme ordinaire.");
   }
+  if(reposRestant > 0) reposRestant--;
+
+  if(Math.random() < P_OPERATION) operation();
+  if(!secousse && !reposRestant && Math.random() < P_EXCEPTIONNEL) declencherMajeur();
+
   rendreTout();
 }
 
@@ -434,24 +490,37 @@ function tick(){
    AFFICHAGE
 =================================================================== */
 const $ = s => document.querySelector(s);
+const soc = c => SOCIETES.find(x => x.code === c);
+
+function badgeRisque(r){
+  const R = RISQUES[r];
+  let b = "";
+  for(let i = 1; i <= 3; i++) b += '<i class="' + (i <= R.barres ? "on" : "") + '"></i>';
+  return '<span class="risque ' + r + '">' + b + R.nom + '</span>';
+}
 
 function rendreTape(){
   const un = v => '<span class="tapeitem"><span class="tapenom">' + v.code + '</span>'
     + '<span class="tapeval">' + cours(v).toFixed(1) + '</span>'
     + '<span class="pct ' + (variation(v) >= 0 ? "up" : "down") + '">' + pctFr(variation(v)) + '</span></span>';
-  // deux fois la liste : le défilement boucle sans saut
-  $("#tape").innerHTML = VALEURS.map(un).join("") + VALEURS.map(un).join("");
+  $("#tape").innerHTML = SOCIETES.map(un).join("") + SOCIETES.map(un).join("");
 }
 
 function rendreValeurs(){
-  $("#nbValeurs").textContent = VALEURS.length + " cotées";
-  $("#valeurs").innerHTML = VALEURS.map(v => {
-    const p = variation(v);
-    const pos = sac[v.code];
+  const liste = SOCIETES.filter(v => filtre === "tout" || v.risque === filtre);
+  $("#nbValeurs").textContent = liste.length + " cotées";
+  $("#valeurs").innerHTML = liste.map(v => {
+    const p = variation(v), pos = sac[v.code];
     return '<div class="valeur' + (v.code === selection ? " on" : "") + '" data-code="' + v.code + '">'
-      + '<span class="jeton" style="background:' + COULEUR[v.equipe] + '">' + v.code + '</span>'
-      + '<span><span class="vnom">' + v.nom + '</span>'
-        + '<span class="vsub">' + (pos ? pos.nb + " en portefeuille" : (v.code === MOI ? "ta valeur" : "—")) + '</span></span>'
+      + '<span><span class="vhaut">'
+        + '<span class="vcode" style="background:' + (v.lien ? COULEUR[v.lien] : "#77849A") + '">' + v.code + '</span>'
+        + '<span class="vnom">' + v.nom + '</span></span>'
+        + '<span class="vsub">' + badgeRisque(v.risque)
+          + '<span>' + v.secteur + '</span>'
+          + (v.lien ? '<span class="lien"><i style="background:' + COULEUR[v.lien] + '"></i>'
+                      + EQUIPE[v.lien] + '</span>' : '<span>indépendante</span>')
+          + (pos ? '<span style="color:var(--accent)">' + pos.nb + ' en poche</span>' : '')
+        + '</span></span>'
       + '<span class="vdroite"><span class="vcours">' + cours(v).toFixed(1) + '</span><br>'
         + '<span class="pct ' + (p >= 0 ? "up" : "down") + '">' + pctFr(p) + '</span></span>'
       + '</div>';
@@ -460,12 +529,10 @@ function rendreValeurs(){
     e.addEventListener("click", () => { selection = e.dataset.code; rendreTout(); }));
 }
 
-/* Les chandeliers. Vert quand la bougie monte, rouge quand elle
-   descend : c'est la convention, et elle se lit sans légende. */
 function rendreChandelles(){
-  const v = VALEURS.find(x => x.code === selection);
+  const v = soc(selection);
   const h = v.histo.slice(-fenetre);
-  const W = 900, H = 296, PL = 6, PR = 52, PT = 10, PB = 16;
+  const W = 900, H = 286, PL = 6, PR = 52, PT = 10, PB = 14;
   const hi = Math.max.apply(null, h.map(c => c.h));
   const lo = Math.min.apply(null, h.map(c => c.b));
   const pad = (hi - lo) * .08 || 1;
@@ -474,7 +541,6 @@ function rendreChandelles(){
   const larg = Math.max(1.5, pas * .62);
 
   let out = "";
-  // quelques lignes de prix
   for(let i = 0; i <= 4; i++){
     const p = (lo - pad) + ((hi + pad) - (lo - pad)) * i / 4, y = Y(p);
     out += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - PR) + '" y2="' + y.toFixed(1)
@@ -484,49 +550,52 @@ function rendreChandelles(){
   }
   h.forEach((c, i) => {
     const x = PL + i * pas + pas / 2;
-    const monte = c.c >= c.o;
-    const col = monte ? "var(--up)" : "var(--down)";
+    const col = c.c >= c.o ? "var(--up)" : "var(--down)";
     out += '<line x1="' + x.toFixed(1) + '" y1="' + Y(c.h).toFixed(1)
         +  '" x2="' + x.toFixed(1) + '" y2="' + Y(c.b).toFixed(1)
         +  '" stroke="' + col + '" stroke-width="1" opacity=".8"/>'
         +  '<rect x="' + (x - larg / 2).toFixed(1) + '" y="' + Math.min(Y(c.o), Y(c.c)).toFixed(1)
         +  '" width="' + larg.toFixed(1) + '" height="' + Math.max(1.2, Math.abs(Y(c.o) - Y(c.c))).toFixed(1)
-        +  '" fill="' + col + '" opacity="' + (monte ? ".9" : ".85") + '"/>';
+        +  '" fill="' + col + '" opacity=".88"/>';
   });
-  // le dernier cours, en évidence sur la droite
   const der = h[h.length - 1];
   out += '<line x1="' + PL + '" y1="' + Y(der.c).toFixed(1) + '" x2="' + (W - PR) + '" y2="' + Y(der.c).toFixed(1)
       +  '" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 3" opacity=".75"/>';
   $("#chandelles").innerHTML = out;
 
   const p = variation(v);
-  $("#chartNom").textContent = v.nom + " · " + v.code;
+  $("#chartNom").textContent = v.nom;
   $("#chartCours").textContent = cours(v).toFixed(1);
   $("#chartPct").className = "pct " + (p >= 0 ? "up" : "down");
   $("#chartPct").textContent = pctFr(p);
+  $("#chartSub").innerHTML = badgeRisque(v.risque)
+    + '<span>' + v.code + ' · ' + v.secteur + '</span>'
+    + (v.lien ? '<span class="lien"><i style="background:' + COULEUR[v.lien] + '"></i>'
+                + 'liée à ' + EQUIPE[v.lien] + '</span>'
+              : '<span>indépendante du challenge</span>');
   $("#sOuv").textContent  = h[0].o.toFixed(1);
   $("#sHaut").textContent = hi.toFixed(1);
   $("#sBas").textContent  = lo.toFixed(1);
-  $("#sVol").textContent  = orFr(h.reduce((a, c) => a + c.v, 0));
+  $("#sAmp").textContent  = ((hi / lo - 1) * 100).toFixed(1) + " %";
 }
 
 function rendrePortefeuille(){
   let valeur = 0, investi = 0;
   const lignes = Object.keys(sac).map(code => {
-    const v = VALEURS.find(x => x.code === code), pos = sac[code];
+    const v = soc(code), pos = sac[code];
     const val = pos.nb * cours(v), inv = pos.nb * pos.pru;
     valeur += val; investi += inv;
     const pl = val - inv, plp = inv ? (val / inv - 1) * 100 : 0;
     return '<div class="ligne">'
-      + '<span class="jeton" style="background:' + COULEUR[v.equipe] + '">' + v.code + '</span>'
+      + '<span class="vcode" style="background:' + (v.lien ? COULEUR[v.lien] : "#77849A") + '">' + v.code + '</span>'
       + '<span><span class="lnom">' + pos.nb + ' × ' + v.nom + '</span><br>'
-        + '<span class="lsub">PRU ' + pos.pru.toFixed(1) + ' · vaut ' + orFr(val) + '</span></span>'
+        + '<span class="lsub">PRU ' + pos.pru.toFixed(1) + ' · vaut ' + orFr(val) + ' or</span></span>'
       + '<span class="lpl pct ' + (pl >= 0 ? "up" : "down") + '">' + (pl >= 0 ? "+" : "−")
         + orFr(Math.abs(pl)) + '<br><span style="font-size:11px">' + pctFr(plp) + '</span></span>'
       + '</div>';
   });
   $("#positions").innerHTML = lignes.length ? lignes.join("")
-    : '<div class="empty" style="font-size:12.5px">Aucune position. Achète une valeur pour commencer.</div>';
+    : '<div class="empty" style="font-size:12.5px">Aucune position. Achète une société pour commencer.</div>';
 
   const pl = valeur - investi;
   $("#pfOr").textContent = orFr(argent);
@@ -537,27 +606,26 @@ function rendrePortefeuille(){
 }
 
 function rendreDepeches(){
+  $("#nbDep").textContent = depeches.length;
   $("#depeches").innerHTML = depeches.length ? depeches.map(d =>
-    '<div class="dep ' + d.genre + '"><span class="deph">' + d.h + '</span>'
+    '<div class="dep ' + d.genre + (d.majeur ? " majeur" : "") + '">'
+    + '<span class="deph">' + d.h + (d.majeur ? " · exceptionnel" : "") + '</span>'
     + '<b>' + d.titre + '</b> — ' + d.texte + '</div>').join("")
     : '<div class="empty" style="font-size:12.5px">Rien à signaler.</div>';
 }
 
 function rendreOrdre(){
-  const v = VALEURS.find(x => x.code === selection);
+  const v = soc(selection);
   const q = Math.max(0, parseInt($("#qte").value, 10) || 0);
-  const cout = q * cours(v);
+  const cout = q * cours(v), frais = cout * 0.015;
   const pos = sac[selection];
-  const sien = selection === MOI;
 
-  $("#bAchat").disabled = sien || !q || cout > argent;
-  $("#bVente").disabled = sien || !q || !pos || pos.nb < q;
-
-  $("#ordreNote").innerHTML = sien
-    ? '<span class="interdit">Tu ne peux pas trader ta propre valeur : tu sais avant tout le monde comment tes parties se passent.</span>'
-    : q + ' × ' + v.code + ' · coût <b>' + orFr(cout) + ' or</b>'
-      + ' · il te resterait <b>' + orFr(argent - cout) + ' or</b>'
-      + (pos ? ' · tu en as déjà <b>' + pos.nb + '</b>' : '');
+  $("#bAchat").disabled = !q || cout + frais > argent;
+  $("#bVente").disabled = !q || !pos || pos.nb < q;
+  $("#ordreNote").innerHTML = q + ' × ' + v.code + ' · <b>' + orFr(cout)
+    + ' or</b> + <b>' + orFr(frais) + '</b> de frais'
+    + ' · il te resterait <b>' + orFr(argent - cout - frais) + ' or</b>'
+    + (pos ? ' · tu en as déjà <b>' + pos.nb + '</b>' : '');
 }
 
 function rendreIndice(){
@@ -565,6 +633,11 @@ function rendreIndice(){
   $("#indiceVal").textContent = orFr(i);
   $("#indicePct").className = "pct " + (p >= 0 ? "up" : "down");
   $("#indicePct").textContent = pctFr(p);
+  const e = $("#etat");
+  e.className = "etatmarche" + (secousse ? " secousse" : "");
+  e.innerHTML = '<i></i>' + (secousse
+    ? (secousse.genre === "baisse" ? "SECOUSSE EN COURS" : "EMBALLEMENT EN COURS")
+    : "MARCHÉ OUVERT");
   const d = new Date();
   $("#horloge").textContent = "Dernier relevé " + d.getHours() + ":"
     + String(d.getMinutes()).padStart(2, "0") + ":" + String(d.getSeconds()).padStart(2, "0");
@@ -572,16 +645,15 @@ function rendreIndice(){
 
 function rendreTout(){
   rendreTape(); rendreValeurs(); rendreChandelles();
-  rendrePortefeuille(); rendreOrdre(); rendreIndice();
+  rendrePortefeuille(); rendreOrdre(); rendreIndice(); rendreDepeches();
 }
 
 /* ---------------- les ordres ---------------- */
 function acheter(){
-  const v = VALEURS.find(x => x.code === selection);
-  const q = parseInt($("#qte").value, 10) || 0;
-  const cout = q * cours(v);
-  if(!q || cout > argent || selection === MOI) return;
-  argent -= cout;
+  const v = soc(selection), q = parseInt($("#qte").value, 10) || 0;
+  const cout = q * cours(v), frais = cout * 0.015;
+  if(!q || cout + frais > argent) return;
+  argent -= cout + frais;
   const pos = sac[selection] || { nb:0, pru:0 };
   pos.pru = (pos.pru * pos.nb + cout) / (pos.nb + q);
   pos.nb += q;
@@ -590,11 +662,11 @@ function acheter(){
   rendreTout();
 }
 function vendre(){
-  const v = VALEURS.find(x => x.code === selection);
-  const q = parseInt($("#qte").value, 10) || 0;
+  const v = soc(selection), q = parseInt($("#qte").value, 10) || 0;
   const pos = sac[selection];
-  if(!q || !pos || pos.nb < q || selection === MOI) return;
-  argent += q * cours(v);
+  if(!q || !pos || pos.nb < q) return;
+  const brut = q * cours(v);
+  argent += brut - brut * 0.015;
   pos.nb -= q;
   if(!pos.nb) delete sac[selection];
   depeche("info", "Ordre exécuté", "Vente de " + q + " × " + v.code + " à " + cours(v).toFixed(1) + ".");
@@ -606,8 +678,9 @@ $("#bAchat").addEventListener("click", acheter);
 $("#bVente").addEventListener("click", vendre);
 $("#qte").addEventListener("input", rendreOrdre);
 document.querySelectorAll(".qterap button").forEach(b => b.addEventListener("click", () => {
-  const v = VALEURS.find(x => x.code === selection);
-  $("#qte").value = b.dataset.q === "max" ? Math.floor(argent / cours(v)) : b.dataset.q;
+  const v = soc(selection);
+  $("#qte").value = b.dataset.q === "max"
+    ? Math.floor(argent / (cours(v) * 1.015)) : b.dataset.q;
   rendreOrdre();
 }));
 document.querySelectorAll(".seg2 button").forEach(b => b.addEventListener("click", () => {
@@ -616,13 +689,18 @@ document.querySelectorAll(".seg2 button").forEach(b => b.addEventListener("click
   fenetre = +b.dataset.vue;
   rendreChandelles();
 }));
-document.querySelectorAll("[data-evt]").forEach(b =>
-  b.addEventListener("click", () => { lancerEvenement(b.dataset.evt); rendreTout(); }));
+document.querySelectorAll(".filtres button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".filtres button").forEach(x => x.setAttribute("aria-pressed", "false"));
+  b.setAttribute("aria-pressed", "true");
+  filtre = b.dataset.f;
+  rendreValeurs();
+}));
 
-depeche("info", "Ouverture du marché",
-  "Onze valeurs cotées. Les cours suivent la forme des joueurs, et les humeurs du marché.");
+depeche("info", "Ouverture de la Place",
+  "Dix sociétés cotées. Trois niveaux de risque, et des nouvelles qui tombent sans prévenir.");
+operation(); operation();
 rendreTout();
-setInterval(tick, 2000);
+setInterval(tick, MS_TICK);
 </script>
 </body>
 </html>
