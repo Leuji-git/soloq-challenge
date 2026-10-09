@@ -2665,8 +2665,8 @@ function renderFeed(t){
         : x.kind === "partage"
         ? ["Part du duo", "objet",
            "L'objet d'un co\u00e9quipier a rejailli sur toi : ces LP vont au score de ton \u00e9quipe"]
-        : ["Bonus d'\u00e9quipe", "boutique",
-           "Achet\u00e9 en boutique : ces LP comptent pour l'\u00e9quipe, pas au classement individuel"];
+        : ["Bonus d'\u00e9quipe", "commerce",
+           "Achet\u00e9 au Commerce : ces LP comptent pour l'\u00e9quipe, pas au classement individuel"];
       // Un renvoi co\u00fbte : la pastille doit virer au rouge.
       const v = x.lp_items || 0;
       return '<div class="row">'
@@ -2778,13 +2778,13 @@ const RULES = [
   + "<p>L'API ne distingue pas un vrai duo de deux joueurs tombés ensemble par hasard : entre joueurs du même niveau, ça peut arriver.</p>" },
 
   { t:"Le duel d'équipes", h:
-    "<p>Le score d'une équipe est la somme des <strong>LP globaux</strong> de ses membres : les LP rendus par Riot, plus ce que les objets, les primes et la boutique ont ajouté. Le classement individuel, lui, reste au <strong>LP net</strong>.</p>"
+    "<p>Le score d'une équipe est la somme des <strong>LP globaux</strong> de ses membres : les LP rendus par Riot, plus ce que les objets, les primes et le Commerce ont ajouté. Le classement individuel, lui, reste au <strong>LP net</strong>.</p>"
   + "<p>Une seule mauvaise soirée peut faire basculer la balance : personne n'est jamais à l'abri.</p>" },
 
   { t:"Les objets", h:
     "<p><strong>Gagne une partie</strong> : un <strong>coffre</strong> tombe. Solo, duo allié, duo adverse — toute victoire compte.</p>"
   + "<p>Le coffre ne dit pas ce qu'il contient : l'objet n'est tiré qu'au moment où tu l'ouvres, dans l'onglet <strong>Objets</strong>. Rien ne dort en base avant, il n'y a donc rien à espionner.</p>"
-  + "<p>Trois, cinq et sept parties dans la même journée donnent chacune un coffre de plus et de l'or — deux coffres pour la septième. Et la boutique en vend à 500 or.</p>"
+  + "<p>Trois, cinq et sept parties dans la même journée donnent chacune un coffre de plus et de l'or — deux coffres pour la septième. Et le Commerce en vend à 500 or.</p>"
   + "<p>Un objet est un <strong>bonus</strong> que tu poses sur toi, ou un <strong>malus</strong> que tu poses sur un adversaire.</p>"
   + "<p><strong>Il faut le verrouiller avant de jouer.</strong> Tu choisis l'objet, tu choisis la cible, et il agira sur la <strong>prochaine partie de cette personne</strong> — où qu'elle joue, avec qui qu'elle veuille. Tu n'as pas besoin d'être dans sa partie, ni même d'être connecté. Que sa condition soit remplie ou non, l'objet est consommé.</p>"
   + "<p>Sur une même partie, au plus <strong>un bonus et trois malus</strong> font effet. Les objets verrouillés en trop restent en réserve, intacts.</p>"

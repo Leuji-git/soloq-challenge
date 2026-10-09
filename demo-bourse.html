@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — la Bourse du challenge</title>
+<!--
+  =====================================================================
+   MAQUETTE. Rien ici ne touche à la base ni au vrai site.
+
+   Les cours sont simulés dans la page : au chargement on fabrique un
+   historique plausible, puis une bougie tombe toutes les deux secondes.
+   Le but est de juger l'INTERFACE et les MÉCANIQUES avant d'écrire la
+   vraie version.
+
+   Les trois boutons du bas déclenchent les scénarios dont on a parlé :
+   un krach, une bulle, une panique sur une seule équipe.
+  =====================================================================
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&family=Outfit:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+<style>
+/* ------------------------------------------------------------------
+   Le poste de trading. Tout ce qui suit est propre à la maquette ;
+   les couleurs et les rayons viennent des variables du site.
+------------------------------------------------------------------- */
+body{padding:0}
+.desk{max-width:1340px;margin:0 auto;padding:18px 20px 40px}
+
+.deskhead{
+  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  padding:16px 20px;border-radius:var(--r-xl);
+  background:var(--surface);border:1px solid var(--line);margin-bottom:12px;
+}
+.deskname{font-family:"Outfit",system-ui,sans-serif;font-size:21px;font-weight:700;letter-spacing:-.02em}
+.deskname span{color:var(--accent)}
+.indice{display:flex;align-items:baseline;gap:9px;margin-left:auto}
+.indicelbl{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted);
+}
+.indiceval{font-family:"Outfit",system-ui,sans-serif;font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+.pct{font-family:"Barlow Semi Condensed",sans-serif;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.pct.up{color:var(--up)} .pct.down{color:var(--down)} .pct.flat{color:var(--muted)}
+.horloge{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;color:var(--muted);
+  font-variant-numeric:tabular-nums;
+}
+.etatmarche{
+  display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:var(--pill);
+  background:color-mix(in srgb, var(--up) 14%, transparent);color:var(--up);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;font-weight:700;letter-spacing:.06em;
+}
+.etatmarche i{width:7px;height:7px;border-radius:50%;background:var(--up);animation:bat 1.6s ease-in-out infinite}
+@keyframes bat{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* Le bandeau défilant : c'est lui qui donne le ton. */
+.tape{
+  overflow:hidden;border-radius:var(--r-lg);border:1px solid var(--line);
+  background:var(--surface-2);margin-bottom:12px;padding:9px 0;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent);
+}
+.tapein{display:flex;gap:30px;width:max-content;animation:defile 38s linear infinite}
+.tape:hover .tapein{animation-play-state:paused}
+@keyframes defile{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.tapeitem{
+  display:flex;align-items:baseline;gap:7px;white-space:nowrap;
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:13px;
+}
+.tapenom{color:var(--ink-2);font-weight:600}
+.tapeval{font-variant-numeric:tabular-nums;color:var(--ink)}
+
+.grille{display:grid;grid-template-columns:272px 1fr 300px;gap:12px;align-items:start}
+.carte{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-xl);
+  padding:14px 16px;
+}
+.cartetitre{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;font-weight:700;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--muted);margin:0 0 10px;
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+}
+
+/* --- la liste des valeurs --- */
+.valeurs{display:flex;flex-direction:column;gap:1px}
+.valeur{
+  display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;
+  padding:7px 9px;border-radius:var(--r-sm);cursor:pointer;border:1px solid transparent;
+}
+.valeur:hover{background:var(--surface-2)}
+.valeur.on{background:var(--surface-3);border-color:color-mix(in srgb, var(--accent) 40%, transparent)}
+.jeton{
+  width:26px;height:26px;border-radius:7px;flex:none;display:grid;place-items:center;
+  font-family:"Outfit",system-ui,sans-serif;font-size:11px;font-weight:700;color:#0B0E14;
+}
+.vnom{font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vsub{font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;color:var(--muted)}
+.vdroite{text-align:right}
+.vcours{font-size:13px;font-variant-numeric:tabular-nums;color:var(--ink)}
+
+/* --- le graphique --- */
+.chartzone{position:relative}
+.chartbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.chartnom{font-family:"Outfit",system-ui,sans-serif;font-size:19px;font-weight:600}
+.chartcours{font-family:"Outfit",system-ui,sans-serif;font-size:27px;font-weight:700;font-variant-numeric:tabular-nums}
+.seg2{display:flex;gap:2px;margin-left:auto;background:var(--surface-2);padding:2px;border-radius:var(--pill)}
+.seg2 button{
+  border:0;background:none;cursor:pointer;padding:4px 11px;border-radius:var(--pill);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;color:var(--muted);
+}
+.seg2 button[aria-pressed="true"]{background:var(--surface-3);color:var(--ink)}
+#chandelles{display:block;width:100%;height:296px}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+.stat{background:var(--surface-2);border-radius:var(--r-md);padding:8px 10px}
+.statlbl{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:10.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);
+}
+.statval{font-size:15px;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--ink)}
+
+/* --- passer un ordre --- */
+.ordre{margin-top:12px;background:var(--surface-2);border-radius:var(--r-lg);padding:12px 14px}
+.ordrelig{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.qte{
+  width:104px;background:var(--surface);border:1px solid var(--line);color:var(--ink);
+  border-radius:var(--r-sm);padding:7px 10px;font-family:inherit;font-size:14px;
+  font-variant-numeric:tabular-nums;
+}
+.qterap{display:flex;gap:4px}
+.qterap button{
+  border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;
+  border-radius:var(--r-sm);padding:5px 9px;font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;
+}
+.qterap button:hover{color:var(--accent);border-color:color-mix(in srgb, var(--accent) 45%, transparent)}
+.bachat,.bvente{
+  border:0;cursor:pointer;border-radius:var(--r-sm);padding:8px 18px;
+  font-family:"Outfit",system-ui,sans-serif;font-size:13px;font-weight:600;color:#0B0E14;
+}
+.bachat{background:var(--up)} .bvente{background:var(--down)}
+.bachat:disabled,.bvente:disabled{opacity:.35;cursor:not-allowed}
+.ordrenote{
+  margin-top:8px;font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;color:var(--muted);
+}
+.ordrenote b{color:var(--ink-2);font-variant-numeric:tabular-nums}
+.interdit{color:var(--down)}
+
+/* --- portefeuille --- */
+.pf{display:flex;flex-direction:column;gap:7px}
+.pfhaut{
+  background:var(--surface-2);border-radius:var(--r-lg);padding:11px 13px;
+  display:grid;grid-template-columns:1fr 1fr;gap:9px;
+}
+.pfcase .statlbl{margin-bottom:2px}
+.pfval{font-family:"Outfit",system-ui,sans-serif;font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
+.ligne{
+  display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;
+  padding:7px 9px;border-radius:var(--r-sm);background:var(--surface-2);
+}
+.lnom{font-size:12.5px;color:var(--ink)}
+.lsub{font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;color:var(--muted)}
+.lpl{text-align:right;font-size:12.5px;font-variant-numeric:tabular-nums}
+
+/* --- dépêches --- */
+.depeches{display:flex;flex-direction:column;gap:6px;max-height:258px;overflow-y:auto}
+.dep{
+  border-left:2px solid var(--line);padding:6px 0 6px 10px;
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12.5px;color:var(--ink-2);line-height:1.45;
+}
+.dep b{color:var(--ink)}
+.dep.krach{border-left-color:var(--down)}
+.dep.bulle{border-left-color:var(--up)}
+.dep.info{border-left-color:var(--accent)}
+.deph{
+  display:block;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:2px;
+}
+
+/* --- la régie des scénarios --- */
+.regie{
+  margin-top:12px;background:var(--surface);border:1px dashed color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius:var(--r-xl);padding:14px 16px;
+}
+.regierow{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+.regierow .btn{cursor:pointer}
+.regienote{margin-top:9px;font-size:12.5px;color:var(--muted);line-height:1.5}
+
+@media (max-width:1180px){
+  .grille{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<div class="desk">
+
+  <div class="deskhead">
+    <div class="deskname">NEXUS <span>EXCHANGE</span></div>
+    <span class="etatmarche"><i></i>MARCHÉ OUVERT</span>
+    <span class="horloge" id="horloge">—</span>
+    <div class="indice">
+      <span class="indicelbl">Indice</span>
+      <span class="indiceval" id="indiceVal">—</span>
+      <span class="pct" id="indicePct">—</span>
+    </div>
+  </div>
+
+  <div class="tape"><div class="tapein" id="tape"></div></div>
+
+  <div class="grille">
+
+    <!-- ---------------- les valeurs ---------------- -->
+    <div class="carte">
+      <h3 class="cartetitre">Les valeurs <span id="nbValeurs"></span></h3>
+      <div class="valeurs" id="valeurs"></div>
+    </div>
+
+    <!-- ---------------- le graphique et l'ordre ---------------- -->
+    <div class="carte chartzone">
+      <div class="chartbar">
+        <span class="chartnom" id="chartNom">—</span>
+        <span class="chartcours" id="chartCours">—</span>
+        <span class="pct" id="chartPct">—</span>
+        <div class="seg2" role="group">
+          <button type="button" data-vue="40" aria-pressed="true">1 h</button>
+          <button type="button" data-vue="90" aria-pressed="false">6 h</button>
+          <button type="button" data-vue="200" aria-pressed="false">Tout</button>
+        </div>
+      </div>
+
+      <svg id="chandelles" viewBox="0 0 900 296" preserveAspectRatio="none" aria-label="Cours de la valeur"></svg>
+
+      <div class="stats">
+        <div class="stat"><div class="statlbl">Ouverture</div><div class="statval" id="sOuv">—</div></div>
+        <div class="stat"><div class="statlbl">Plus haut</div><div class="statval" id="sHaut">—</div></div>
+        <div class="stat"><div class="statlbl">Plus bas</div><div class="statval" id="sBas">—</div></div>
+        <div class="stat"><div class="statlbl">Volume</div><div class="statval" id="sVol">—</div></div>
+      </div>
+
+      <div class="ordre">
+        <div class="ordrelig">
+          <input class="qte" id="qte" type="number" min="1" step="1" value="10" aria-label="Quantité">
+          <div class="qterap">
+            <button type="button" data-q="10">10</button>
+            <button type="button" data-q="50">50</button>
+            <button type="button" data-q="100">100</button>
+            <button type="button" data-q="max">Max</button>
+          </div>
+          <button type="button" class="bachat" id="bAchat">Acheter</button>
+          <button type="button" class="bvente" id="bVente">Vendre</button>
+        </div>
+        <div class="ordrenote" id="ordreNote">—</div>
+      </div>
+    </div>
+
+    <!-- ---------------- portefeuille et dépêches ---------------- -->
+    <div>
+      <div class="carte" style="margin-bottom:12px">
+        <h3 class="cartetitre">Ton portefeuille</h3>
+        <div class="pf">
+          <div class="pfhaut">
+            <div class="pfcase"><div class="statlbl">Or disponible</div><div class="pfval" id="pfOr">—</div></div>
+            <div class="pfcase"><div class="statlbl">Valeur totale</div><div class="pfval" id="pfTotal">—</div></div>
+            <div class="pfcase"><div class="statlbl">Investi</div><div class="pfval" id="pfInv">—</div></div>
+            <div class="pfcase"><div class="statlbl">Plus-value</div><div class="pfval" id="pfPl">—</div></div>
+          </div>
+          <div id="positions"></div>
+        </div>
+      </div>
+
+      <div class="carte">
+        <h3 class="cartetitre">Dépêches</h3>
+        <div class="depeches" id="depeches"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------- la régie ---------------- -->
+  <div class="regie">
+    <div class="regierow">
+      <strong style="font-family:Outfit,sans-serif;font-size:14px">Régie des scénarios</strong>
+      <button type="button" class="btn ghost sm" data-evt="krach">Déclencher un krach</button>
+      <button type="button" class="btn ghost sm" data-evt="bulle">Déclencher une bulle</button>
+      <button type="button" class="btn ghost sm" data-evt="panique">Panique sur Les Pitoyables</button>
+      <button type="button" class="btn ghost sm" data-evt="annonce">Rumeur sur une valeur</button>
+    </div>
+    <p class="regienote">
+      Dans la vraie version, ces scénarios se programment à l'avance depuis la console admin
+      (« krach le 12 octobre à 21 h, −38 % sur six relevés ») ou se déclenchent sur-le-champ.
+      Les joueurs ne les voient pas venir : ils ne lisent que la dépêche, une fois le mouvement commencé.
+    </p>
+  </div>
+</div>
+
+<script>
+/* ===================================================================
+   SIMULATION — tout est faux, rien n'est enregistré.
+=================================================================== */
+
+/* Les valeurs : une par joueur du challenge. Le cours d'une action
+   suit la forme de son joueur ; ici elle est tirée au sort, dans la
+   vraie version elle viendra des LP relevés chez Riot. */
+const VALEURS = [
+  { code:"NMD", nom:"NamelessDivnity", equipe:"a", base:118 },
+  { code:"TNK", nom:"Tankiste",        equipe:"a", base:142 },
+  { code:"BIG", nom:"Le Big Mat",      equipe:"a", base:76  },
+  { code:"LEU", nom:"LEUJI",           equipe:"a", base:94  },
+  { code:"MTX", nom:"Metaxou",         equipe:"a", base:61  },
+  { code:"SNZ", nom:"Snoozenlaw31",    equipe:"b", base:168 },
+  { code:"RGM", nom:"RageMachala",     equipe:"b", base:133 },
+  { code:"RNA", nom:"Runailen",        equipe:"b", base:105 },
+  { code:"FLK", nom:"FlinkiiS",        equipe:"b", base:69  },
+  { code:"MVP", nom:"monvraipseudo2",  equipe:"b", base:58  },
+  { code:"ARM", nom:"Aria Math",       equipe:"b", base:47  }
+];
+
+const COULEUR = { a:"#2E9BE0", b:"#E33B3B" };
+const N_HISTO = 200;                 // bougies fabriquées au départ
+const MOI = "LEU";                   // on joue LEUJI : sa valeur est interdite
+
+/* Un choc en cours : il pousse tous les cours pendant quelques bougies,
+   puis s'épuise. C'est ce qui donne au krach sa forme de chute et pas
+   de marche d'escalier. */
+let choc = null;
+let argent = 8400;                   // or disponible
+const sac = {};                      // code -> { nb, pru }
+let selection = "SNZ";
+let fenetre = 40;
+
+const alea = (a, b) => a + Math.random() * (b - a);
+const orFr = n => Math.round(n).toLocaleString("fr-FR").replace(/ /g, " ");
+const pctFr = p => (p >= 0 ? "+" : "−") + Math.abs(p).toFixed(2) + " %";
+
+/* Une bougie : ouverture, plus haut, plus bas, clôture, volume. */
+function bougieSuivante(v){
+  const der = v.histo[v.histo.length - 1];
+  const ouv = der ? der.c : v.base;
+
+  // Trois forces : la forme du joueur, le marché, le bruit. Plus le
+  // choc, quand il y en a un.
+  const forme   = v.tendance;                       // dérive propre au joueur
+  const marche  = marcheDuTick;                     // commun à tout le monde
+  const bruit   = alea(-0.016, 0.016);
+  const secousse = choc ? choc.force(v) : 0;
+
+  const rendement = forme + marche + bruit + secousse;
+  const clot = Math.max(4, ouv * (1 + rendement));
+  const amp = Math.abs(ouv - clot) + ouv * alea(0.002, 0.012);
+  return {
+    o: ouv, c: clot,
+    h: Math.max(ouv, clot) + amp * alea(0, .6),
+    b: Math.max(2, Math.min(ouv, clot) - amp * alea(0, .6)),
+    v: Math.round(alea(40, 400) * (choc ? 3.2 : 1))
+  };
+}
+
+let marcheDuTick = 0;
+
+// Historique de départ, pour que le graphique ne naisse pas vide.
+VALEURS.forEach(v => {
+  v.tendance = alea(-0.004, 0.005);
+  v.histo = [];
+  for(let i = 0; i < N_HISTO; i++){
+    marcheDuTick = alea(-0.008, 0.008);
+    v.histo.push(bougieSuivante(v));
+  }
+});
+
+const cours = v => v.histo[v.histo.length - 1].c;
+const veille = v => v.histo[Math.max(0, v.histo.length - 41)].c;
+const variation = v => (cours(v) / veille(v) - 1) * 100;
+const indice = () => VALEURS.reduce((a, v) => a + cours(v), 0) / VALEURS.length * 7.4;
+
+let indiceVeille = indice();
+
+/* ---------------- les dépêches ---------------- */
+const depeches = [];
+function depeche(genre, titre, texte){
+  const d = new Date();
+  depeches.unshift({ genre, titre, texte,
+    h: d.getHours() + ":" + String(d.getMinutes()).padStart(2, "0") });
+  if(depeches.length > 40) depeches.pop();
+  rendreDepeches();
+}
+
+/* ---------------- les scénarios ---------------- */
+function lancerEvenement(type){
+  if(type === "krach"){
+    choc = { reste: 7, force: () => alea(-0.085, -0.035) };
+    depeche("krach", "Krach sur le NEXUS",
+      "Les ventes s'enchaînent sur toutes les valeurs. Aucune n'est épargnée.");
+  }
+  if(type === "bulle"){
+    choc = { reste: 6, force: () => alea(0.03, 0.08) };
+    depeche("bulle", "Euphorie générale",
+      "L'indice s'envole : tout le monde achète, personne ne sait vraiment pourquoi.");
+  }
+  if(type === "panique"){
+    choc = { reste: 6, force: v => v.equipe === "b" ? alea(-0.09, -0.04) : alea(0, 0.015) };
+    depeche("krach", "Panique sur Les Pitoyables",
+      "Les valeurs d'une seule équipe décrochent. Les Médiocres tiennent bon.");
+  }
+  if(type === "annonce"){
+    const v = VALEURS[Math.floor(Math.random() * VALEURS.length)];
+    const hausse = Math.random() < .5;
+    choc = { reste: 4, force: x => x.code === v.code
+      ? (hausse ? alea(0.07, 0.14) : alea(-0.13, -0.06)) : 0 };
+    depeche("info", (hausse ? "Rumeur favorable sur " : "Doute sur ") + v.nom,
+      hausse ? "Le marché parie sur une remontée. " + v.code + " s'envole."
+             : "Les vendeurs prennent le dessus. " + v.code + " dévisse.");
+  }
+}
+
+/* ---------------- le temps qui passe ---------------- */
+function tick(){
+  marcheDuTick = alea(-0.009, 0.009);
+  VALEURS.forEach(v => {
+    v.histo.push(bougieSuivante(v));
+    if(v.histo.length > 400) v.histo.shift();
+    // La tendance d'un joueur dérive lentement : sa forme change.
+    if(Math.random() < .06) v.tendance = alea(-0.004, 0.005);
+  });
+  if(choc && --choc.reste <= 0){
+    choc = null;
+    depeche("info", "Le marché se stabilise", "Les cours reprennent leur cours normal.");
+  }
+  rendreTout();
+}
+
+/* ===================================================================
+   AFFICHAGE
+=================================================================== */
+const $ = s => document.querySelector(s);
+
+function rendreTape(){
+  const un = v => '<span class="tapeitem"><span class="tapenom">' + v.code + '</span>'
+    + '<span class="tapeval">' + cours(v).toFixed(1) + '</span>'
+    + '<span class="pct ' + (variation(v) >= 0 ? "up" : "down") + '">' + pctFr(variation(v)) + '</span></span>';
+  // deux fois la liste : le défilement boucle sans saut
+  $("#tape").innerHTML = VALEURS.map(un).join("") + VALEURS.map(un).join("");
+}
+
+function rendreValeurs(){
+  $("#nbValeurs").textContent = VALEURS.length + " cotées";
+  $("#valeurs").innerHTML = VALEURS.map(v => {
+    const p = variation(v);
+    const pos = sac[v.code];
+    return '<div class="valeur' + (v.code === selection ? " on" : "") + '" data-code="' + v.code + '">'
+      + '<span class="jeton" style="background:' + COULEUR[v.equipe] + '">' + v.code + '</span>'
+      + '<span><span class="vnom">' + v.nom + '</span>'
+        + '<span class="vsub">' + (pos ? pos.nb + " en portefeuille" : (v.code === MOI ? "ta valeur" : "—")) + '</span></span>'
+      + '<span class="vdroite"><span class="vcours">' + cours(v).toFixed(1) + '</span><br>'
+        + '<span class="pct ' + (p >= 0 ? "up" : "down") + '">' + pctFr(p) + '</span></span>'
+      + '</div>';
+  }).join("");
+  $("#valeurs").querySelectorAll("[data-code]").forEach(e =>
+    e.addEventListener("click", () => { selection = e.dataset.code; rendreTout(); }));
+}
+
+/* Les chandeliers. Vert quand la bougie monte, rouge quand elle
+   descend : c'est la convention, et elle se lit sans légende. */
+function rendreChandelles(){
+  const v = VALEURS.find(x => x.code === selection);
+  const h = v.histo.slice(-fenetre);
+  const W = 900, H = 296, PL = 6, PR = 52, PT = 10, PB = 16;
+  const hi = Math.max.apply(null, h.map(c => c.h));
+  const lo = Math.min.apply(null, h.map(c => c.b));
+  const pad = (hi - lo) * .08 || 1;
+  const Y = p => PT + (1 - (p - (lo - pad)) / ((hi + pad) - (lo - pad))) * (H - PT - PB);
+  const pas = (W - PL - PR) / h.length;
+  const larg = Math.max(1.5, pas * .62);
+
+  let out = "";
+  // quelques lignes de prix
+  for(let i = 0; i <= 4; i++){
+    const p = (lo - pad) + ((hi + pad) - (lo - pad)) * i / 4, y = Y(p);
+    out += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - PR) + '" y2="' + y.toFixed(1)
+        +  '" stroke="var(--line-soft)" stroke-width="1" opacity=".55"/>'
+        +  '<text x="' + (W - PR + 8) + '" y="' + (y + 4).toFixed(1) + '" fill="var(--muted)"'
+        +  ' font-family="Barlow Semi Condensed" font-size="11">' + p.toFixed(1) + '</text>';
+  }
+  h.forEach((c, i) => {
+    const x = PL + i * pas + pas / 2;
+    const monte = c.c >= c.o;
+    const col = monte ? "var(--up)" : "var(--down)";
+    out += '<line x1="' + x.toFixed(1) + '" y1="' + Y(c.h).toFixed(1)
+        +  '" x2="' + x.toFixed(1) + '" y2="' + Y(c.b).toFixed(1)
+        +  '" stroke="' + col + '" stroke-width="1" opacity=".8"/>'
+        +  '<rect x="' + (x - larg / 2).toFixed(1) + '" y="' + Math.min(Y(c.o), Y(c.c)).toFixed(1)
+        +  '" width="' + larg.toFixed(1) + '" height="' + Math.max(1.2, Math.abs(Y(c.o) - Y(c.c))).toFixed(1)
+        +  '" fill="' + col + '" opacity="' + (monte ? ".9" : ".85") + '"/>';
+  });
+  // le dernier cours, en évidence sur la droite
+  const der = h[h.length - 1];
+  out += '<line x1="' + PL + '" y1="' + Y(der.c).toFixed(1) + '" x2="' + (W - PR) + '" y2="' + Y(der.c).toFixed(1)
+      +  '" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 3" opacity=".75"/>';
+  $("#chandelles").innerHTML = out;
+
+  const p = variation(v);
+  $("#chartNom").textContent = v.nom + " · " + v.code;
+  $("#chartCours").textContent = cours(v).toFixed(1);
+  $("#chartPct").className = "pct " + (p >= 0 ? "up" : "down");
+  $("#chartPct").textContent = pctFr(p);
+  $("#sOuv").textContent  = h[0].o.toFixed(1);
+  $("#sHaut").textContent = hi.toFixed(1);
+  $("#sBas").textContent  = lo.toFixed(1);
+  $("#sVol").textContent  = orFr(h.reduce((a, c) => a + c.v, 0));
+}
+
+function rendrePortefeuille(){
+  let valeur = 0, investi = 0;
+  const lignes = Object.keys(sac).map(code => {
+    const v = VALEURS.find(x => x.code === code), pos = sac[code];
+    const val = pos.nb * cours(v), inv = pos.nb * pos.pru;
+    valeur += val; investi += inv;
+    const pl = val - inv, plp = inv ? (val / inv - 1) * 100 : 0;
+    return '<div class="ligne">'
+      + '<span class="jeton" style="background:' + COULEUR[v.equipe] + '">' + v.code + '</span>'
+      + '<span><span class="lnom">' + pos.nb + ' × ' + v.nom + '</span><br>'
+        + '<span class="lsub">PRU ' + pos.pru.toFixed(1) + ' · vaut ' + orFr(val) + '</span></span>'
+      + '<span class="lpl pct ' + (pl >= 0 ? "up" : "down") + '">' + (pl >= 0 ? "+" : "−")
+        + orFr(Math.abs(pl)) + '<br><span style="font-size:11px">' + pctFr(plp) + '</span></span>'
+      + '</div>';
+  });
+  $("#positions").innerHTML = lignes.length ? lignes.join("")
+    : '<div class="empty" style="font-size:12.5px">Aucune position. Achète une valeur pour commencer.</div>';
+
+  const pl = valeur - investi;
+  $("#pfOr").textContent = orFr(argent);
+  $("#pfTotal").textContent = orFr(argent + valeur);
+  $("#pfInv").textContent = orFr(investi);
+  $("#pfPl").textContent = (pl >= 0 ? "+" : "−") + orFr(Math.abs(pl));
+  $("#pfPl").style.color = pl >= 0 ? "var(--up)" : "var(--down)";
+}
+
+function rendreDepeches(){
+  $("#depeches").innerHTML = depeches.length ? depeches.map(d =>
+    '<div class="dep ' + d.genre + '"><span class="deph">' + d.h + '</span>'
+    + '<b>' + d.titre + '</b> — ' + d.texte + '</div>').join("")
+    : '<div class="empty" style="font-size:12.5px">Rien à signaler.</div>';
+}
+
+function rendreOrdre(){
+  const v = VALEURS.find(x => x.code === selection);
+  const q = Math.max(0, parseInt($("#qte").value, 10) || 0);
+  const cout = q * cours(v);
+  const pos = sac[selection];
+  const sien = selection === MOI;
+
+  $("#bAchat").disabled = sien || !q || cout > argent;
+  $("#bVente").disabled = sien || !q || !pos || pos.nb < q;
+
+  $("#ordreNote").innerHTML = sien
+    ? '<span class="interdit">Tu ne peux pas trader ta propre valeur : tu sais avant tout le monde comment tes parties se passent.</span>'
+    : q + ' × ' + v.code + ' · coût <b>' + orFr(cout) + ' or</b>'
+      + ' · il te resterait <b>' + orFr(argent - cout) + ' or</b>'
+      + (pos ? ' · tu en as déjà <b>' + pos.nb + '</b>' : '');
+}
+
+function rendreIndice(){
+  const i = indice(), p = (i / indiceVeille - 1) * 100;
+  $("#indiceVal").textContent = orFr(i);
+  $("#indicePct").className = "pct " + (p >= 0 ? "up" : "down");
+  $("#indicePct").textContent = pctFr(p);
+  const d = new Date();
+  $("#horloge").textContent = "Dernier relevé " + d.getHours() + ":"
+    + String(d.getMinutes()).padStart(2, "0") + ":" + String(d.getSeconds()).padStart(2, "0");
+}
+
+function rendreTout(){
+  rendreTape(); rendreValeurs(); rendreChandelles();
+  rendrePortefeuille(); rendreOrdre(); rendreIndice();
+}
+
+/* ---------------- les ordres ---------------- */
+function acheter(){
+  const v = VALEURS.find(x => x.code === selection);
+  const q = parseInt($("#qte").value, 10) || 0;
+  const cout = q * cours(v);
+  if(!q || cout > argent || selection === MOI) return;
+  argent -= cout;
+  const pos = sac[selection] || { nb:0, pru:0 };
+  pos.pru = (pos.pru * pos.nb + cout) / (pos.nb + q);
+  pos.nb += q;
+  sac[selection] = pos;
+  depeche("info", "Ordre exécuté", "Achat de " + q + " × " + v.code + " à " + cours(v).toFixed(1) + ".");
+  rendreTout();
+}
+function vendre(){
+  const v = VALEURS.find(x => x.code === selection);
+  const q = parseInt($("#qte").value, 10) || 0;
+  const pos = sac[selection];
+  if(!q || !pos || pos.nb < q || selection === MOI) return;
+  argent += q * cours(v);
+  pos.nb -= q;
+  if(!pos.nb) delete sac[selection];
+  depeche("info", "Ordre exécuté", "Vente de " + q + " × " + v.code + " à " + cours(v).toFixed(1) + ".");
+  rendreTout();
+}
+
+/* ---------------- branchements ---------------- */
+$("#bAchat").addEventListener("click", acheter);
+$("#bVente").addEventListener("click", vendre);
+$("#qte").addEventListener("input", rendreOrdre);
+document.querySelectorAll(".qterap button").forEach(b => b.addEventListener("click", () => {
+  const v = VALEURS.find(x => x.code === selection);
+  $("#qte").value = b.dataset.q === "max" ? Math.floor(argent / cours(v)) : b.dataset.q;
+  rendreOrdre();
+}));
+document.querySelectorAll(".seg2 button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".seg2 button").forEach(x => x.setAttribute("aria-pressed", "false"));
+  b.setAttribute("aria-pressed", "true");
+  fenetre = +b.dataset.vue;
+  rendreChandelles();
+}));
+document.querySelectorAll("[data-evt]").forEach(b =>
+  b.addEventListener("click", () => { lancerEvenement(b.dataset.evt); rendreTout(); }));
+
+depeche("info", "Ouverture du marché",
+  "Onze valeurs cotées. Les cours suivent la forme des joueurs, et les humeurs du marché.");
+rendreTout();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>
