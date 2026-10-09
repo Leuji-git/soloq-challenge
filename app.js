@@ -2838,7 +2838,7 @@ function renderRules(){
 /* Les prix de base. Ceux des objets vivent en base, ceux-ci sont
    fixes — les avantages d'équipe ne suivent pas la bourse, ce sont des
    leviers d'équilibre, pas des marchandises. */
-const PRIX = { coffre: 500, lp25: 2000, boost: 5000, swap: 25000 };
+const PRIX = { coffre: 500, lp25: 6000, boost: 10000, swap: 30000 };
 
 /* Le Commerce suit l'indice de la Place : il monte, tout coûte plus
    cher ; il s'effondre, les rayons passent en solde.

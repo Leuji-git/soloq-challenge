@@ -222,3 +222,10 @@
 }
 .tutopoints i.on{background:var(--accent);transform:scale(1.25)}
 .tuto .btnrow{justify-content:space-between;margin-top:14px}
+
+/* Les limites de l'ordre, toujours visibles : un refus du serveur ne
+   doit jamais être une surprise. */
+.ordrelimites{display:inline-block;margin-top:5px;font-size:11.5px;color:var(--muted)}
+.ordrelimites b{color:var(--ink-2)}
+.ordrelimites .verrou{color:var(--accent)}
+.ordrelimites.epuise{color:var(--down)}

@@ -31,11 +31,17 @@ const RISQUES = {
    change l'autre : la page annoncerait sinon un prix que le serveur ne
    pratique pas. */
 const SENSIBILITE = { commun:0.6, coffre:0.8, rare:1.0, legendaire:1.5 };
-const FRAIS = 0.01;
+/* Les memes valeurs que bourse_frais(), bourse_detention() et
+   bourse_max_jour() en SQL. C'est le serveur qui refuse ; la page ne
+   fait que l'annoncer avant le clic, pour qu'un refus ne soit jamais
+   une surprise. */
+const FRAIS = 0.02;
+const DETENTION_MIN = 30;     // minutes avant de pouvoir revendre
+const MAX_JOUR = 12;          // ordres par jour et par joueur
 
 const S = {
   session:null, moi:null, equipes:{ a:"Équipe A", b:"Équipe B" },
-  societes:[], cours:{}, positions:[], depeches:[], etat:null, objets:[]
+  societes:[], cours:{}, positions:[], depeches:[], etat:null, objets:[], ordresJour:0
 };
 let selection = null, fenetre = 36, filtre = "tout";
 
@@ -73,6 +79,14 @@ async function charger(){
   if(S.session){
     const me = await sb.from("players").select("*").eq("claimed_by", S.session.user.id).maybeSingle();
     S.moi = me.data || null;
+    /* Les ordres du jour se comptent sur le journal d'or, comme le fait
+       le serveur. Tenir un second compteur finirait par diverger. */
+    if(S.moi){
+      const t = new Date(); t.setHours(0, 0, 0, 0);
+      const o = await sb.from("gold_ledger").select("id")
+        .eq("player_id", S.moi.id).like("raison", "bourse : %").gte("at", t.toISOString());
+      S.ordresJour = o.error ? 0 : (o.data || []).length;
+    }
   }
   if(!selection && S.societes.length) selection = S.societes[0].code;
 }
@@ -257,6 +271,15 @@ function rendreDepeches(){
   }).join("") : '<div class="empty" style="font-size:12.5px">Rien à signaler.</div>';
 }
 
+/* Minutes restantes avant de pouvoir revendre une ligne, 0 si elle est
+   libre. Le serveur refusera de toute façon : ceci ne fait que le dire
+   avant le clic. */
+function verrouRestant(pos){
+  if(!pos || !pos.achete_le) return 0;
+  const fin = new Date(pos.achete_le).getTime() + DETENTION_MIN * 60000;
+  return Math.max(0, Math.ceil((fin - Date.now()) / 60000));
+}
+
 function rendreOrdre(){
   const s = soc(selection);
   if(!s) return;
@@ -265,15 +288,28 @@ function rendreOrdre(){
   const cout = Math.round(prix * q), frais = Math.max(1, Math.round(cout * FRAIS));
   const pos = maPosition(selection);
   const or = S.moi ? (S.moi.gold || 0) : 0;
+  const reste = Math.max(0, MAX_JOUR - S.ordresJour);
+  const verrou = verrouRestant(pos);
 
-  $("#bAchat").disabled = !S.moi || !q || cout + frais > or;
-  $("#bVente").disabled = !S.moi || !q || !pos || pos.nb < q;
+  $("#bAchat").disabled = !S.moi || !q || cout + frais > or || !reste;
+  $("#bVente").disabled = !S.moi || !q || !pos || pos.nb < q || !reste || verrou > 0;
 
-  $("#ordreNote").innerHTML = !S.moi
-    ? "Connecte-toi sur le challenge pour passer un ordre."
-    : q + ' × ' + esc(s.code) + ' · <b>' + orFr(cout) + ' or</b> + <b>' + orFr(frais)
-      + '</b> de frais (1 %) · il te resterait <b>' + orFr(or - cout - frais) + ' or</b>'
-      + (pos ? ' · tu en as déjà <b>' + pos.nb + '</b>' : '');
+  if(!S.moi){
+    $("#ordreNote").innerHTML = "Connecte-toi sur le challenge pour passer un ordre.";
+    return;
+  }
+  $("#ordreNote").innerHTML =
+      q + ' × ' + esc(s.code) + ' · <b>' + orFr(cout) + ' or</b> + <b>' + orFr(frais)
+    + '</b> de frais (2 %) · il te resterait <b>' + orFr(or - cout - frais) + ' or</b>'
+    + (pos ? ' · tu en as déjà <b>' + pos.nb + '</b>' : '')
+    + '<br><span class="ordrelimites' + (!reste ? " epuise" : "") + '">'
+      + (reste ? '<b>' + reste + '</b> ordre' + (reste > 1 ? 's' : '') + ' restant'
+                 + (reste > 1 ? 's' : '') + " aujourd'hui"
+               : "Tu as usé tes " + MAX_JOUR + " ordres du jour. La bourse rouvre demain.")
+      + (verrou > 0
+          ? ' · <b class="verrou">revendable dans ' + verrou + ' min</b>'
+          : ' · toute ligne se garde ' + DETENTION_MIN + ' min avant revente')
+    + '</span>';
 }
 
 function rendreIndice(){
@@ -360,6 +396,7 @@ async function passer(fn, mot){
   // Le prix facturé est celui du serveur, pas celui qu'on avait sous
   // les yeux : on le redit, sinon un cours qui a bougé entre le clic et
   // l'exécution passerait pour une erreur.
+  if(data.ordres !== undefined) S.ordresJour = data.ordres;
   dire(mot + " " + data.nb + " × " + data.code + " à " + Number(data.prix).toFixed(1)
     + " · frais " + orFr(data.frais) + " or"
     + (data.gain !== undefined ? " · plus-value " + (data.gain >= 0 ? "+" : "−")
@@ -432,9 +469,13 @@ const TUTO = [
   { t:"Passer un ordre",
     h:"<p>Choisis une soci\u00e9t\u00e9 dans la liste de gauche, tape une <b>quantit\u00e9</b>, "
      +"puis <b>Acheter</b>. Pour r\u00e9cup\u00e9rer ton or, <b>Vendre</b>.</p>"
-     +"<p>Il y a <b>1 % de frais</b> \u00e0 l'achat comme \u00e0 la vente. Acheter puis "
-     +"revendre aussit\u00f4t te co\u00fbte donc 2 % : il faut que le prix ait bougé plus "
-     +"que \u00e7a pour que l'aller-retour vaille le coup.</p>"
+     +"<p>Il y a <b>2 % de frais</b> à l'achat comme à la vente, et <b>douze ordres "
+     +"par jour</b> au maximum. Choisis-les bien.</p>"
+     +"<p>Une ligne achetée se garde <b>trente minutes</b> avant de pouvoir être "
+     +"revendue. Racheter remet ce délai à zéro sur toute la ligne.</p>"
+     +"<div class='exemple'>Ces trois règles visent la même chose : empêcher "
+     +"l'aller-retour toutes les cinq minutes, qui transformait la bourse en "
+     +"machine à sous. Investir, c'est <b>attendre</b>.</div>"
      +"<div class='exemple'>Le prix qui te sera factur\u00e9 est celui du <b>serveur au "
      +"moment du clic</b>, pas celui affich\u00e9 \u00e0 l'\u00e9cran. Entre les deux, le cours a "
      +"pu bouger. Le message sous le bouton te dit toujours ce qui a r\u00e9ellement "
