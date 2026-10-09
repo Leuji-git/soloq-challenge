@@ -188,6 +188,34 @@ body{padding:0}
 }
 .note b{color:var(--ink-2)}
 
+/* --- le commerce indexé sur la bourse --- */
+.objets{display:grid;grid-template-columns:repeat(auto-fit,minmax(176px,1fr));gap:8px}
+.objet{
+  display:flex;align-items:center;gap:10px;padding:9px 11px;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);
+}
+.objico{font-size:21px;line-height:1;flex:none}
+.objtxt{min-width:0;flex:1}
+.objnom{font-size:12.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.objprix{display:flex;align-items:baseline;gap:6px;margin-top:2px}
+.objbase{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;color:var(--muted);
+  text-decoration:line-through;
+}
+.objnow{font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.objbadge{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:10px;font-weight:700;
+  letter-spacing:.06em;padding:1px 6px;border-radius:var(--pill);flex:none;
+}
+.objbadge.bas{background:color-mix(in srgb, var(--up) 15%, transparent);color:var(--up)}
+.objbadge.haut{background:color-mix(in srgb, var(--down) 15%, transparent);color:var(--down)}
+.objbadge.plat{background:var(--surface-3);color:var(--muted)}
+.commnote{
+  margin:10px 0 0;font-family:"Barlow Semi Condensed",sans-serif;font-size:12.5px;
+  color:var(--muted);line-height:1.55;
+}
+.commnote b{color:var(--ink-2)}
+
 @media (max-width:1180px){ .grille{grid-template-columns:1fr} }
 </style>
 </head>
@@ -280,6 +308,15 @@ body{padding:0}
     </div>
   </div>
 
+  <!-- ---------------- le commerce indexé ---------------- -->
+  <div class="carte commerce" style="margin-top:12px">
+    <h3 class="cartetitre">
+      Le Commerce <span id="indicePrix"></span>
+    </h3>
+    <div class="objets" id="objets"></div>
+    <p class="commnote" id="commNote">—</p>
+  </div>
+
   <div class="note">
     <b>Le marché tourne tout seul.</b> Personne ne décide des mouvements, ni toi ni moi :
     les opérations tombent au hasard à chaque relevé, et les événements exceptionnels ont
@@ -338,6 +375,12 @@ const sac = {};
 let selection = "PLT";
 let fenetre = 40;
 let filtre = "tout";
+/* 1 % à l'achat comme à la vente. Assez bas pour qu'on ose entrer,
+   assez haut pour que l'aller-retour permanent ne rapporte rien : à 2 %
+   le tour, il faut viser plus que le bruit du marché. C'est aussi un
+   robinet qui vide un peu d'or du challenge à chaque ordre. */
+const FRAIS = 0.01;
+
 let secousse = null;            // l'événement majeur en cours
 let reposRestant = 0;
 
@@ -617,13 +660,13 @@ function rendreDepeches(){
 function rendreOrdre(){
   const v = soc(selection);
   const q = Math.max(0, parseInt($("#qte").value, 10) || 0);
-  const cout = q * cours(v), frais = cout * 0.015;
+  const cout = q * cours(v), frais = cout * FRAIS;
   const pos = sac[selection];
 
   $("#bAchat").disabled = !q || cout + frais > argent;
   $("#bVente").disabled = !q || !pos || pos.nb < q;
   $("#ordreNote").innerHTML = q + ' × ' + v.code + ' · <b>' + orFr(cout)
-    + ' or</b> + <b>' + orFr(frais) + '</b> de frais'
+    + ' or</b> + <b>' + orFr(frais) + '</b> de frais (1 %)'
     + ' · il te resterait <b>' + orFr(argent - cout - frais) + ' or</b>'
     + (pos ? ' · tu en as déjà <b>' + pos.nb + '</b>' : '');
 }
@@ -646,12 +689,79 @@ function rendreIndice(){
 function rendreTout(){
   rendreTape(); rendreValeurs(); rendreChandelles();
   rendrePortefeuille(); rendreOrdre(); rendreIndice(); rendreDepeches();
+  rendreCommerce();
+}
+
+/* ===================================================================
+   LE COMMERCE INDEXÉ SUR LA BOURSE
+
+   L'indice EST l'économie du challenge. Quand il monte, tout coûte plus
+   cher ; quand il s'effondre, les rayons passent en solde. Un krach
+   ruine les portefeuilles mais ouvre une fenêtre d'achat — c'est ce qui
+   donne une raison de garder de l'or de côté au lieu de tout investir.
+
+   La sensibilité varie avec la rareté : un objet commun est une denrée
+   de base, un légendaire est un produit de luxe, et le luxe suit les
+   humeurs du marché bien plus fort.
+=================================================================== */
+const SENSIBILITE = { commun:0.6, coffre:0.8, rare:1.0, legendaire:1.5 };
+const PLANCHER = 0.55, PLAFOND = 1.60;
+
+const OBJETS = [
+  { ico:"\u{1F4E6}", nom:"Un coffre",        rarete:"coffre",     base:500  },
+  { ico:"\u{1F6E1}\uFE0F", nom:"Pierre de Garde", rarete:"commun", base:350 },
+  { ico:"\u26CF\uFE0F", nom:"Pioche du Nain", rarete:"commun",   base:350  },
+  { ico:"\u{1F525}", nom:"\u00c9lixir de Rage", rarete:"rare",   base:800  },
+  { ico:"\u{1F4B0}", nom:"P\u00e9age",       rarete:"rare",       base:800  },
+  { ico:"\u{1F40D}", nom:"Baron Nashor",      rarete:"legendaire", base:1800 },
+  { ico:"\u2694\uFE0F", nom:"\u00c9gide du Contre", rarete:"legendaire", base:1800 }
+];
+
+// Le coefficient de prix, borné : même un krach historique ne brade pas
+// tout, et une bulle ne rend pas la boutique inaccessible.
+function coefPrix(rarete){
+  const brut = indice() / indiceVeille;
+  const k = SENSIBILITE[rarete] || 1;
+  return Math.max(PLANCHER, Math.min(PLAFOND, 1 + (brut - 1) * k));
+}
+// Arrondi à cinq : un prix à 1 % près serait illisible.
+const prixObjet = o => Math.round(o.base * coefPrix(o.rarete) / 5) * 5;
+
+function rendreCommerce(){
+  const moyen = OBJETS.reduce((a, o) => a + prixObjet(o) / o.base, 0) / OBJETS.length;
+  const p = (moyen - 1) * 100;
+  $("#indicePrix").innerHTML = '<span class="pct ' + (p > 1 ? "down" : p < -1 ? "up" : "flat") + '">'
+    + (p >= 0 ? "+" : "\u2212") + Math.abs(p).toFixed(1) + ' % sur les prix</span>';
+
+  $("#objets").innerHTML = OBJETS.map(o => {
+    const prix = prixObjet(o), d = (prix / o.base - 1) * 100;
+    const classe = d < -1.5 ? "bas" : d > 1.5 ? "haut" : "plat";
+    return '<div class="objet">'
+      + '<span class="objico">' + o.ico + '</span>'
+      + '<span class="objtxt"><span class="objnom">' + o.nom + '</span>'
+        + '<span class="objprix">'
+          + (Math.abs(d) > 1.5 ? '<span class="objbase">' + orFr(o.base) + '</span>' : '')
+          + '<span class="objnow" style="color:' + (d < -1.5 ? "var(--up)" : d > 1.5 ? "var(--down)" : "var(--ink)")
+          + '">' + orFr(prix) + ' or</span></span></span>'
+      + '<span class="objbadge ' + classe + '">'
+        + (classe === "bas" ? "SOLDE" : classe === "haut" ? "+" + d.toFixed(0) + " %" : "\u2014")
+      + '</span></div>';
+  }).join("");
+
+  $("#commNote").innerHTML = p < -4
+    ? "L'indice a chut\u00e9 : <b>les rayons sont en solde</b>. C'est le moment d'acheter \u2014 "
+      + "\u00e0 condition d'avoir gard\u00e9 de l'or au lieu de tout mettre en bourse."
+    : p > 4
+      ? "L'indice s'envole : <b>tout co\u00fbte plus cher</b>. Les l\u00e9gendaires souffrent le plus, "
+        + "le luxe suit les humeurs du march\u00e9."
+      : "Les prix suivent l'indice. Un commun bouge peu, un l\u00e9gendaire beaucoup : "
+        + "<b>plus c'est rare, plus c'est cyclique</b>.";
 }
 
 /* ---------------- les ordres ---------------- */
 function acheter(){
   const v = soc(selection), q = parseInt($("#qte").value, 10) || 0;
-  const cout = q * cours(v), frais = cout * 0.015;
+  const cout = q * cours(v), frais = cout * FRAIS;
   if(!q || cout + frais > argent) return;
   argent -= cout + frais;
   const pos = sac[selection] || { nb:0, pru:0 };
@@ -666,7 +776,7 @@ function vendre(){
   const pos = sac[selection];
   if(!q || !pos || pos.nb < q) return;
   const brut = q * cours(v);
-  argent += brut - brut * 0.015;
+  argent += brut - brut * FRAIS;
   pos.nb -= q;
   if(!pos.nb) delete sac[selection];
   depeche("info", "Ordre exécuté", "Vente de " + q + " × " + v.code + " à " + cours(v).toFixed(1) + ".");
@@ -680,7 +790,7 @@ $("#qte").addEventListener("input", rendreOrdre);
 document.querySelectorAll(".qterap button").forEach(b => b.addEventListener("click", () => {
   const v = soc(selection);
   $("#qte").value = b.dataset.q === "max"
-    ? Math.floor(argent / (cours(v) * 1.015)) : b.dataset.q;
+    ? Math.floor(argent / (cours(v) * (1 + FRAIS))) : b.dataset.q;
   rendreOrdre();
 }));
 document.querySelectorAll(".seg2 button").forEach(b => b.addEventListener("click", () => {
