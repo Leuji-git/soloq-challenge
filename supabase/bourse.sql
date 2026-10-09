@@ -269,11 +269,16 @@ begin
       amp := abs(ouv - clo) + ouv * (0.002 + random() * 0.009) * public.bourse_vol(soc.risque);
 
       insert into public.bourse_cours (code, slot, at, o, h, b, c)
+      /* Les casts ne sont pas de la decoration : random() rend du
+         double precision, qui contamine toute l'expression, et
+         round(x, n) n'existe que pour numeric. Sans eux, Postgres
+         repond « function round(double precision, integer) does not
+         exist ». */
       values (soc.code, s, to_timestamp(s * 300),
-              round(ouv, 2),
-              round(greatest(ouv, clo) + amp * random() * 0.6, 2),
-              round(greatest(2, least(ouv, clo) - amp * random() * 0.6), 2),
-              round(clo, 2))
+              round(ouv::numeric, 2),
+              round((greatest(ouv, clo) + amp * random() * 0.6)::numeric, 2),
+              round((greatest(2, least(ouv, clo) - amp * random() * 0.6))::numeric, 2),
+              round(clo::numeric, 2))
       on conflict (code, slot) do nothing;
 
       -- Une tendance s'épuise vite, et reste bornée : sans plafond,
