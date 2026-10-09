@@ -1668,3 +1668,19 @@ dialog.modal .form{margin-bottom:12px}
 /* Le coffre de la boutique. */
 .coffreico{width:22px;height:22px;color:var(--accent);display:block}
 .shopico .coffreico{width:21px;height:21px}
+
+/* L'écart entre le prix de base d'un objet et son prix du jour. */
+.shopecart{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:10.5px;font-weight:700;
+  letter-spacing:.05em;padding:1px 6px;border-radius:var(--pill);align-self:center;
+}
+.shopecart.bas{background:color-mix(in srgb, var(--up) 15%, transparent);color:var(--up)}
+.shopecart.haut{background:color-mix(in srgb, var(--down) 15%, transparent);color:var(--down)}
+.shoprow:has(.shopecart){grid-template-columns:auto 1fr auto auto}
+.shopindice{
+  margin:0 0 10px;padding:8px 11px;border-radius:var(--r-md);font-size:12.5px;
+  background:var(--surface-2);border:1px solid var(--line);
+}
+.shopindice.bas{border-color:color-mix(in srgb, var(--up) 35%, transparent)}
+.shopindice.haut{border-color:color-mix(in srgb, var(--down) 35%, transparent)}
+.shopindice a{color:var(--accent)}

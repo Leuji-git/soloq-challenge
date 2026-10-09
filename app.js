@@ -95,6 +95,7 @@ const S = {
   live: {},         // id joueur -> partie en cours chez Riot
   boosts: {},       // équipe -> bonus « double LP » en cours
   boxes: [],        // coffres lootés, ouverts ou non
+  bourse: null,     // l'indice de la Place, qui pilote les prix
   challenge: null,
   players: [],
   games: [],
@@ -144,7 +145,7 @@ if(!SUPABASE_URL || SUPABASE_URL.includes("xxxxxxxx") || SUPABASE_ANON_KEY.inclu
 =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv, tb, bx] = await Promise.all([
+  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv, tb, bx, bo] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at"),
@@ -156,7 +157,8 @@ async function loadAll(){
     sb.from("gold_ledger").select("*").order("at", { ascending:false }).limit(60),
     sb.from("live_games").select("*"),
     sb.from("team_boosts").select("*"),
-    sb.from("player_boxes").select("*")
+    sb.from("player_boxes").select("*"),
+    sb.from("bourse_resume").select("*").maybeSingle()
   ]);
   const err = ch.error || pl.error || gm.error || sn.error || pr.error || bt.error || st.error || pi.error;
   if(err){
@@ -189,6 +191,9 @@ async function loadAll(){
   S.live      = lv.error ? {} : Object.fromEntries((lv.data || []).map(r => [r.player_id, r]));
   S.boosts    = tb.error ? {} : Object.fromEntries((tb.data || []).map(r => [r.team, r]));
   S.boxes     = bx.error ? [] : (bx.data || []);
+  // bourse.sql n'est peut-être pas encore lancé : sans lui, l'indice
+  // vaut 1 000 et les prix ne bougent pas. Le site marche comme avant.
+  S.bourse    = bo.error ? null : (bo.data || null);
   S.ready = true;
   $("#errBox").hidden = true;
   render();
@@ -2830,7 +2835,25 @@ function renderRules(){
 /* Le rayon. Les prix vivent AUSSI dans boutique-v2.sql, qui seul
    décide : la page ne fait que les annoncer. Si tu changes l'un,
    change l'autre. */
+/* Les prix de base. Ceux des objets vivent en base, ceux-ci sont
+   fixes — les avantages d'équipe ne suivent pas la bourse, ce sont des
+   leviers d'équilibre, pas des marchandises. */
 const PRIX = { coffre: 500, lp25: 2000, boost: 5000, swap: 25000 };
+
+/* Le Commerce suit l'indice de la Place : il monte, tout coûte plus
+   cher ; il s'effondre, les rayons passent en solde.
+
+   Ces sensibilités doivent rester identiques à prix_indexe() en SQL :
+   c'est le serveur qui facture, la page ne fait qu'annoncer. */
+const SENSIBILITE = { commun:0.6, coffre:0.8, rare:1.0, legendaire:1.5 };
+
+function coefPrix(rarete){
+  const indice = S.bourse ? Number(S.bourse.indice) : 1000;
+  const k = SENSIBILITE[rarete] || 1;
+  return Math.max(0.55, Math.min(1.60, 1 + (indice / 1000 - 1) * k));
+}
+const prixIndexe = (base, rarete) =>
+  Math.max(5, Math.round(base * coefPrix(rarete) / 5) * 5);
 
 /* Le coffre de la boutique, dessiné comme celui du volet : même forme,
    même couvercle plat, pour qu'on reconnaisse ce qu'on achète. */
@@ -2906,7 +2929,9 @@ function renderShop(){
   const rayon = S.items.filter(i => connus.has(i.key) && i.active !== false);
 
   const ligneObjet = it => {
-    const prix = it.price || 0;
+    const base = it.price || 0;
+    const prix = prixIndexe(base, it.rarity);
+    const ecart = base ? (prix / base - 1) * 100 : 0;
     const possible = or >= prix;
     return '<div class="shoprow' + (possible ? "" : " court") + '">'
       + '<span class="shopico" data-tip="' + esc(infobulleObjet(it, true, null)) + '">' + esc(it.icon) + '</span>'
@@ -2914,7 +2939,13 @@ function renderShop(){
         + '<div class="shopsub">'
         + (it.target === "soi" ? "pour toi" : "sur un adversaire") + '</div></div>'
       + '<button type="button" class="btn sm" data-buy="' + esc(it.key) + '"'
-        + (possible ? "" : " disabled") + '>' + orFr(prix) + ' or</button>'
+        + (possible ? "" : " disabled")
+        + ' title="Prix de base ' + orFr(base) + ' or">'
+        + orFr(prix) + ' or</button>'
+      + (Math.abs(ecart) > 1.5
+          ? '<span class="shopecart ' + (ecart < 0 ? "bas" : "haut") + '">'
+            + (ecart < 0 ? "\u2212" : "+") + Math.abs(ecart).toFixed(0) + ' %</span>'
+          : '')
       + '</div>';
   };
 
@@ -2937,14 +2968,23 @@ function renderShop(){
 
   const enAttente = S.boxes.filter(b => b.player_id === moi.id && !b.opened_at).length;
 
+  const indiceP = S.bourse ? (coefPrix("rare") - 1) * 100 : 0;
+
   corps.innerHTML =
       '<h4>Au comptoir</h4>'
+    + (Math.abs(indiceP) > 1.5
+        ? '<p class="hint shopindice ' + (indiceP < 0 ? "bas" : "haut") + '">'
+          + (indiceP < 0
+              ? "La Place a chut\u00e9 : les rayons sont en <b>solde</b>."
+              : "La Place s'envole : <b>tout co\u00fbte plus cher</b>.")
+          + ' <a href="bourse.html">Voir la bourse</a></p>'
+        : '')
     + article(COFFRE_MINI, "Un coffre",
         enAttente
           ? "un objet au hasard \u00b7 <b>" + enAttente
             + (enAttente > 1 ? " en attente</b>" : " en attente</b>")
           : "un objet au hasard, \u00e0 ouvrir dans l'onglet Objets",
-        PRIX.coffre, 'data-box="1"', false)
+        prixIndexe(PRIX.coffre, "coffre"), 'data-box="1"', false)
     + '<h4>Tes objets</h4>'
     + (rayon.length
         ? ORDRE_RARETE.map(r => {

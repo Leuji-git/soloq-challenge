@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>La Place de Runeterra — SoloQ Challenge</title>
+<meta name="description" content="La bourse du SoloQ Challenge : dix sociétés cotées, trois niveaux de risque, et un marché que personne ne pilote.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2064%2064%27%3E%3Cpath%20d%3D%27M6%2050L22%2034l12%2010L58%2016%27%20fill%3D%27none%27%20stroke%3D%27%23D8B36A%27%20stroke-width%3D%276%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%2F%3E%3C%2Fsvg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&family=Outfit:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="bourse.css">
+</head>
+<body>
+
+<div class="desk">
+
+  <div class="deskhead">
+    <div class="deskname">PLACE <span>DE RUNETERRA</span></div>
+    <a class="btn ghost sm retour" href="index.html">← Le challenge</a>
+    <span class="etatmarche" id="etat"><i></i>CHARGEMENT</span>
+    <span class="horloge" id="horloge">—</span>
+    <div class="indice">
+      <span class="indicelbl">Indice</span>
+      <span class="indiceval" id="indiceVal">—</span>
+      <span class="pct" id="indicePct">—</span>
+    </div>
+  </div>
+
+  <div class="notice bad" id="errBox" hidden><span>⚠</span><div id="errTxt"></div></div>
+
+  <div class="tape"><div class="tapein" id="tape"></div></div>
+
+  <div class="grille">
+
+    <div class="carte">
+      <h3 class="cartetitre">Les sociétés <span id="nbValeurs"></span></h3>
+      <div class="filtres" role="group" aria-label="Filtrer par risque">
+        <button type="button" data-f="tout" aria-pressed="true">Toutes</button>
+        <button type="button" data-f="prudente" aria-pressed="false">Prudentes</button>
+        <button type="button" data-f="equilibree" aria-pressed="false">Équilibrées</button>
+        <button type="button" data-f="speculative" aria-pressed="false">Spéculatives</button>
+      </div>
+      <div class="valeurs" id="valeurs"></div>
+    </div>
+
+    <div class="carte">
+      <div class="chartbar">
+        <span class="chartnom" id="chartNom">—</span>
+        <span class="chartcours" id="chartCours">—</span>
+        <span class="pct" id="chartPct">—</span>
+        <div class="seg2" role="group" aria-label="Période">
+          <button type="button" data-vue="36" aria-pressed="true">3 h</button>
+          <button type="button" data-vue="144" aria-pressed="false">12 h</button>
+          <button type="button" data-vue="400" aria-pressed="false">Tout</button>
+        </div>
+      </div>
+      <div class="chartsub" id="chartSub">—</div>
+
+      <svg id="chandelles" viewBox="0 0 900 286" preserveAspectRatio="none" role="img" aria-label="Cours de la société"></svg>
+
+      <div class="stats">
+        <div class="stat"><div class="statlbl">Ouverture</div><div class="statval" id="sOuv">—</div></div>
+        <div class="stat"><div class="statlbl">Plus haut</div><div class="statval" id="sHaut">—</div></div>
+        <div class="stat"><div class="statlbl">Plus bas</div><div class="statval" id="sBas">—</div></div>
+        <div class="stat"><div class="statlbl">Amplitude</div><div class="statval" id="sAmp">—</div></div>
+      </div>
+
+      <div class="ordre">
+        <div class="ordrelig">
+          <input class="qte" id="qte" type="number" min="1" step="1" value="10" aria-label="Quantité">
+          <div class="qterap">
+            <button type="button" data-q="10">10</button>
+            <button type="button" data-q="50">50</button>
+            <button type="button" data-q="100">100</button>
+            <button type="button" data-q="max">Max</button>
+          </div>
+          <button type="button" class="bachat" id="bAchat">Acheter</button>
+          <button type="button" class="bvente" id="bVente">Vendre</button>
+        </div>
+        <div class="ordrenote" id="ordreNote">—</div>
+        <div class="log" id="ordreLog"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="carte" style="margin-bottom:12px">
+        <h3 class="cartetitre">Ton portefeuille <span id="pfQui"></span></h3>
+        <div class="pf">
+          <div class="pfhaut">
+            <div><div class="statlbl">Or disponible</div><div class="pfval" id="pfOr">—</div></div>
+            <div><div class="statlbl">Valeur totale</div><div class="pfval" id="pfTotal">—</div></div>
+            <div><div class="statlbl">Investi</div><div class="pfval" id="pfInv">—</div></div>
+            <div><div class="statlbl">Plus-value</div><div class="pfval" id="pfPl">—</div></div>
+          </div>
+          <div id="positions"></div>
+        </div>
+      </div>
+
+      <div class="carte">
+        <h3 class="cartetitre">Dépêches</h3>
+        <div class="depeches" id="depeches"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="carte" style="margin-top:12px">
+    <h3 class="cartetitre">Le Commerce <span id="indicePrix"></span></h3>
+    <div class="objets" id="objets"></div>
+    <p class="commnote" id="commNote">—</p>
+  </div>
+
+</div>
+
+<script type="module" src="bourse.js"></script>
+</body>
+</html>
