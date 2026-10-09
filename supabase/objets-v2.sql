@@ -17,9 +17,8 @@
 --  objets d'un catalogue de seize se font attendre très longtemps :
 --  à 1,7 %, un légendaire précis demande une quarantaine de coffres.
 --
---  Le prix ne suit PAS la rareté ici : l'Égide reste à 800 et l'Amnésie
---  à 1 800, comme demandé. Dis-le si tu veux les aligner sur la grille
---  (350 / 800 / 1 800).
+--  Le prix suit la rareté : 350 commun, 800 rare, 1 800 légendaire.
+--  L'Égide passe donc de 800 à 1 800, l'Amnésie de 1 800 à 800.
 --
 --  À lancer après egide.sql. Idempotent.
 -- =====================================================================
@@ -53,6 +52,16 @@ on conflict (key) do update set
 -- ---------------------------------------------------------------------
 update public.items set rarity = 'legendaire' where key = 'egide_contre';
 update public.items set rarity = 'rare'       where key = 'amnesie';
+
+/* Le prix suit la rarete, pour tout le catalogue d'un coup. Ecrire les
+   deux objets concernes aurait suffi aujourd'hui, mais une grille qui
+   se reapplique en entier ne peut pas se desynchroniser : changer une
+   rarete suffira toujours a remettre le prix d'aplomb. */
+update public.items set price = case rarity
+    when 'commun'     then 350
+    when 'rare'       then 800
+    when 'legendaire' then 1800
+    else price end;
 
 
 -- ---------------------------------------------------------------------
