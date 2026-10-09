@@ -1430,9 +1430,17 @@ const RARETES = { commun:"Commun", rare:"Rare", legendaire:"Légendaire" };
    la probabilité, c'est le serveur qui tire. */
 const POIDS_RARETE = { commun:60, rare:30, legendaire:10 };
 
-// Chance qu'un coffre ouvert tombe sur cet objet précis.
-function tauxDrop(it, items){
-  const poids = x => POIDS_RARETE[x.rarity] || 1;
+/* Un objet jamais obtenu sort trois fois plus souvent. Le tirage se
+   fait en SQL (draw_item) ; ce chiffre-ci doit rester le même, sinon
+   la fiche annonce une chance que le serveur ne donne pas. */
+const BOOST_INEDIT = 3;
+
+/* Chance qu'un coffre ouvert tombe sur cet objet précis, pour CE
+   visiteur : elle dépend de ce qu'il a déjà découvert, puisque les
+   inédits sont favorisés et prennent leur part aux autres. */
+function tauxDrop(it, items, decouverts){
+  const vu = cle => !decouverts || decouverts.has(cle);
+  const poids = x => (POIDS_RARETE[x.rarity] || 1) * (vu(x.key) ? 1 : BOOST_INEDIT);
   const total = items.reduce((a, x) => a + poids(x), 0);
   return total ? poids(it) / total * 100 : 0;
 }
@@ -1485,7 +1493,7 @@ function renderItems(){
   grille.innerHTML = S.items.map(it => {
     const connu = decouverts.has(it.key) || admin;
     const n = enStock[it.key] || 0;
-    const taux = formatTaux(tauxDrop(it, S.items));
+    const taux = formatTaux(tauxDrop(it, S.items, mine ? decouverts : null));
     const libre = (libres[it.key] || [])[0];
     const arme  = (armes[it.key]  || [])[0];
     return '<article class="item' + (connu ? "" : " locked") + ' ' + esc(it.rarity) + '">'
@@ -1497,7 +1505,11 @@ function renderItems(){
           + '<div class="itemtags">'
             + '<span class="rarity ' + esc(it.rarity) + '">' + esc(RARETES[it.rarity] || it.rarity) + '</span>'
             + '<span class="itemtarget">' + (it.target === "soi" ? "pour toi" : "sur un adversaire") + '</span>'
-            + '<span class="droprate" title="Chance de tomber sur cet objet a chaque coffre ouvert">' + taux + '</span>'
+            + '<span class="droprate" title="'
+              + (connu ? "Chance de tomber sur cet objet a chaque coffre ouvert"
+                       : "Chance de tomber sur cet objet a chaque coffre ouvert. Jamais obtenu : il sort "
+                         + BOOST_INEDIT + " fois plus souvent tant que tu ne l'as pas.")
+              + '">' + taux + '</span>'
           + '</div>'
         + '</div>'
         + (n > 1 ? '<span class="itemcount">×' + n + '</span>' : n === 1 ? '<span class="itemcount">×1</span>' : '')
@@ -2648,6 +2660,9 @@ function renderFeed(t){
         : x.kind === "renvoi"
         ? ["Malus renvoy\u00e9", "objet",
            "Une \u00c9gide du Contre t'a retourn\u00e9 ce que tu avais pos\u00e9 : le co\u00fbt est pour ton \u00e9quipe"]
+        : x.kind === "partage"
+        ? ["Part du duo", "objet",
+           "L'objet d'un co\u00e9quipier a rejailli sur toi : ces LP vont au score de ton \u00e9quipe"]
         : ["Bonus d'\u00e9quipe", "boutique",
            "Achet\u00e9 en boutique : ces LP comptent pour l'\u00e9quipe, pas au classement individuel"];
       // Un renvoi co\u00fbte : la pastille doit virer au rouge.

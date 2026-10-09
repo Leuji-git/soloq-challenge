@@ -107,6 +107,9 @@ function readMatch(match, puuid, byPuuid, myTeam){
     tourelles: me.turretKills,
     voles: me.objectivesStolen,
     cs: (me.totalMinionsKilled || 0) + (me.neutralMinionsKilled || 0),
+    // L'or amassé DANS la partie LoL, à ne pas confondre avec l'or du
+    // challenge : c'est ce que regarde la Pioche du Nain.
+    orPartie: me.goldEarned,
     /* Durée EXACTE, en minutes décimales. Surtout pas arrondie : une
        partie de 24 min 40 devenait « 25 min » et perdait le bonus de
        rapidité au moment précis où il était mérité. Le cas s'est
@@ -155,6 +158,9 @@ function splitLp(delta, games){
    Une donnée manquante (vieille partie sans `deaths`) ne doit jamais
    déclencher un malus : toutes les comparaisons échouent vers 0.     */
 // « 24 min 40 s » à partir de minutes décimales.
+// 10000 -> « 10 000 ». Une espace fine insécable, comme sur le site.
+const orFr = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+
 function dureeMatch(min){
   const t = Math.max(0, Math.round((Number(min) || 0) * 60));
   return Math.floor(t / 60) + " min " + String(t % 60).padStart(2, "0") + " s";
@@ -236,7 +242,7 @@ const EFFETS = {
     : { lp: -c.lp, note: "défaite amortie" },
 
   bottes_celerite: c => (c.win && c.dureeMin < 25)
-    ? { lp: 20, note: "victoire en " + dureeMatch(c.dureeMin) }
+    ? { lp: 30, note: "victoire en " + dureeMatch(c.dureeMin) }
     : { lp: 0, note: c.win ? "victoire trop longue (" + dureeMatch(c.dureeMin) + ")" : "partie perdue" },
 
   // Trois LP par partie, mais sur cinq parties : la ligne consommée en
@@ -261,9 +267,22 @@ const EFFETS = {
     return { lp: rendu, note: "d\u00e9faite pr\u00e9c\u00e9dente rattrap\u00e9e (\u2212" + perdu + " LP)" };
   },
 
+  /* Le Baron ne profite pas qu'à celui qui l'a armé : si la partie a
+     été jouée en duo allié, le coéquipier touche autant. Le partage est
+     porté par PARTAGEURS, plus bas — ici on ne rend que la part du
+     porteur. */
   baron_nashor: c => c.win
-    ? { lp: 25, note: "victoire" }
+    ? { lp: 30, note: (c.duo === "team" && c.partnerId) ? "victoire, partagée avec le duo" : "victoire" }
     : { lp: 0, note: "partie perdue" },
+
+  /* Elle ne rend pas de LP : son travail est en or, par DONNEURS_OR.
+     Le seuil se lit sur l'or amassé dans la partie LoL, pas sur celui
+     du challenge, et la défaite compte autant que la victoire. */
+  pioche_nain: c => (c.orPartie >= SEUIL_PIOCHE)
+    ? { lp: 0, note: orFr(c.orPartie) + " or amassés" }
+    : { lp: 0, note: c.orPartie === undefined
+          ? "or de la partie inconnu"
+          : orFr(c.orPartie) + " or amassés, sous le seuil" },
 
   // ---- malus, posés sur un adversaire ----
   marque_chasseur: c => (c.deaths >= 5)
@@ -274,7 +293,7 @@ const EFFETS = {
     ? { lp: -15, note: "partie jouée en duo" }
     : { lp: 0, note: "partie jouée en solo" },
 
-  brouillard: c => (c.vision < 15)
+  brouillard: c => (c.vision < 30)
     ? { lp: -15, note: "vision " + c.vision }
     : { lp: 0, note: c.vision === undefined ? "vision inconnue" : "vision " + c.vision },
 
@@ -294,9 +313,11 @@ const EFFETS = {
     ? { lp: -25, note: (c.champion || "champion") + " déjà joué" }
     : { lp: 0, note: (c.champion || "champion") + " inédit" },
 
+  /* Pile paie 30 LP à la cible. Face lui coûte 40 LP ET 1 000 or —
+     l'amende part en fumée, elle ne revient à personne (AMENDES). */
   pile_ou_face: c => c.win
     ? { lp: 30, note: "pile" }
-    : { lp: -30, note: "face" },
+    : { lp: -40, note: "face : −40 LP et −" + orFr(AMENDE_FACE) + " or" },
 
   // Ces deux-là ne rendent pas de LP : leur travail est ailleurs.
   bourse_coupee: c => c.win
@@ -317,8 +338,26 @@ const EFFETS = {
 
    « Égide du Contre » annule les malus de la partie quand on la gagne.
    Elle ne vaut donc rien si on perd : la poser, c'est parier sur soi. */
-const OR_VOLE = 150;
+const OR_VOLE = 500;
 const VOLEURS   = { bourse_coupee: c => !c.win ? OR_VOLE : 0 };
+
+// L'or qu'il faut amasser dans la partie LoL pour que la Pioche paie.
+const SEUIL_PIOCHE = 10000;
+const PRIME_PIOCHE = 500;
+// Ce que coûte un Pile ou Face tombé du mauvais côté, en plus des LP.
+const AMENDE_FACE  = 1000;
+
+/* L'or que certains objets font GAGNER à leur porteur, sans le prendre
+   à personne. À distinguer des voleurs, qui déplacent l'or. */
+const DONNEURS_OR = { pioche_nain: c => (c.orPartie >= SEUIL_PIOCHE ? PRIME_PIOCHE : 0) };
+
+/* L'or qu'un malus fait PERDRE à sa cible sans que personne le touche.
+   Une amende, pas un vol : elle disparaît. */
+const AMENDES = { pile_ou_face: c => (!c.win ? AMENDE_FACE : 0) };
+
+/* Les objets dont l'effet rejaillit sur le coéquipier, quand la partie
+   a été jouée en duo allié. La valeur est ce qu'il touche. */
+const PARTAGEURS = { baron_nashor: 30 };
 
 /* Les malus dont les LP retirés à la victime ne s'évaporent pas : ils
    partent au total global de celui qui a posé l'objet, donc au score de
@@ -368,6 +407,30 @@ function resoudreObjets(armes, ctx){
       : "aucun malus à renvoyer";
   }
 
+  /* Ce que le duo allié touche en plus. On ne partage que si l'objet a
+     réellement donné quelque chose : un Baron sur une défaite ne vaut
+     rien à personne. */
+  const partages = [];
+  appliques.forEach(o => {
+    const part = PARTAGEURS[o.itemKey];
+    if(!part || o.lp <= 0) return;
+    if(ctx.duo !== "team" || !ctx.partnerId) return;
+    partages.push({ vers: ctx.partnerId, lp: part, itemKey: o.itemKey });
+  });
+
+  // L'or gagné et l'or perdu : les primes vont au porteur, les amendes
+  // partent en fumée.
+  const primes = [], amendes = [];
+  appliques.forEach(o => {
+    const f = DONNEURS_OR[o.itemKey];
+    const g = f ? f(ctx) : 0;
+    if(g > 0) primes.push({ vers: o.owner, or: g, itemKey: o.itemKey });
+
+    const h = AMENDES[o.itemKey];
+    const d = h ? h(ctx) : 0;
+    if(d > 0) amendes.push({ de: ctx.cibleId, or: d, itemKey: o.itemKey });
+  });
+
   // Les LP de péage : qui encaisse, et combien.
   const transferts = [];
   appliques.forEach(o => {
@@ -383,7 +446,7 @@ function resoudreObjets(armes, ctx){
   });
 
   return {
-    appliques, vols, transferts, renvois,
+    appliques, vols, transferts, renvois, partages, primes, amendes,
     reportes: tri.filter(o => gardes.indexOf(o) < 0).map(o => o.id),
     total: appliques.reduce((a, o) => a + o.lp, 0)
   };
@@ -609,6 +672,7 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
     {
       win: g.win, lp: lpNet, duo: g.duo, champion: g.champion,
       deaths: g.deaths, vision: g.vision, dureeMin: g.dureeMin,
+      orPartie: g.orPartie, partnerId: g.partnerId,
       lpPrecedent,
       cibleId: joueur.id,
       championsJoues: (passees || []).map(x => x.champion).filter(Boolean)
@@ -643,6 +707,36 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
         restantes: reste
       });
     }
+  }
+
+  /* La part du coéquipier. Une ligne à lp = 0 et lp_items positif à son
+     nom : comme tout ce qui vient d'un objet, ça nourrit le score de son
+     équipe sans toucher son classement individuel. */
+  for(const p of (r.partages || [])){
+    await db.from("games").insert({
+      player_id: p.vers, lp: 0, lp_items: clampLp(p.lp),
+      win: true, duo: "solo", kind: "partage",
+      match_id: g.matchId + "-partage",
+      played_on: parisDate(g.end), created_at: new Date(g.end).toISOString()
+    });
+  }
+
+  // Les primes en or : le porteur touche, personne ne paie.
+  for(const p of (r.primes || [])){
+    await db.rpc("credit_gold", {
+      p_player: p.vers, p_amount: p.or,
+      p_raison: "prime d'objet", p_match: g.matchId + "-prime"
+    });
+  }
+
+  /* Les amendes : la cible paie, personne ne reçoit. credit_gold borne
+     le solde à zéro, donc une amende plus lourde que la bourse ne la
+     fait pas passer dans le rouge. */
+  for(const a of (r.amendes || [])){
+    await db.rpc("credit_gold", {
+      p_player: a.de, p_amount: -a.or,
+      p_raison: "amende d'objet", p_match: g.matchId + "-amende"
+    });
   }
 
   /* Les malus renvoyés par l'Égide. Ils ne touchent pas le classement
@@ -684,7 +778,8 @@ async function appliquerObjets(joueur, g, lpNet, parCle){
 
   return { lp: clampLp(r.total), detail: r.appliques,
            vols: r.vols || [], transferts: r.transferts || [],
-           renvois: r.renvois || [] };
+           renvois: r.renvois || [], partages: r.partages || [],
+           primes: r.primes || [], amendes: r.amendes || [] };
 }
 
 async function isAdmin(uid){
@@ -1242,6 +1337,7 @@ async function recalculer(user, body){
   const ctx = {
     win: g.win, lp: jeu.lp, duo: g.duo, champion: g.champion,
     deaths: g.deaths, vision: g.vision, dureeMin: g.dureeMin,
+    orPartie: g.orPartie, partnerId: g.partnerId,
     lpPrecedent: avant && avant.length ? avant[0].lp : 0,
     championsJoues: (passees || []).map(x => x.champion).filter(Boolean)
   };
