@@ -221,13 +221,31 @@ function rendreChandelles(){
   const pas = (W - PL - PR) / h.length;
   const larg = Math.max(1.5, pas * .62);
 
+  /* Le graphique remplit la largeur quelle qu'elle soit
+     (preserveAspectRatio « none ») : une unité horizontale ne vaut donc
+     pas une unité verticale à l'écran. Les bougies et les traits s'en
+     moquent — ce sont des rectangles — mais un cercle devient un ovale
+     et une photo de profil se retrouve écrasée.
+
+     ratioPixel dit de combien il faut étirer un dessin horizontalement
+     pour qu'il retombe rond à l'écran. Il vaut 1 quand la largeur du
+     cadre est exactement celle du repère. */
+  const boite = svg.getBoundingClientRect();
+  const ratioPixel = (boite.width > 0 && boite.height > 0)
+    ? (boite.height / H) / (boite.width / W) : 1;
+  // Un groupe qui annule la déformation autour de son propre axe.
+  const droit = (x, dedans) =>
+    '<g transform="translate(' + x.toFixed(1) + ' 0) scale(' + ratioPixel.toFixed(4)
+    + ' 1) translate(' + (-x).toFixed(1) + ' 0)">' + dedans + '</g>';
+
   let out = "";
   for(let i = 0; i <= 4; i++){
     const p = (lo - pad) + ((hi + pad) - (lo - pad)) * i / 4, y = Y(p);
     out += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - PR) + '" y2="' + y.toFixed(1)
         +  '" stroke="var(--line-soft)" stroke-width="1" opacity=".55"/>'
-        +  '<text x="' + (W - PR + 8) + '" y="' + (y + 4).toFixed(1) + '" fill="var(--muted)"'
-        +  ' font-family="Barlow Semi Condensed" font-size="11">' + p.toFixed(1) + '</text>';
+        +  droit(W - PR + 8,
+             '<text x="' + (W - PR + 8) + '" y="' + (y + 4).toFixed(1) + '" fill="var(--muted)"'
+             + ' font-family="Barlow Semi Condensed" font-size="11">' + p.toFixed(1) + '</text>');
   }
   h.forEach((c, i) => {
     const x = PL + i * pas + pas / 2;
@@ -243,7 +261,7 @@ function rendreChandelles(){
   out += '<line x1="' + PL + '" y1="' + Y(der.c).toFixed(1) + '" x2="' + (W - PR) + '" y2="' + Y(der.c).toFixed(1)
       +  '" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 3" opacity=".75"/>';
 
-  out += rendreAchats(parSlot, h, PL, pas, H, PB, Y);
+  out += rendreAchats(parSlot, h, PL, pas, H, PB, Y, droit);
   svg.innerHTML = out;
 
   const p = variation(selection);
@@ -272,7 +290,7 @@ function rendreChandelles(){
 
    Au-delà de trois acheteurs sur le même créneau, on compte au lieu
    d'empiler : la bande deviendrait une bouillie de vignettes. */
-function rendreAchats(parSlot, h, PL, pas, H, PB, Y){
+function rendreAchats(parSlot, h, PL, pas, H, PB, Y, droit){
   if(!Object.keys(parSlot).length) return "";
   const R = 7.5, yBande = H - PB + 17;
   let out = "";
@@ -299,41 +317,45 @@ function rendreAchats(parSlot, h, PL, pas, H, PB, Y){
         + a.nb + " × " + esc(a.code)
         + (moi ? " pour " + orFr(a.montant) + " or" : "");
 
-      out += '<g><title>' + titre + '</title>';
+      let vign = '<title>' + titre + '</title>';
       if(qui.avatar){
-        out += '<defs><clipPath id="' + cle + '"><circle cx="' + cx.toFixed(1)
+        /* « slice » recadre au lieu d'étirer : une photo qui ne serait
+           pas carrée est rognée, jamais déformée. Et le groupe
+           redresseur fait que ce carré en est vraiment un à l'écran. */
+        vign += '<defs><clipPath id="' + cle + '"><circle cx="' + cx.toFixed(1)
             +  '" cy="' + yBande + '" r="' + R + '"/></clipPath></defs>'
             +  '<image href="' + esc(qui.avatar) + '" x="' + (cx - R).toFixed(1)
             +  '" y="' + (yBande - R) + '" width="' + (R * 2) + '" height="' + (R * 2)
             +  '" clip-path="url(#' + cle + ')" preserveAspectRatio="xMidYMid slice"/>';
       }else{
-        out += '<circle cx="' + cx.toFixed(1) + '" cy="' + yBande + '" r="' + R
+        vign += '<circle cx="' + cx.toFixed(1) + '" cy="' + yBande + '" r="' + R
             +  '" fill="var(--surface-3)"/>'
             +  '<text x="' + cx.toFixed(1) + '" y="' + (yBande + 3.5)
             +  '" text-anchor="middle" font-size="9" fill="var(--muted)"'
             +  ' font-family="Barlow Semi Condensed">' + esc((qui.nom || "?")[0]) + '</text>';
       }
-      out += '<circle cx="' + cx.toFixed(1) + '" cy="' + yBande + '" r="' + R
+      vign += '<circle cx="' + cx.toFixed(1) + '" cy="' + yBande + '" r="' + R
           +  '" fill="none" stroke="' + (moi ? "var(--accent)" : "var(--up)")
           +  '" stroke-width="' + (moi ? 2 : 1.3) + '" opacity=".95"/>';
 
       // Le montant n'apparaît que sous TON achat.
       if(moi){
-        out += '<text x="' + cx.toFixed(1) + '" y="' + (yBande + R + 10)
+        vign += '<text x="' + cx.toFixed(1) + '" y="' + (yBande + R + 10)
             +  '" text-anchor="middle" font-size="9.5" fill="var(--accent)"'
             +  ' font-family="Barlow Semi Condensed">' + orFr(a.montant) + '</text>';
       }
-      out += '</g>';
+      out += droit(cx, vign);
     });
 
     if(liste.length > 3){
       const cx = x + (montre.length - (montre.length - 1) / 2) * 17;
-      out += '<g><title>' + (liste.length - 3) + ' autre(s) acheteur(s)</title>'
-          +  '<circle cx="' + cx.toFixed(1) + '" cy="' + yBande + '" r="' + R
-          +  '" fill="var(--surface-3)" stroke="var(--line)" stroke-width="1"/>'
-          +  '<text x="' + cx.toFixed(1) + '" y="' + (yBande + 3.5)
-          +  '" text-anchor="middle" font-size="8.5" fill="var(--ink-2)"'
-          +  ' font-family="Barlow Semi Condensed">+' + (liste.length - 3) + '</text></g>';
+      out += droit(cx,
+          '<title>' + (liste.length - 3) + ' autre(s) acheteur(s)</title>'
+          + '<circle cx="' + cx.toFixed(1) + '" cy="' + yBande + '" r="' + R
+          + '" fill="var(--surface-3)" stroke="var(--line)" stroke-width="1"/>'
+          + '<text x="' + cx.toFixed(1) + '" y="' + (yBande + 3.5)
+          + '" text-anchor="middle" font-size="8.5" fill="var(--ink-2)"'
+          + ' font-family="Barlow Semi Condensed">+' + (liste.length - 3) + '</text>');
     }
   });
   return out;
@@ -687,6 +709,14 @@ function tutoDejaVu(){
 
 /* ---------------- démarrage ---------------- */
 function brancher(){
+  /* Le rapport entre les deux échelles dépend de la largeur du cadre :
+     il faut redessiner quand elle change, sinon les vignettes restent
+     corrigées pour l'ancienne taille. */
+  let minuteur = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(minuteur);
+    minuteur = setTimeout(rendreChandelles, 150);
+  });
   $("#bAchat").addEventListener("click", () => passer("bourse_acheter", "Achat de"));
   $("#bVente").addEventListener("click", () => passer("bourse_vendre", "Vente de"));
   $("#qte").addEventListener("input", rendreOrdre);
