@@ -1424,6 +1424,8 @@ function renderSyncStatus(){
    description mystérieuse. Une fois découvert, l'effet reste visible.
 ------------------------------------------------------------------ */
 const RARETES = { commun:"Commun", rare:"Rare", legendaire:"Légendaire" };
+// Du plus courant au plus rare — donc du moins cher au plus cher.
+const ORDRE_RARETE = ["commun", "rare", "legendaire"];
 
 /* Mêmes poids que le tirage de la fonction « riot » (POIDS_RARETE).
    Si tu les changes là-bas, change-les ici : le site ne fait qu'afficher
@@ -2909,8 +2911,7 @@ function renderShop(){
     return '<div class="shoprow' + (possible ? "" : " court") + '">'
       + '<span class="shopico" data-tip="' + esc(infobulleObjet(it, true, null)) + '">' + esc(it.icon) + '</span>'
       + '<div class="shoptext"><div class="shopname">' + esc(it.name) + '</div>'
-        + '<div class="shopsub"><span class="rarity ' + esc(it.rarity) + '">'
-        + esc(RARETES[it.rarity] || it.rarity) + '</span> · '
+        + '<div class="shopsub">'
         + (it.target === "soi" ? "pour toi" : "sur un adversaire") + '</div></div>'
       + '<button type="button" class="btn sm" data-buy="' + esc(it.key) + '"'
         + (possible ? "" : " disabled") + '>' + orFr(prix) + ' or</button>'
@@ -2946,7 +2947,20 @@ function renderShop(){
         PRIX.coffre, 'data-box="1"', false)
     + '<h4>Tes objets</h4>'
     + (rayon.length
-        ? rayon.map(ligneObjet).join("")
+        ? ORDRE_RARETE.map(r => {
+            const lot = rayon.filter(i => i.rarity === r);
+            if(!lot.length) return "";
+            /* Le prix est le même pour toute une rareté : on l'annonce
+               une fois en tête de rayon plutôt que de le répéter sur
+               chaque bouton — ils le portent quand même, c'est là qu'on
+               clique. */
+            return '<div class="shoprare">'
+              + '<span class="rarity ' + esc(r) + '">' + esc(RARETES[r] || r) + '</span>'
+              + '<span class="shoprarecount">' + lot.length
+                + (lot.length > 1 ? " objets" : " objet") + '</span>'
+              + '</div>'
+              + lot.map(ligneObjet).join("");
+          }).join("")
         : '<div class="empty">Tu ne peux acheter qu\'un objet que tu as déjà découvert. Ouvre un coffre pour en découvrir un.</div>')
     + '<h4>Pour ton équipe</h4>'
     + article("\u{1F4C8}", "25 LP", "cr\u00e9dit\u00e9s \u00e0 ton \u00e9quipe", PRIX.lp25, 'data-lp="25"', false)

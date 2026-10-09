@@ -971,6 +971,18 @@ dialog.modal .form{margin-bottom:12px}
   color:var(--muted);
 }
 #shopBody h4:first-child{margin-top:4px}
+
+/* Le titre d'un rayon de la boutique : la pastille de rareté suffit à
+   dire de quoi il s'agit, et sa couleur à séparer les rayons. */
+.shoprare{
+  display:flex;align-items:center;gap:9px;
+  margin:14px 0 7px;padding-bottom:6px;border-bottom:1px solid var(--line);
+}
+.shoprare:first-of-type{margin-top:8px}
+.shoprarecount{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;color:var(--muted);
+  letter-spacing:.04em;
+}
 #shopBody .hint{margin:9px 0 0;font-size:12.5px}
 
 .shoprow{
