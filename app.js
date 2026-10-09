@@ -2789,7 +2789,8 @@ const RULES = [
   { t:"Les objets", h:
     "<p><strong>Gagne une partie</strong> : un <strong>coffre</strong> tombe. Solo, duo allié, duo adverse — toute victoire compte.</p>"
   + "<p>Le coffre ne dit pas ce qu'il contient : l'objet n'est tiré qu'au moment où tu l'ouvres, dans l'onglet <strong>Objets</strong>. Rien ne dort en base avant, il n'y a donc rien à espionner.</p>"
-  + "<p>Trois, cinq et sept parties dans la même journée donnent chacune un coffre de plus et de l'or — deux coffres pour la septième. Et le Commerce en vend à 500 or.</p>"
+  + "<p>Trois, cinq et sept parties dans la même journée donnent chacune un coffre de plus et de l'or — deux coffres pour la septième. Et le Commerce en vend un aussi.</p>"
+  + "<p><strong>Les prix bougent.</strong> Ils suivent l'indice de la Place — un krach met les rayons en solde — et la <strong>demande</strong> : un objet que tout le monde achète monte, un objet délaissé redescend. Survole un prix pour voir d'où vient l'écart.</p>"
   + "<p>Un objet est un <strong>bonus</strong> que tu poses sur toi, ou un <strong>malus</strong> que tu poses sur un adversaire.</p>"
   + "<p><strong>Il faut le verrouiller avant de jouer.</strong> Tu choisis l'objet, tu choisis la cible, et il agira sur la <strong>prochaine partie de cette personne</strong> — où qu'elle joue, avec qui qu'elle veuille. Tu n'as pas besoin d'être dans sa partie, ni même d'être connecté. Que sa condition soit remplie ou non, l'objet est consommé.</p>"
   + "<p>Sur une même partie, au plus <strong>un bonus et trois malus</strong> font effet. Les objets verrouillés en trop restent en réserve, intacts.</p>"
@@ -2854,6 +2855,46 @@ function coefPrix(rarete){
 }
 const prixIndexe = (base, rarete) =>
   Math.max(5, Math.round(base * coefPrix(rarete) / 5) * 5);
+
+/* La demande : un objet que tout le monde achète monte, un objet que
+   personne ne prend redescend.
+
+   Les mêmes constantes que prix_demande() en SQL — c'est le serveur qui
+   facture, la page ne fait qu'annoncer. Si tu changes l'une, change
+   l'autre.
+
+   Le lissage de 2 évite qu'un premier achat fasse doubler le prix :
+   un achat ne prouve rien. L'exposant 0,4 écrase les écarts, il faut
+   beaucoup d'achats pour peser. Et les bornes empêchent qu'un objet
+   devienne inachetable parce que trois personnes ont eu la même idée. */
+const DEMANDE = { fenetre: 7 * 864e5, lissage: 2, exposant: 0.4, min: 0.80, max: 1.40 };
+
+/* On ne compte que les ACHATS, jamais le butin : un objet tombé d'un
+   coffre ne dit rien de ce que les joueurs veulent, il dit ce que le
+   hasard leur a donné. Un achat porte le matricule « shop-… ». */
+function achatsRecents(){
+  const limite = Date.now() - DEMANDE.fenetre;
+  const n = {};
+  S.items.forEach(i => { n[i.key] = 0; });
+  S.inventory.forEach(r => {
+    if(n[r.item_key] === undefined) return;
+    if(!String(r.source_match || "").startsWith("shop-")) return;
+    if(new Date(r.obtained_at).getTime() <= limite) return;
+    n[r.item_key]++;
+  });
+  return n;
+}
+
+function coefDemande(cle, n){
+  const vals = Object.values(n);
+  const moy = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  return Math.max(DEMANDE.min, Math.min(DEMANDE.max,
+    Math.pow(((n[cle] || 0) + DEMANDE.lissage) / (moy + DEMANDE.lissage), DEMANDE.exposant)));
+}
+
+// Le prix du jour : les deux coefficients se multiplient.
+const prixObjet = (it, n) =>
+  Math.max(5, Math.round(prixIndexe(it.price || 0, it.rarity) * coefDemande(it.key, n) / 5) * 5);
 
 /* Le coffre de la boutique, dessiné comme celui du volet : même forme,
    même couvercle plat, pour qu'on reconnaisse ce qu'on achète. */
@@ -2928,11 +2969,21 @@ function renderShop(){
   const connus = new Set(S.inventory.filter(r => r.player_id === moi.id).map(r => r.item_key));
   const rayon = S.items.filter(i => connus.has(i.key) && i.active !== false);
 
+  // Compté une fois pour tout le rayon, pas une fois par ligne.
+  const nAchats = achatsRecents();
+
   const ligneObjet = it => {
     const base = it.price || 0;
-    const prix = prixIndexe(base, it.rarity);
+    const prix = prixObjet(it, nAchats);
     const ecart = base ? (prix / base - 1) * 100 : 0;
     const possible = or >= prix;
+    const cb = coefPrix(it.rarity), cd = coefDemande(it.key, nAchats);
+    const vendus = nAchats[it.key] || 0;
+    // Le badge dit l'écart total ; l'infobulle dit d'où il vient.
+    const pourquoi = "Prix de base " + orFr(base) + " or"
+      + " \u00b7 bourse " + (cb >= 1 ? "+" : "\u2212") + Math.abs((cb - 1) * 100).toFixed(0) + " %"
+      + " \u00b7 demande " + (cd >= 1 ? "+" : "\u2212") + Math.abs((cd - 1) * 100).toFixed(0) + " %"
+      + " (" + vendus + " achat" + (vendus > 1 ? "s" : "") + " sur 7 jours)";
     return '<div class="shoprow' + (possible ? "" : " court") + '">'
       + '<span class="shopico" data-tip="' + esc(infobulleObjet(it, true, null)) + '">' + esc(it.icon) + '</span>'
       + '<div class="shoptext"><div class="shopname">' + esc(it.name) + '</div>'
@@ -2940,7 +2991,7 @@ function renderShop(){
         + (it.target === "soi" ? "pour toi" : "sur un adversaire") + '</div></div>'
       + '<button type="button" class="btn sm" data-buy="' + esc(it.key) + '"'
         + (possible ? "" : " disabled")
-        + ' title="Prix de base ' + orFr(base) + ' or">'
+        + ' title="' + esc(pourquoi) + '">'
         + orFr(prix) + ' or</button>'
       + (Math.abs(ecart) > 1.5
           ? '<span class="shopecart ' + (ecart < 0 ? "bas" : "haut") + '">'
