@@ -80,6 +80,16 @@
           <button type="button" class="bachat" id="bAchat">Acheter</button>
           <button type="button" class="bvente" id="bVente">Vendre</button>
         </div>
+
+        <!-- Parier à la baisse est une autre intention qu'acheter : sa
+             propre ligne, et un libellé qui le dit, pour qu'on ne clique
+             pas dessus par mégarde. -->
+        <div class="ordrebaisse" hidden>
+          <span class="obl">À la baisse</span>
+          <button type="button" class="bdec" id="bDecouvert">Vendre à découvert</button>
+          <button type="button" class="brach" id="bRachat">Racheter</button>
+        </div>
+
         <div class="ordrenote" id="ordreNote">—</div>
         <div class="log" id="ordreLog"></div>
       </div>

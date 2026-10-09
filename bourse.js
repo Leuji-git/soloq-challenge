@@ -42,19 +42,25 @@ const MAX_JOUR = 12;          // ordres par jour et par joueur
 const S = {
   session:null, moi:null, equipes:{ a:"Équipe A", b:"Équipe B" },
   societes:[], cours:{}, positions:[], depeches:[], etat:null, objets:[], ordresJour:0,
-  qui:{}, achats:[]
+  qui:{}, achats:[], shorts:[], etats:{}, v2:false
 };
 let selection = null, fenetre = 36, filtre = "tout";
 
 /* ---------------- chargement ---------------- */
 async function charger(){
-  const [so, et, po, de, ch, it] = await Promise.all([
+  const [so, et, po, de, ch, it, sh, es] = await Promise.all([
     sb.from("bourse_societes").select("*").eq("actif", true).order("sort"),
     sb.from("bourse_etat").select("*").eq("id", 1).maybeSingle(),
     sb.from("bourse_positions").select("*"),
     sb.from("bourse_depeches").select("*").order("at", { ascending:false }).limit(40),
     sb.from("challenge").select("team_a_name,team_b_name").eq("id", 1).maybeSingle(),
-    sb.from("items").select("key,name,icon,rarity,price").eq("active", true).order("sort")
+    sb.from("items").select("key,name,icon,rarity,price").eq("active", true).order("sort"),
+    /* Les positions à découvert sont publiques, comme les autres : voir
+       qui parie contre quoi fait partie du jeu. Les états, eux, passent
+       par une vue qui ne dit que le déjà-annoncé — gel en cours, bilan
+       déposé. Ce qui VIENT n'est lisible nulle part. */
+    sb.from("bourse_shorts").select("*"),
+    sb.from("bourse_etats").select("*")
   ]);
 
   if(so.error){
@@ -67,6 +73,14 @@ async function charger(){
   S.positions = po.error ? [] : (po.data || []);
   S.depeches = de.error ? [] : (de.data || []);
   S.objets = it.error ? [] : (it.data || []);
+  /* Le site se déploie tout seul au push, la base se met à jour à la
+     main : entre les deux, bourse_shorts et bourse_etats n'existent pas
+     encore. Plutôt que d'afficher des boutons qui répondraient « fonction
+     introuvable », on cache simplement la vente à découvert tant que le
+     serveur ne la porte pas. L'ordre du déploiement n'a plus d'importance. */
+  S.v2 = !sh.error && !es.error;
+  S.shorts = sh.error ? [] : (sh.data || []);
+  S.etats = es.error ? {} : Object.fromEntries((es.data || []).map(e => [e.code, e]));
   if(ch.data) S.equipes = { a: ch.data.team_a_name, b: ch.data.team_b_name };
 
   /* Qui est qui, et son avatar Discord. On en a besoin pour poser les
@@ -139,10 +153,16 @@ function veille(c){
 }
 const variation = c => (cours(c) / veille(c) - 1) * 100;
 
+/* L'indice, calculé comme bourse_indice() en SQL — et comme elle, il
+   SAUTE LES SOCIÉTÉS RADIÉES. Trois titres à 1 au lieu de 150 feraient
+   perdre trente pour cent à la moyenne et mettraient le Commerce en
+   solde permanent : ce n'est pas un marché en berne, c'est une moyenne
+   qui traîne des cadavres. Le déclin, lui, compte toujours. */
 function indice(){
-  if(!S.societes.length) return 1000;
-  return S.societes.reduce((a, s) => a + cours(s.code) / Number(s.prix_base), 0)
-    / S.societes.length * 1000;
+  const vivantes = S.societes.filter(s => !etatSoc(s.code).failli);
+  if(!vivantes.length) return 1000;
+  return vivantes.reduce((a, s) => a + cours(s.code) / Number(s.prix_base), 0)
+    / vivantes.length * 1000;
 }
 function coefPrix(rarete){
   const k = SENSIBILITE[rarete] || 1;
@@ -153,6 +173,17 @@ const prixIndexe = (base, rarete) =>
 
 const maPosition = c => S.moi
   ? S.positions.find(p => p.player_id === S.moi.id && p.code === c) : null;
+const monShort = c => S.moi
+  ? S.shorts.find(p => p.player_id === S.moi.id && p.code === c) : null;
+
+/* Gelée, coulée, ou normale. Si la vue n'existe pas encore (bourse-v2
+   pas lancé), tout répond « non » et la page marche comme avant. */
+const etatSoc = c => S.etats[c] || { gelee:false, failli:false, opa_fin:null };
+
+/* Ce que vaut un découvert si on le rachète maintenant. La garantie
+   couvrait la valeur vendue ; elle revient augmentée de la baisse,
+   diminuée de la hausse, et jamais négative. Même formule qu'en SQL. */
+const valeurShort = sh => Math.max(0, sh.nb * (2 * Number(sh.prix_vente) - cours(sh.code)));
 
 /* ---------------- rendu ---------------- */
 function badgeRisque(r){
@@ -174,7 +205,8 @@ function rendreValeurs(){
   const liste = S.societes.filter(s => filtre === "tout" || s.risque === filtre);
   $("#nbValeurs").textContent = liste.length + " cotées";
   $("#valeurs").innerHTML = liste.map(s => {
-    const p = variation(s.code), pos = maPosition(s.code);
+    const p = variation(s.code), pos = maPosition(s.code), crt = monShort(s.code);
+    const e = etatSoc(s.code);
     return '<div class="valeur' + (s.code === selection ? " on" : "") + '" data-code="' + esc(s.code) + '">'
       + '<span><span class="vhaut">'
         + '<span class="vcode" style="background:' + (s.lien ? COULEUR[s.lien] : "#77849A") + '">'
@@ -185,6 +217,9 @@ function rendreValeurs(){
           + (s.lien ? '<span class="lien"><i style="background:' + COULEUR[s.lien] + '"></i>'
                       + esc(S.equipes[s.lien]) + '</span>' : '<span>indépendante</span>')
           + (pos ? '<span style="color:var(--accent)">' + pos.nb + ' en poche</span>' : '')
+          + (crt ? '<span class="etiq court">' + crt.nb + ' à découvert</span>' : '')
+          + (e.failli ? '<span class="etiq fail">bilan déposé</span>'
+             : e.gelee ? '<span class="etiq gel">gelée</span>' : '')
         + '</span></span>'
       + '<span class="vdroite"><span class="vcours">' + cours(s.code).toFixed(1) + '</span><br>'
         + '<span class="pct ' + (p >= 0 ? "up" : "down") + '">' + pctFr(p) + '</span></span>'
@@ -371,6 +406,7 @@ function rendrePortefeuille(){
     return;
   }
   const miennes = S.positions.filter(p => p.player_id === S.moi.id);
+  const miensCourts = S.shorts.filter(p => p.player_id === S.moi.id);
   let valeur = 0, investi = 0;
   const lignes = miennes.map(pos => {
     const s = soc(pos.code);
@@ -388,7 +424,29 @@ function rendrePortefeuille(){
       + '</div>';
   }).filter(Boolean);
 
-  $("#positions").innerHTML = lignes.length ? lignes.join("")
+  /* Les découverts, comptés dans les mêmes totaux. L'« investi » est la
+     garantie bloquée, la « valeur » ce qu'on récupèrerait en rachetant
+     tout de suite : la plus-value tombe juste sans cas particulier. */
+  const lignesCourtes = miensCourts.map(sh => {
+    const so2 = soc(sh.code);
+    if(!so2) return "";
+    const val = valeurShort(sh), inv = sh.garantie;
+    valeur += val; investi += inv;
+    const pl = val - inv, plp = inv ? (val / inv - 1) * 100 : 0;
+    const seuil = Number(sh.prix_vente) * 2;
+    return '<div class="ligne court">'
+      + '<span class="vcode" style="background:var(--down)">' + esc(sh.code) + '</span>'
+      + '<span><span class="lnom">' + sh.nb + ' × ' + esc(so2.nom)
+        + ' <span class="etiq court">découvert</span></span><br>'
+        + '<span class="lsub">vendu à ' + Number(sh.prix_vente).toFixed(1)
+        + ' · garantie ' + orFr(inv) + ' or · liquidé à ' + seuil.toFixed(1) + '</span></span>'
+      + '<span class="lpl pct ' + (pl >= 0 ? "up" : "down") + '">' + (pl >= 0 ? "+" : "−")
+        + orFr(Math.abs(pl)) + '<br><span style="font-size:11px">' + pctFr(plp) + '</span></span>'
+      + '</div>';
+  }).filter(Boolean);
+
+  const toutes = lignes.concat(lignesCourtes);
+  $("#positions").innerHTML = toutes.length ? toutes.join("")
     : '<div class="empty" style="font-size:12.5px">Aucune position. Achète une société pour commencer.</div>';
 
   const pl = valeur - investi, or = S.moi.gold || 0;
@@ -413,40 +471,80 @@ function rendreDepeches(){
    libre. Le serveur refusera de toute façon : ceci ne fait que le dire
    avant le clic. */
 function verrouRestant(pos){
-  if(!pos || !pos.achete_le) return 0;
-  const fin = new Date(pos.achete_le).getTime() + DETENTION_MIN * 60000;
+  const quand = pos && (pos.achete_le || pos.ouvert_le);
+  if(!quand) return 0;
+  const fin = new Date(quand).getTime() + DETENTION_MIN * 60000;
   return Math.max(0, Math.ceil((fin - Date.now()) / 60000));
 }
 
 function rendreOrdre(){
+  // Avant le retour anticipé : sans société sélectionnée, la ligne
+  // resterait visible alors que le serveur ne la porte pas.
+  $(".ordrebaisse").hidden = !S.v2;
   const s = soc(selection);
   if(!s) return;
   const q = Math.max(0, parseInt($("#qte").value, 10) || 0);
   const prix = cours(selection);
   const cout = Math.round(prix * q), frais = Math.max(1, Math.round(cout * FRAIS));
-  const pos = maPosition(selection);
+  const pos = maPosition(selection), crt = monShort(selection);
   const or = S.moi ? (S.moi.gold || 0) : 0;
   const reste = Math.max(0, MAX_JOUR - S.ordresJour);
-  const verrou = verrouRestant(pos);
+  const verrou = verrouRestant(pos), verrouC = verrouRestant(crt);
+  const e = etatSoc(selection);
 
-  $("#bAchat").disabled = !S.moi || !q || cout + frais > or || !reste;
-  $("#bVente").disabled = !S.moi || !q || !pos || pos.nb < q || !reste || verrou > 0;
+  /* Un gel bloque les quatre sens. Une faillite ne bloque que les
+     ENTRÉES : on peut toujours solder ce qu'on a, même pour trois sous
+     — rester piégé dedans serait une punition sans leçon. */
+  const entree = !e.gelee && !e.failli;
+  const sortie = !e.gelee;
+
+  $("#bAchat").disabled = !S.moi || !q || cout + frais > or || !reste || !entree || !!crt;
+  $("#bVente").disabled = !S.moi || !q || !pos || pos.nb < q || !reste || verrou > 0 || !sortie;
+  $("#bDecouvert").disabled = !S.moi || !q || cout + frais > or || !reste || !entree || !!pos;
+  $("#bRachat").disabled = !S.moi || !q || !crt || crt.nb < q || !reste || verrouC > 0 || !sortie;
 
   if(!S.moi){
     $("#ordreNote").innerHTML = "Connecte-toi sur le challenge pour passer un ordre.";
     return;
   }
-  $("#ordreNote").innerHTML =
-      q + ' × ' + esc(s.code) + ' · <b>' + orFr(cout) + ' or</b> + <b>' + orFr(frais)
+
+  /* Le bandeau passe AVANT les chiffres : annoncer un coût pour un
+     ordre qui sera refusé ne rend service à personne. */
+  let bandeau = "";
+  if(e.gelee){
+    bandeau = '<div class="gelbandeau"><b>Échanges suspendus.</b> Une offre de rachat est '
+      + 'en cours sur ' + esc(s.code) + ' : les fonds engagés dessus sont <b>gelés</b> et le '
+      + 'cours ne bouge plus. Rien ne peut être acheté, vendu ni racheté avant la clôture '
+      + '— après quoi le titre bondira si l\'offre aboutit, retombera si le repreneur se '
+      + 'désiste.</div>';
+  }else if(e.failli){
+    bandeau = '<div class="failbandeau"><b>Bilan déposé.</b> ' + esc(s.nom) + ' ne vaut plus '
+      + 'rien et sort des achats. Si tu en détiens encore, tu peux solder — pour ce que ça '
+      + 'vaut. Un découvert ouvert dessus, en revanche, se rachète au meilleur moment de '
+      + 'ta vie.</div>';
+  }
+
+  const infoCourt = crt
+    ? ' · tu en as <b>' + crt.nb + ' à découvert</b>, vendus à '
+      + Number(crt.prix_vente).toFixed(1) + ' (liquidation à '
+      + (Number(crt.prix_vente) * 2).toFixed(1) + ')'
+    : '';
+
+  $("#ordreNote").innerHTML = bandeau
+    + q + ' × ' + esc(s.code) + ' · <b>' + orFr(cout) + ' or</b> + <b>' + orFr(frais)
     + '</b> de frais (2 %) · il te resterait <b>' + orFr(or - cout - frais) + ' or</b>'
     + (pos ? ' · tu en as déjà <b>' + pos.nb + '</b>' : '')
+    + infoCourt
     + '<br><span class="ordrelimites' + (!reste ? " epuise" : "") + '">'
       + (reste ? '<b>' + reste + '</b> ordre' + (reste > 1 ? 's' : '') + ' restant'
                  + (reste > 1 ? 's' : '') + " aujourd'hui"
                : "Tu as usé tes " + MAX_JOUR + " ordres du jour. La bourse rouvre demain.")
-      + (verrou > 0
-          ? ' · <b class="verrou">revendable dans ' + verrou + ' min</b>'
-          : ' · toute ligne se garde ' + DETENTION_MIN + ' min avant revente')
+      + (verrou > 0 ? ' · <b class="verrou">revendable dans ' + verrou + ' min</b>' : '')
+      + (verrouC > 0 ? ' · <b class="verrou">rachetable dans ' + verrouC + ' min</b>' : '')
+      + (verrou === 0 && verrouC === 0
+          ? ' · toute position se garde ' + DETENTION_MIN + ' min' : '')
+      + (pos ? ' · solde ta ligne avant de parier contre'
+             : crt ? ' · rachète ton découvert avant de miser à la hausse' : '')
     + '</span>';
 }
 
@@ -527,6 +625,7 @@ async function passer(fn, mot){
   const q = parseInt($("#qte").value, 10) || 0;
   if(!q || !selection) return;
   $("#bAchat").disabled = $("#bVente").disabled = true;
+  $("#bDecouvert").disabled = $("#bRachat").disabled = true;
   dire("Ordre en cours…");
   const { data, error } = await sb.rpc(fn, { p_code: selection, p_nb: q });
   if(error){ dire(error.message || String(error), true); rendreOrdre(); return; }
@@ -537,6 +636,12 @@ async function passer(fn, mot){
   if(data.ordres !== undefined) S.ordresJour = data.ordres;
   dire(mot + " " + data.nb + " × " + data.code + " à " + Number(data.prix).toFixed(1)
     + " · frais " + orFr(data.frais) + " or"
+    // Ouvrir un découvert n'a pas de plus-value : il a une garantie
+    // bloquée et un seuil de liquidation. C'est ça qu'il faut redire.
+    + (data.garantie !== undefined && data.gain === undefined
+        ? " · garantie " + orFr(data.garantie) + " or bloquée · liquidé si le cours atteint "
+          + Number(data.liquidation).toFixed(1)
+        : "")
     + (data.gain !== undefined ? " · plus-value " + (data.gain >= 0 ? "+" : "−")
         + orFr(Math.abs(data.gain)) + " or" : "")
     + " · il te reste " + orFr(data.or) + " or");
@@ -653,12 +758,71 @@ const TUTO = [
      +"qui ont tout plac\u00e9, et il offre un l\u00e9gendaire \u00e0 moiti\u00e9 prix \u00e0 celui qui a "
      +"gard\u00e9 de l'or de c\u00f4t\u00e9.</div>" },
 
+  { t:"Parier à la baisse",
+    h:"<p>Jusqu'ici tu ne pouvais gagner que si un cours <b>montait</b>. La <b>vente "
+     +"à découvert</b> fait l'inverse&nbsp;: tu gagnes si le cours <b>descend</b>.</p>"
+     +"<p>Tu bloques une <b>garantie</b> égale à ce que tu vends. Au rachat, elle "
+     +"revient <b>augmentée de la baisse</b> — ou <b>diminuée de la hausse</b>.</p>"
+     +"<div class='exemple'>Tu vends 10 parts à <b>100</b>. Garantie bloquée&nbsp;: "
+     +"<b>1 000 or</b>.<br>"
+     +"Le cours tombe à <b>60</b> → tu récupères <span class='vert'>1 400 or</span>.<br>"
+     +"Le cours monte à <b>130</b> → tu récupères <span class='rouge'>700 or</span>.</div>"
+     +"<p>Et si le cours <b>double</b>, la garantie est entièrement mangée&nbsp;: la "
+     +"position est <b>liquidée d'office</b> et tu ne récupères rien.</p>"
+     +"<div class='exemple'><b>C'est tout ce que tu risques</b>, jamais plus. Le "
+     +"panneau d'ordre t'affiche le seuil de liquidation avant que tu cliques.</div>" },
+
+  { t:"Ce qu'il faut savoir avant",
+    h:"<p>Trois règles, et elles tiennent toutes à la même idée&nbsp;: un découvert "
+     +"est un pari, pas un aller-retour.</p>"
+     +"<p><b>Un seul sens à la fois.</b> Tu ne peux pas détenir des parts d'une "
+     +"société et parier contre elle en même temps. Solde avant de retourner ta "
+     +"position.</p>"
+     +"<p><b>Les mêmes limites qu'un achat</b>&nbsp;: 2&nbsp;% de frais, trente minutes "
+     +"minimum avant de racheter, et ça compte dans tes douze ordres du jour.</p>"
+     +"<p><b>Une baisse ne dure pas toujours.</b> Un titre qui a déjà beaucoup chuté "
+     +"peut rebondir brutalement — et c'est contre toi que le rebond joue.</p>"
+     +"<div class='exemple'>Le bon moment pour parier à la baisse, c'est quand une "
+     +"<b>dépêche</b> t'apprend quelque chose que le cours n'a pas encore digéré. "
+     +"Lis-les.</div>" },
+
+  { t:"Les offres de rachat",
+    h:"<p>Dans les dépêches, tu liras souvent des <b>bruits de couloir</b>&nbsp;: un "
+     +"concurrent qui lorgne une société, un fonds qui entre au capital, une famille "
+     +"fondatrice qui songerait à vendre. <b>La plupart ne mènent nulle part.</b></p>"
+     +"<p>Mais parfois, l'une devient une <b>offre ferme</b>. Et là, tout s'arrête sur "
+     +"cette société&nbsp;:</p>"
+     +"<div class='exemple'><b>Les fonds sont gelés.</b> Pendant quelques heures, plus "
+     +"aucun ordre n'est accepté — ni achat, ni vente, ni rachat — et le cours ne "
+     +"bouge plus. Ce que tu avais placé dessus est <b>immobilisé</b> jusqu'à la "
+     +"clôture.</div>"
+     +"<p>Puis l'offre se dénoue d'un coup. Elle aboutit&nbsp;: le titre "
+     +"<span class='vert'>bondit</span>. Le repreneur se désiste&nbsp;: il "
+     +"<span class='rouge'>retombe</span>.</p>"
+     +"<p>Il y a six chances sur dix que ça passe. Et tu ne peux rien faire pendant "
+     +"ce temps-là&nbsp;: c'est le risque d'avoir tout mis au même endroit.</p>" },
+
+  { t:"Une société peut mourir",
+    h:"<p>Les cours ne font pas que monter et descendre. Une société peut <b>couler "
+     +"pour de bon</b>.</p>"
+     +"<p>Ça commence doucement&nbsp;: des retards de paiement qui circulent, un "
+     +"démenti de la direction. Puis une recherche de repreneur en urgence. Puis le "
+     +"<b>dépôt de bilan</b> — et le titre ne vaut plus rien.</p>"
+     +"<div class='exemple'>Un titre qui a déposé son bilan <b>sort des achats</b>. Si "
+     +"tu en détiens encore, tu peux solder — pour ce que ça vaut. On ne t'enferme "
+     +"pas dedans.</div>"
+     +"<p><b>Personne ne sait lesquelles</b>, ni quand. Ni l'administrateur, ni moi. "
+     +"C'est tiré au sort et gardé secret dans la base.</p>"
+     +"<p>Les dépêches sont le seul avertissement. Celui qui les lit et se met à "
+     +"découvert à temps double sa garantie. Celui qui détient des parts et ne lit "
+     +"rien perd tout.</p>" },
+
   { t:"Trois conseils pour finir",
     h:"<p><b>Ne place pas tout.</b> Sans or disponible, tu ne peux ni profiter des "
      +"soldes ni acheter un objet au bon moment.</p>"
      +"<p><b>Une perte n'existe qu'une fois vendue.</b> Vendre dans la panique, "
      +"c'est transformer une mauvaise journ\u00e9e en perte d\u00e9finitive.</p>"
-     +"<p><b>Le risque se choisit.</b> Si tu d\u00e9couvres, commence par une prudente&nbsp;: "
+     +"<p><b>Le risque se choisit.</b> Si tu d\u00e9butes, commence par une prudente&nbsp;: "
      +"tu verras le m\u00e9canisme sans y laisser ta r\u00e9serve.</p>"
      +"<div class='exemple'>Et souviens-toi que cet or ach\u00e8te des LP et des objets. "
      +"Ce que tu perds ici, tu le perds <b>dans le challenge</b>.</div>" }
@@ -719,6 +883,9 @@ function brancher(){
   });
   $("#bAchat").addEventListener("click", () => passer("bourse_acheter", "Achat de"));
   $("#bVente").addEventListener("click", () => passer("bourse_vendre", "Vente de"));
+  $("#bDecouvert").addEventListener("click", () =>
+    passer("bourse_vendre_decouvert", "Découvert ouvert sur"));
+  $("#bRachat").addEventListener("click", () => passer("bourse_racheter", "Rachat de"));
   $("#qte").addEventListener("input", rendreOrdre);
   $$(".qterap button").forEach(b => b.addEventListener("click", () => {
     const or = S.moi ? (S.moi.gold || 0) : 0;

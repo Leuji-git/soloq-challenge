@@ -139,6 +139,42 @@
 }
 .bachat{background:var(--up)} .bvente{background:var(--down)}
 .bachat:disabled,.bvente:disabled{opacity:.35;cursor:not-allowed}
+/* La ligne du bas. Les deux boutons restent volontairement plus sobres
+   que « Acheter » et « Vendre » : c'est un geste de spécialiste, pas le
+   geste par défaut. */
+.ordrebaisse{display:flex;gap:8px;align-items:center;margin-top:8px;
+  padding-top:9px;border-top:1px dashed var(--line)}
+.obl{font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-right:2px}
+.bdec,.brach{
+  border:1px solid var(--line);background:var(--surface-2);color:var(--ink-2);
+  cursor:pointer;border-radius:var(--r-sm);padding:7px 14px;
+  font-family:"Outfit",system-ui,sans-serif;font-size:12.5px;font-weight:600;
+}
+.bdec:hover:not(:disabled){border-color:var(--down);color:var(--down)}
+.brach:hover:not(:disabled){border-color:var(--up);color:var(--up)}
+.bdec:disabled,.brach:disabled{opacity:.3;cursor:not-allowed}
+
+/* Un titre gelé ou coulé doit se voir dans la liste sans avoir à lire. */
+.etiq{display:inline-flex;align-items:center;gap:4px;padding:1px 6px;border-radius:999px;
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:10.5px;letter-spacing:.04em;
+  text-transform:uppercase;font-weight:600}
+.etiq.gel{background:rgba(94,154,255,.16);color:#8FB8FF}
+.etiq.fail{background:rgba(227,59,59,.16);color:#FF8A8A}
+.etiq.court{background:rgba(227,59,59,.12);color:#FF9D9D}
+
+/* Le bandeau qui barre le panneau d'ordre pendant une offre. */
+.gelbandeau{margin-top:9px;padding:8px 11px;border-radius:var(--r-sm);
+  background:rgba(94,154,255,.12);border:1px solid rgba(94,154,255,.3);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;color:#AFCCFF;line-height:1.45}
+.gelbandeau b{color:#DCE9FF}
+.failbandeau{margin-top:9px;padding:8px 11px;border-radius:var(--r-sm);
+  background:rgba(227,59,59,.1);border:1px solid rgba(227,59,59,.3);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;color:#FFB4B4;line-height:1.45}
+
+/* Une ligne de portefeuille tenue à l'envers. */
+.ligne.court{box-shadow:inset 2px 0 0 var(--down)}
+
 .ordrenote{margin-top:8px;font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;color:var(--muted)}
 .ordrenote b{color:var(--ink-2);font-variant-numeric:tabular-nums}
 
