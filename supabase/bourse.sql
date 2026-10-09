@@ -118,7 +118,7 @@ end $$;
 -- ---------------------------------------------------------------------
 insert into public.bourse_societes (code, nom, secteur, risque, lien, prix_base, sort) values
   ('PLT','Piltover Tech',       'Technologie',     'speculative', 'a', 184, 1),
-  ('ZAU','Zaun Chimie',         'Chimie',          'speculative', null, 96, 2),
+  ('ZAU','Zaun Chimie',         'Chimie',          'speculative', 'b',  96, 2),
   ('DEM','Demacia Acier',       'Industrie',       'prudente',    'a', 212, 3),
   ('NOX','Noxus Armement',      'Armement',        'equilibree',  'b', 158, 4),
   ('ION','Ionia Jardins',       'Agroalimentaire', 'prudente',    null,134, 5),
@@ -528,7 +528,9 @@ begin
     raise exception 'Tu n''as jamais obtenu cet objet : il n''est pas en rayon pour toi';
   end if;
 
-  prix := public.prix_indexe(it.price, it.rarity);
+  -- prix_objet et non prix_indexe : il porte la règle en vigueur,
+  -- demande comprise. Rejouer ce script ne fait donc rien perdre.
+  prix := public.prix_objet(p_item);
   if moi.gold < prix then raise exception 'Il te manque % or', prix - moi.gold; end if;
 
   update public.players set gold = gold - prix where id = moi.id;

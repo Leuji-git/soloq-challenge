@@ -41,7 +41,8 @@ const MAX_JOUR = 12;          // ordres par jour et par joueur
 
 const S = {
   session:null, moi:null, equipes:{ a:"Équipe A", b:"Équipe B" },
-  societes:[], cours:{}, positions:[], depeches:[], etat:null, objets:[], ordresJour:0
+  societes:[], cours:{}, positions:[], depeches:[], etat:null, objets:[], ordresJour:0,
+  qui:{}, achats:[]
 };
 let selection = null, fenetre = 36, filtre = "tout";
 
@@ -67,6 +68,32 @@ async function charger(){
   S.depeches = de.error ? [] : (de.data || []);
   S.objets = it.error ? [] : (it.data || []);
   if(ch.data) S.equipes = { a: ch.data.team_a_name, b: ch.data.team_b_name };
+
+  /* Qui est qui, et son avatar Discord. On en a besoin pour poser les
+     achats sous les bougies : un pseudo ne se reconnaît pas d'un coup
+     d'œil, une photo si. */
+  const [jo, pr, ac] = await Promise.all([
+    sb.from("players").select("id,name,claimed_by,team"),
+    sb.from("profiles").select("id,display_name,avatar_url"),
+    sb.from("gold_ledger").select("player_id,delta,raison,at")
+      .like("raison", "bourse : achat%").order("at")
+  ]);
+  const profils = Object.fromEntries((pr.data || []).map(p => [p.id, p]));
+  S.qui = Object.fromEntries((jo.data || []).map(p => [p.id, {
+    nom: p.name, team: p.team,
+    avatar: p.claimed_by && profils[p.claimed_by] ? profils[p.claimed_by].avatar_url : null
+  }]));
+
+  /* On relit le journal d'or plutôt que de tenir une table d'ordres :
+     il porte déjà tout, et une seconde source finirait par diverger.
+     « bourse : achat 30 × SHU » se lit sans ambiguïté. */
+  S.achats = (ac.data || []).map(r => {
+    const m = /^bourse : achat (\d+) × (\w+)$/.exec(r.raison);
+    if(!m) return null;
+    return { player_id: r.player_id, nb: +m[1], code: m[2],
+             montant: -r.delta,
+             slot: Math.floor(new Date(r.at).getTime() / 300000) };
+  }).filter(Boolean);
 
   // L'historique : les quatre cents derniers créneaux suffisent à tous
   // les graphiques, et évitent de rapatrier des milliers de lignes.
@@ -176,7 +203,17 @@ function rendreChandelles(){
   const svg = $("#chandelles");
   if(!h.length){ svg.innerHTML = ""; return; }
 
-  const W = 900, H = 286, PL = 6, PR = 52, PT = 10, PB = 14;
+  /* Les achats visibles, regroupés par créneau. On réserve une bande
+     en bas du graphique quand il y en a : les poser sur les bougies
+     les rendrait illisibles toutes les deux. */
+  const parSlot = {};
+  S.achats.filter(a => a.code === selection).forEach(a => {
+    const i = h.findIndex(c => Number(c.slot) === a.slot);
+    if(i >= 0) (parSlot[i] = parSlot[i] || []).push(a);
+  });
+  const aDesAchats = Object.keys(parSlot).length > 0;
+
+  const W = 900, H = 286, PL = 6, PR = 52, PT = 10, PB = aDesAchats ? 42 : 14;
   const hi = Math.max(...h.map(c => c.h));
   const lo = Math.min(...h.map(c => c.b));
   const pad = (hi - lo) * .08 || 1;
@@ -205,6 +242,8 @@ function rendreChandelles(){
   const der = h[h.length - 1];
   out += '<line x1="' + PL + '" y1="' + Y(der.c).toFixed(1) + '" x2="' + (W - PR) + '" y2="' + Y(der.c).toFixed(1)
       +  '" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 3" opacity=".75"/>';
+
+  out += rendreAchats(parSlot, h, PL, pas, H, PB, Y);
   svg.innerHTML = out;
 
   const p = variation(selection);
@@ -221,6 +260,83 @@ function rendreChandelles(){
   $("#sHaut").textContent = hi.toFixed(1);
   $("#sBas").textContent  = lo.toFixed(1);
   $("#sAmp").textContent  = ((hi / lo - 1) * 100).toFixed(1) + " %";
+}
+
+/* Les achats, posés sous la bougie où ils ont eu lieu.
+
+   On montre QUI est entré, pas combien il a mis. Savoir que trois
+   personnes se sont placées sur une valeur est une information de
+   marché, que tout le monde mérite ; savoir combien chacune a engagé
+   serait regarder dans la bourse du voisin. Seul TON montant t'est
+   rendu, parce qu'il est à toi.
+
+   Au-delà de trois acheteurs sur le même créneau, on compte au lieu
+   d'empiler : la bande deviendrait une bouillie de vignettes. */
+function rendreAchats(parSlot, h, PL, pas, H, PB, Y){
+  if(!Object.keys(parSlot).length) return "";
+  const R = 7.5, yBande = H - PB + 17;
+  let out = "";
+
+  Object.keys(parSlot).forEach(i => {
+    const liste = parSlot[i];
+    const x = PL + (+i) * pas + pas / 2;
+    const bas = Y(h[+i].b);
+
+    // Un trait discret relie l'achat à sa bougie, sinon on ne sait pas
+    // à quel moment il se rattache.
+    out += '<line x1="' + x.toFixed(1) + '" y1="' + (bas + 3).toFixed(1)
+        +  '" x2="' + x.toFixed(1) + '" y2="' + (yBande - R - 2).toFixed(1)
+        +  '" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>';
+
+    const montre = liste.slice(0, 3);
+    montre.forEach((a, k) => {
+      const cx = x + (k - (montre.length - 1) / 2) * 17;
+      const qui = S.qui[a.player_id] || { nom: a.player_id, avatar: null };
+      const moi = S.moi && a.player_id === S.moi.id;
+      const cle = "ach" + i + "_" + k;
+
+      const titre = (moi ? "Tu as achet\u00e9 " : esc(qui.nom) + " a achet\u00e9 ")
+        + a.nb + " × " + esc(a.code)
+        + (moi ? " pour " + orFr(a.montant) + " or" : "");
+
+      out += '<g><title>' + titre + '</title>';
+      if(qui.avatar){
+        out += '<defs><clipPath id="' + cle + '"><circle cx="' + cx.toFixed(1)
+            +  '" cy="' + yBande + '" r="' + R + '"/></clipPath></defs>'
+            +  '<image href="' + esc(qui.avatar) + '" x="' + (cx - R).toFixed(1)
+            +  '" y="' + (yBande - R) + '" width="' + (R * 2) + '" height="' + (R * 2)
+            +  '" clip-path="url(#' + cle + ')" preserveAspectRatio="xMidYMid slice"/>';
+      }else{
+        out += '<circle cx="' + cx.toFixed(1) + '" cy="' + yBande + '" r="' + R
+            +  '" fill="var(--surface-3)"/>'
+            +  '<text x="' + cx.toFixed(1) + '" y="' + (yBande + 3.5)
+            +  '" text-anchor="middle" font-size="9" fill="var(--muted)"'
+            +  ' font-family="Barlow Semi Condensed">' + esc((qui.nom || "?")[0]) + '</text>';
+      }
+      out += '<circle cx="' + cx.toFixed(1) + '" cy="' + yBande + '" r="' + R
+          +  '" fill="none" stroke="' + (moi ? "var(--accent)" : "var(--up)")
+          +  '" stroke-width="' + (moi ? 2 : 1.3) + '" opacity=".95"/>';
+
+      // Le montant n'apparaît que sous TON achat.
+      if(moi){
+        out += '<text x="' + cx.toFixed(1) + '" y="' + (yBande + R + 10)
+            +  '" text-anchor="middle" font-size="9.5" fill="var(--accent)"'
+            +  ' font-family="Barlow Semi Condensed">' + orFr(a.montant) + '</text>';
+      }
+      out += '</g>';
+    });
+
+    if(liste.length > 3){
+      const cx = x + (montre.length - (montre.length - 1) / 2) * 17;
+      out += '<g><title>' + (liste.length - 3) + ' autre(s) acheteur(s)</title>'
+          +  '<circle cx="' + cx.toFixed(1) + '" cy="' + yBande + '" r="' + R
+          +  '" fill="var(--surface-3)" stroke="var(--line)" stroke-width="1"/>'
+          +  '<text x="' + cx.toFixed(1) + '" y="' + (yBande + 3.5)
+          +  '" text-anchor="middle" font-size="8.5" fill="var(--ink-2)"'
+          +  ' font-family="Barlow Semi Condensed">+' + (liste.length - 3) + '</text></g>';
+    }
+  });
+  return out;
 }
 
 function rendrePortefeuille(){
@@ -445,7 +561,10 @@ const TUTO = [
      +"<span class='vert'>vert</span>, le prix a fini plus haut qu'il n'avait commenc\u00e9. "
      +"Les <b>traits fins</b> au-dessus et en dessous sont les extr\u00eames.</p>"
      +"<p>Les boutons <b>3 h</b>, <b>12 h</b> et <b>Tout</b> changent la p\u00e9riode "
-     +"regard\u00e9e.</p>" },
+     +"regard\u00e9e.</p>"
+     +"<div class='exemple'>Sous les bougies, les <b>visages</b> de ceux qui ont achet\u00e9 "
+     +"\u00e0 ce moment-l\u00e0. Tu vois qui est entr\u00e9 et quand, mais pas combien il a mis \u2014 "
+     +"sauf pour <b>tes propres achats</b>, dont le montant s'affiche.</div>" },
 
   { t:"Le niveau de risque",
     h:"<p>Chaque soci\u00e9t\u00e9 porte une \u00e9tiquette. C'est l'information la plus "
