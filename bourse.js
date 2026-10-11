@@ -42,9 +42,25 @@ const MAX_JOUR = 12;          // ordres par jour et par joueur
 const S = {
   session:null, moi:null, equipes:{ a:"Équipe A", b:"Équipe B" },
   societes:[], cours:{}, positions:[], depeches:[], etat:null, objets:[], ordresJour:0,
-  qui:{}, achats:[], shorts:[], etats:{}, v2:false
+  qui:{}, achats:[], shorts:[], etats:{}, v2:false,
+  prix:{}, slotActuel:0
 };
 let selection = null, fenetre = 36, filtre = "tout";
+
+/* Au-delà de ce nombre, les bougies sont regroupées. 900 pixels de
+   large ne peuvent pas montrer quatre mille chandeliers : à un quart de
+   pixel chacun, on ne verrait qu'un aplat. On agrège donc par paquets,
+   en vraie logique OHLC — ouverture du premier, clôture du dernier,
+   plus haut et plus bas du paquet — ce qui est exactement ce que fait
+   un graphique boursier quand on dézoome. */
+const MAX_BOUGIES = 240;
+
+/* Le plafond de PostgREST. Il répond au plus mille lignes et ne le dit
+   que dans l'en-tête Content-Range, que personne ne lit. Toute requête
+   d'historique doit donc rester SOUS ce plafond, et être triée du plus
+   récent au plus ancien : si la coupe tombe, elle doit emporter le
+   passé lointain, jamais le présent. */
+const CAP_LIGNES = 1000;
 
 /* ---------------- chargement ---------------- */
 async function charger(){
@@ -109,13 +125,43 @@ async function charger(){
              slot: Math.floor(new Date(r.at).getTime() / 300000) };
   }).filter(Boolean);
 
-  // L'historique : les quatre cents derniers créneaux suffisent à tous
-  // les graphiques, et évitent de rapatrier des milliers de lignes.
-  const depuis = (S.etat ? Number(S.etat.slot) : 0) - 400;
-  const co = await sb.from("bourse_cours").select("code,slot,o,h,b,c")
-    .gte("slot", depuis).order("slot");
+  /* LES PRIX, EN DEUX REQUÊTES MINUSCULES.
+
+     L'ancienne version demandait quatre cents créneaux pour les dix
+     sociétés d'un coup : quatre mille lignes, dont PostgREST n'en rend
+     que mille, et comme le tri était croissant c'étaient les mille PLUS
+     VIEILLES. La page affichait donc un marché vieux de vingt-cinq
+     heures — Piltover à 210 quand elle valait 79 — sans qu'aucune
+     erreur n'apparaisse nulle part.
+
+     On ne demande plus que ce dont la liste et le bandeau ont besoin :
+     le dernier cours, et celui d'il y a douze heures. Deux nombres par
+     société, quelques dizaines de lignes en tout. L'historique complet
+     ne concerne que la valeur affichée, et il est chargé à part. */
+  S.slotActuel = S.etat ? Number(S.etat.slot) : 0;
+  const [der, vei] = await Promise.all([
+    // Les deux derniers créneaux : le dernier existe toujours, l'avant
+    // dernier sert de filet si le relève vient tout juste de tourner.
+    sb.from("bourse_cours").select("code,slot,c")
+      .gte("slot", S.slotActuel - 2).order("slot"),
+    /* Douze heures en arrière, avec un peu de marge de part et d'autre :
+       si le marché a sauté un créneau cette nuit-là, on prend le plus
+       proche plutôt que de rendre une variation fausse. */
+    sb.from("bourse_cours").select("code,slot,c")
+      .gte("slot", S.slotActuel - 150).lte("slot", S.slotActuel - 140).order("slot")
+  ]);
+
+  S.prix = {};
+  (der.data || []).forEach(r => {
+    const p = S.prix[r.code] = S.prix[r.code] || {};
+    if(p.slot === undefined || r.slot >= p.slot){ p.c = r.c; p.slot = r.slot; }
+  });
+  (vei.data || []).forEach(r => {
+    const p = S.prix[r.code] = S.prix[r.code] || {};
+    if(p.veille === undefined) p.veille = r.c;   // le plus ancien de la bande
+  });
+
   S.cours = {};
-  (co.data || []).forEach(r => { (S.cours[r.code] = S.cours[r.code] || []).push(r); });
 
   if(S.session){
     const me = await sb.from("players").select("*").eq("claimed_by", S.session.user.id).maybeSingle();
@@ -130,6 +176,45 @@ async function charger(){
     }
   }
   if(!selection && S.societes.length) selection = S.societes[0].code;
+  if(selection) await chargerSerie(selection);
+}
+
+/* L'historique COMPLET d'une seule société.
+
+   Une seule à la fois, parce qu'une seule est affichée : mille lignes
+   suffisent alors à couvrir trois jours et demi de créneaux de cinq
+   minutes, et on les prend par la fin. Si le challenge dure assez pour
+   dépasser le plafond, c'est le début qui manquera, pas le présent.
+
+   Le tri DESCENDANT n'est pas un détail de confort : c'est lui qui
+   décide, le jour où la coupe tombe, de quel côté elle tombe. */
+async function chargerSerie(code){
+  if(!code) return;
+  const r = await sb.from("bourse_cours").select("code,slot,o,h,b,c")
+    .eq("code", code).order("slot", { ascending:false }).limit(CAP_LIGNES);
+  if(r.error) return;
+  S.cours[code] = (r.data || []).slice().reverse();
+}
+
+/* Regrouper des bougies sans mentir sur ce qu'elles disent : ouverture
+   de la première, clôture de la dernière, extrêmes du paquet. On garde
+   le créneau de début ET celui de fin, pour savoir plus bas dans quelle
+   bougie tombe un achat. */
+function grouperBougies(h, max){
+  if(h.length <= max) return h;
+  const n = Math.ceil(h.length / max);
+  const out = [];
+  for(let i = 0; i < h.length; i += n){
+    const t = h.slice(i, i + n);
+    out.push({
+      slot: Number(t[0].slot), slotFin: Number(t[t.length - 1].slot),
+      o: t[0].o, c: t[t.length - 1].c,
+      h: Math.max.apply(null, t.map(x => x.h)),
+      b: Math.min.apply(null, t.map(x => x.b)),
+      groupe: n
+    });
+  }
+  return out;
 }
 
 function fatal(html){
@@ -140,16 +225,25 @@ function fatal(html){
 /* ---------------- lectures ---------------- */
 const soc = c => S.societes.find(x => x.code === c);
 const histo = c => S.cours[c] || [];
+/* Le cours du moment. S.prix fait autorité : il vient d'une requête qui
+   ne demande QUE les derniers créneaux, donc jamais tronquée. La série
+   complète ne sert que de second recours, et le prix d'introduction de
+   dernier recours. */
 function cours(c){
+  const p = S.prix[c];
+  if(p && p.c !== undefined) return p.c;
   const h = histo(c);
   if(h.length) return h[h.length - 1].c;
   const s = soc(c);
   return s ? Number(s.prix_base) : 0;
 }
+// Douze heures en arrière, pour la variation affichée partout.
 function veille(c){
+  const p = S.prix[c];
+  if(p && p.veille !== undefined) return p.veille;
   const h = histo(c);
   if(!h.length) return cours(c);
-  return h[Math.max(0, h.length - 145)].c;     // douze heures en arrière
+  return h[Math.max(0, h.length - 145)].c;
 }
 const variation = c => (cours(c) / veille(c) - 1) * 100;
 
@@ -226,7 +320,12 @@ function rendreValeurs(){
       + '</div>';
   }).join("");
   $$("#valeurs [data-code]").forEach(e =>
-    e.addEventListener("click", () => { selection = e.dataset.code; rendre(); }));
+    e.addEventListener("click", async () => {
+      selection = e.dataset.code;
+      rendre();                       // la liste et le bandeau tout de suite
+      await chargerSerie(selection);  // le graphique quand il arrive
+      rendreChandelles();
+    }));
 }
 
 /* Les chandeliers. Vert quand la bougie monte, rouge quand elle
@@ -234,7 +333,10 @@ function rendreValeurs(){
 function rendreChandelles(){
   const s = soc(selection);
   if(!s) return;
-  const h = histo(selection).slice(-fenetre);
+  // fenetre à zéro : tout l'historique, si long soit-il.
+  const serie = histo(selection);
+  const brut = fenetre > 0 ? serie.slice(-fenetre) : serie;
+  const h = grouperBougies(brut, MAX_BOUGIES);
   const svg = $("#chandelles");
   if(!h.length){ svg.innerHTML = ""; return; }
 
@@ -243,7 +345,9 @@ function rendreChandelles(){
      les rendrait illisibles toutes les deux. */
   const parSlot = {};
   S.achats.filter(a => a.code === selection).forEach(a => {
-    const i = h.findIndex(c => Number(c.slot) === a.slot);
+    // Une bougie regroupée couvre une plage : l'achat tombe dedans.
+    const i = h.findIndex(c =>
+      a.slot >= Number(c.slot) && a.slot <= Number(c.slotFin !== undefined ? c.slotFin : c.slot));
     if(i >= 0) (parSlot[i] = parSlot[i] || []).push(a);
   });
   const aDesAchats = Object.keys(parSlot).length > 0;
@@ -309,6 +413,19 @@ function rendreChandelles(){
     + (s.lien ? '<span class="lien"><i style="background:' + COULEUR[s.lien] + '"></i>liée à '
                 + esc(S.equipes[s.lien]) + '</span>'
               : '<span>indépendante du challenge</span>');
+  /* Quand les bougies sont regroupées, le dire : un chandelier qui
+     couvre une heure n'est pas un chandelier de cinq minutes, et le
+     lecteur a le droit de le savoir. */
+  const grp = h[0] && h[0].groupe ? h[0].groupe : 1;
+  const duree = grp * 5;
+  $("#chartSub").innerHTML += '<span>'
+    + brut.length + ' créneaux · ' + (brut.length * 5 / 60).toFixed(1).replace(".", ",") + ' h'
+    + (grp > 1
+        ? ' · bougies de ' + (duree >= 60
+            ? (duree / 60).toFixed(duree % 60 ? 1 : 0).replace(".", ",") + ' h'
+            : duree + ' min')
+        : '')
+    + '</span>';
   $("#sOuv").textContent  = h[0].o.toFixed(1);
   $("#sHaut").textContent = hi.toFixed(1);
   $("#sBas").textContent  = lo.toFixed(1);
