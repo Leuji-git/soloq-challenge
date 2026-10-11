@@ -204,6 +204,22 @@
     </div>
   </div>
   <p class="hint warintro" id="warHint">Qui a lancé quoi, sur qui, et ce que ça a donné.</p>
+
+  <!-- Deux axes : l'état de l'objet, et sur QUI il est posé. Le second
+       répond à la seule question qu'on se pose vraiment en ouvrant le
+       journal : qu'est-ce qui m'attend ? -->
+  <div class="warfiltres" id="warFiltres">
+    <div class="seg" role="group" aria-label="État des objets">
+      <button type="button" data-etat="tout" aria-pressed="true">Tout</button>
+      <button type="button" data-etat="embuscade" aria-pressed="false">En embuscade</button>
+      <button type="button" data-etat="resolu" aria-pressed="false">Résolu</button>
+    </div>
+    <select id="warCible" aria-label="Sur quel joueur">
+      <option value="">Sur tout le monde</option>
+    </select>
+  </div>
+  <p class="warresume" id="warResume" hidden></p>
+
   <div class="drawerbody warlog" id="warLog"></div>
 </aside>
 

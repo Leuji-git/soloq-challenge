@@ -2423,6 +2423,11 @@ function enregistrerLus(set){
 }
 let journalLus = chargerLus();
 
+/* L'état du filtre. Volontairement PAS retenu d'une visite à l'autre :
+   un filtre oublié ferait croire le journal vide, et on chercherait
+   longtemps pourquoi. Il repart sur « tout » à chaque chargement. */
+let warFiltre = { etat: "tout", cible: "" };
+
 function basculerLu(id){
   journalLus.has(id) ? journalLus.delete(id) : journalLus.add(id);
   enregistrerLus(journalLus);
@@ -2438,18 +2443,32 @@ function toutMarquerLu(){
 function renderWarlog(){
   const box = $("#warLog");
   if(!box) return;
-  const lignes = S.inventory
+  const toutes = S.inventory
     .filter(r => r.locked_at || r.applied_match)
     .sort((x, y) => new Date(y.locked_at || y.obtained_at) - new Date(x.locked_at || x.obtained_at));
 
   const moi = myPlayer();
+  remplirCibles(toutes, moi);
+
+  /* « En embuscade » = armé mais pas encore résolu, donc en attente de
+     la prochaine partie de sa cible. C'est exactement le critère dont
+     se sert l'affichage plus bas : un objet est résolu quand il porte
+     une partie. */
+  const lignes = toutes.filter(r => {
+    if(warFiltre.etat === "embuscade" && r.applied_match) return false;
+    if(warFiltre.etat === "resolu" && !r.applied_match) return false;
+    if(warFiltre.cible && r.target_id !== warFiltre.cible) return false;
+    return true;
+  });
   const vus = new Set(isAdmin()
     ? S.items.map(i => i.key)
     : (moi ? S.inventory.filter(r => r.player_id === moi.id).map(r => r.item_key) : []));
 
-  // La pastille compte les NON LUS : un compteur qui ne redescend
-  // jamais n'incite plus personne à ouvrir le journal.
-  const nonLus = lignes.filter(r => !journalLus.has(r.id)).length;
+  /* La pastille compte les NON LUS — un compteur qui ne redescend
+     jamais n'incite plus personne à ouvrir le journal — et elle les
+     compte sur TOUT le journal, jamais sur le filtre : une notification
+     qui dépendrait d'un réglage d'affichage ne voudrait plus rien dire. */
+  const nonLus = toutes.filter(r => !journalLus.has(r.id)).length;
   const pastille = $("#warCount");
   if(pastille){
     pastille.textContent = nonLus;
@@ -2459,13 +2478,33 @@ function renderWarlog(){
   if(btnLu) btnLu.disabled = !nonLus;
   const intro = $("#warHint");
   if(intro){
-    intro.textContent = lignes.length
+    intro.textContent = toutes.length
       ? "Qui a lancé quoi, sur qui, et ce que ça a donné."
       : "Rien n'a encore été lancé.";
   }
 
-  if(!lignes.length){
+  // Combien d'objets attendent, et sur qui : la réponse en une ligne.
+  resumerEmbuscades(toutes);
+
+  if(!toutes.length){
     box.innerHTML = '<div class="empty">Aucun objet n\'a encore été lancé. Ça ne saurait tarder.</div>';
+    return;
+  }
+
+  /* Vide À CAUSE DU FILTRE, et non parce qu'il ne s'est rien passé : le
+     dire, sinon on croit à une panne et on recharge la page. */
+  if(!lignes.length){
+    const qui = warFiltre.cible
+      ? (S.players.find(p => p.id === warFiltre.cible) || {}).name : null;
+    box.innerHTML = '<div class="empty">'
+      + (warFiltre.etat === "embuscade"
+          ? (qui ? "Rien n'attend <b>" + esc(qui) + "</b> pour l'instant."
+                 : "Aucune embuscade en cours. Tout est retombé.")
+         : warFiltre.etat === "resolu"
+          ? (qui ? "Rien ne s'est encore résolu sur <b>" + esc(qui) + "</b>."
+                 : "Rien ne s'est encore résolu.")
+         : "Rien sur <b>" + esc(qui || "ce joueur") + "</b> pour l'instant.")
+      + '</div>';
     return;
   }
 
@@ -2527,6 +2566,75 @@ function renderWarlog(){
     if(e.target.closest("[data-tip]")) return;
     basculerLu(el.dataset.lu);
   }));
+}
+
+/* La liste déroulante des cibles. Reconstruite à chaque rendu, parce
+   que les joueurs visés changent — mais la sélection en cours est
+   préservée, sinon le filtre sauterait tout seul au rafraîchissement
+   suivant.
+
+   On ne propose que les joueurs réellement visés, le plus assiégé en
+   tête, avec le nombre d'embuscades en attente : la liste renseigne
+   avant même qu'on l'ouvre. */
+function remplirCibles(toutes, moi){
+  const sel = $("#warCible");
+  if(!sel) return;
+
+  const enAttente = {}, vises = {};
+  toutes.forEach(r => {
+    if(!r.target_id) return;
+    vises[r.target_id] = true;
+    if(!r.applied_match) enAttente[r.target_id] = (enAttente[r.target_id] || 0) + 1;
+  });
+
+  const liste = S.players.filter(p => vises[p.id])
+    .sort((a, b) => (enAttente[b.id] || 0) - (enAttente[a.id] || 0)
+                 || a.name.localeCompare(b.name, "fr"));
+
+  const option = p => '<option value="' + esc(p.id) + '">'
+    + esc(p.name) + (moi && p.id === moi.id ? " (toi)" : "")
+    + ((enAttente[p.id] || 0) ? " — " + enAttente[p.id] + " en embuscade" : "")
+    + '</option>';
+
+  const neuf = '<option value="">Sur tout le monde</option>' + liste.map(option).join("");
+  if(sel.innerHTML !== neuf){
+    sel.innerHTML = neuf;
+    sel.value = warFiltre.cible;
+    // La cible a pu quitter la liste : on retombe alors sur « tout ».
+    if(sel.value !== warFiltre.cible) warFiltre.cible = sel.value = "";
+  }
+  sel.classList.toggle("on", !!warFiltre.cible);
+}
+
+/* Une phrase au-dessus du journal : combien d'objets attendent, et sur
+   qui. C'est l'information qu'on vient chercher. */
+function resumerEmbuscades(toutes){
+  const box = $("#warResume");
+  if(!box) return;
+  const attente = toutes.filter(r => !r.applied_match);
+
+  if(warFiltre.cible){
+    const p = S.players.find(x => x.id === warFiltre.cible);
+    const n = attente.filter(r => r.target_id === warFiltre.cible).length;
+    box.hidden = false;
+    box.innerHTML = n
+      ? "<b>" + n + "</b> objet" + (n > 1 ? "s" : "") + " attend" + (n > 1 ? "ent" : "")
+        + " la prochaine partie de <b>" + esc(p ? p.name : "?") + "</b>."
+      : "Rien n'attend <b>" + esc(p ? p.name : "?") + "</b>.";
+    return;
+  }
+
+  if(!attente.length){ box.hidden = true; return; }
+  // Sur qui ça se concentre : utile pour savoir où regarder.
+  const par = {};
+  attente.forEach(r => { if(r.target_id) par[r.target_id] = (par[r.target_id] || 0) + 1; });
+  const top = Object.keys(par).sort((a, b) => par[b] - par[a])[0];
+  const nom = (S.players.find(p => p.id === top) || {}).name;
+  box.hidden = false;
+  box.innerHTML = "<b>" + attente.length + "</b> objet" + (attente.length > 1 ? "s" : "")
+    + " en embuscade"
+    + (nom && par[top] > 1 ? ", dont <b>" + par[top] + "</b> sur " + esc(nom) : "")
+    + ".";
 }
 
 // « il y a 12 min », « il y a 3 h », « le 4 oct. »
@@ -3354,6 +3462,19 @@ function initUI(){
   $("#btnWar").addEventListener("click", () => openWar(true));
   $("#warClose").addEventListener("click", () => openWar(false));
   $("#warRead").addEventListener("click", toutMarquerLu);
+
+  // Les deux filtres du journal. Le rendu relit warFiltre, rien d'autre.
+  document.querySelectorAll("#warFiltres [data-etat]").forEach(b =>
+    b.addEventListener("click", () => {
+      warFiltre.etat = b.dataset.etat;
+      document.querySelectorAll("#warFiltres [data-etat]").forEach(x =>
+        x.setAttribute("aria-pressed", String(x === b)));
+      renderWarlog();
+    }));
+  $("#warCible").addEventListener("change", e => {
+    warFiltre.cible = e.target.value;
+    renderWarlog();
+  });
   initInfobulles();
   $("#warScrim").addEventListener("click", () => openWar(false));
   $("#btnRules").addEventListener("click", () => openRules(true));
