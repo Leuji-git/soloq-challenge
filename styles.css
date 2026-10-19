@@ -283,6 +283,115 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
   letter-spacing:.02em;color:var(--muted);
 }
 /* L'en-tête du volet : « tout marquer lu » à gauche de la croix. */
+/* Le bandeau d'aperçu. Volontairement voyant : on ne doit pas oublier
+   qu'on regarde une simulation, surtout en montrant son écran. */
+.apercufin{
+  position:fixed;left:0;right:0;bottom:0;z-index:250;
+  display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;
+  padding:9px 16px;background:color-mix(in srgb, var(--accent) 20%, var(--surface));
+  border-top:1px solid var(--accent);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12.5px;color:var(--ink);
+}
+.apercufin[hidden]{display:none}
+.apercufin b{letter-spacing:.06em;text-transform:uppercase}
+.apercufin button{
+  background:var(--surface);border:1px solid var(--line);color:var(--ink-2);
+  border-radius:var(--pill);padding:5px 13px;cursor:pointer;font-family:inherit;font-size:12px;
+}
+.apercufin button:hover{border-color:var(--accent);color:var(--ink)}
+
+/* ---------- la cérémonie ---------- */
+.ceremonie{
+  position:fixed;inset:0;z-index:300;background:var(--bg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:24px 18px 0;
+}
+.ceremonie[hidden]{display:none}
+/* Une lueur qui respire derrière la scène, pour que le fond ne soit pas
+   un simple aplat noir pendant deux minutes. */
+.ceremonie::before{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(60% 50% at 50% 42%,
+    color-mix(in srgb, var(--accent) 13%, transparent), transparent 70%);
+  animation:cerSouffle 6s ease-in-out infinite;
+}
+@keyframes cerSouffle{ 0%,100%{opacity:.55} 50%{opacity:1} }
+
+.cerx{
+  position:absolute;top:18px;right:18px;z-index:2;
+  background:var(--surface-2);border:1px solid var(--line);color:var(--muted);
+  width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:15px;
+}
+.cerx:hover{color:var(--ink)}
+
+.cerscene{
+  position:relative;z-index:1;width:100%;max-width:720px;flex:1;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:14px;
+}
+.cerkick{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;letter-spacing:.22em;
+  text-transform:uppercase;color:var(--muted);
+}
+.cerico{font-size:64px;line-height:1;animation:cerPose .5s cubic-bezier(.2,.9,.3,1.4)}
+.certitre{font-family:"Outfit",system-ui,sans-serif;font-size:40px;font-weight:700;
+  line-height:1.1;margin:0}
+.cersous{font-family:"Barlow Semi Condensed",sans-serif;font-size:15px;color:var(--muted);
+  margin:0}
+@keyframes cerPose{ from{opacity:0;transform:scale(.6) translateY(14px)} to{opacity:1} }
+
+/* Le vainqueur n'arrive pas avec la catégorie : une seconde de silence,
+   puis il tombe. C'est tout ce qui fait une annonce. */
+.cerqui{opacity:0;transform:translateY(16px);transition:opacity .45s, transform .45s}
+.cerqui.la{opacity:1;transform:none}
+.cerpav{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:6px}
+.cerpav .pav{width:68px;height:68px}
+.cernom{font-family:"Outfit",system-ui,sans-serif;font-size:30px;font-weight:600;text-align:left}
+.cerval{font-family:"Barlow Semi Condensed",sans-serif;font-size:17px;
+  letter-spacing:.04em;margin-top:2px}
+.cerequipe{font-family:"Barlow Semi Condensed",sans-serif;font-size:12.5px;
+  letter-spacing:.1em;text-transform:uppercase;margin-top:3px}
+.cergain{margin-top:10px;display:inline-block;
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:13px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--accent);
+  background:color-mix(in srgb, var(--accent) 13%, transparent);
+  border-radius:var(--pill);padding:6px 15px}
+.cersuite{display:flex;flex-direction:column;gap:3px;margin-top:14px;width:100%;
+  max-width:360px;opacity:0;transition:opacity .5s}
+.cersuite.la{opacity:1}
+.cerligne{display:grid;grid-template-columns:18px 1fr auto;gap:8px;align-items:center;
+  font-size:12.5px;color:var(--muted);padding:2px 4px}
+.cerligne .pos{font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;text-align:right}
+
+/* L'écran final */
+.cerfin{display:flex;align-items:stretch;gap:12px;width:100%;margin-top:4px}
+.cercamp{flex:1;background:var(--surface-2);border-radius:var(--r-lg);padding:16px 12px;
+  border-top:3px solid var(--line)}
+.cercamp.gagne{border-top-color:var(--accent);
+  background:color-mix(in srgb, var(--accent) 10%, var(--surface-2))}
+.cercamp .cnom{font-family:"Outfit",system-ui,sans-serif;font-size:17px;font-weight:600}
+.cercamp .cscore{font-family:"Outfit",system-ui,sans-serif;font-size:34px;font-weight:700;
+  font-variant-numeric:tabular-nums;margin-top:4px}
+.cercoupe{font-size:56px;line-height:1;animation:cerPose .6s cubic-bezier(.2,.9,.3,1.4)}
+
+.cerbas{position:relative;z-index:1;width:100%;max-width:720px;padding:16px 0 20px}
+.cerjauge{height:3px;background:var(--surface-3);border-radius:2px;overflow:hidden}
+.cerjauge i{display:block;height:100%;background:var(--accent);
+  border-radius:2px;transition:width .4s}
+.ceractions{display:flex;gap:9px;justify-content:center;margin-top:14px}
+.cerclavier{text-align:center;margin:10px 0 0;
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;color:var(--muted)}
+
+@media (max-width:620px){
+  .certitre{font-size:29px}
+  .cerico{font-size:48px}
+  .cernom{font-size:23px}
+  .cerpav .pav{width:54px;height:54px}
+  .cerfin{flex-direction:column}
+  .cercamp .cscore{font-size:28px}
+  .cerclavier{display:none}
+}
+
 /* ---------- le Rewind ---------- */
 .rewstatut{
   font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;letter-spacing:.08em;
@@ -293,7 +402,11 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .rewintro{margin:0 0 14px;font-size:13.5px;color:var(--ink-2);line-height:1.6}
 .rewintro b{color:var(--ink)}
 
-.rewgrille{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
+/* align-items:start, et c'est tout le sujet : sans lui, une carte
+   dépliée étire ses voisines sur sa hauteur et laisse deux grands vides
+   à côté d'elle. Chaque carte garde désormais la sienne. */
+.rewgrille{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));
+  gap:10px;align-items:start}
 .rewcat{background:var(--surface-2);border-radius:var(--r-lg);padding:11px 13px;
   border-left:3px solid var(--line)}
 .rewcat.nul{border-left-color:var(--down)}
@@ -318,7 +431,10 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .rewcat.ouvert .chev{transform:rotate(180deg)}
 
 .rewclt{margin-top:10px;padding-top:9px;border-top:1px solid var(--line);
-  display:flex;flex-direction:column;gap:3px}
+  display:flex;flex-direction:column;gap:2px;
+  /* Douze joueurs tiennent sans ascenseur ; au-delà il apparaît plutôt
+     que d'allonger la carte sans fin. */
+  max-height:340px;overflow-y:auto}
 .rewrang{display:grid;grid-template-columns:20px auto 1fr auto;gap:7px;align-items:center;
   padding:3px 5px;border-radius:var(--r-sm);font-size:12.5px}
 .rewrang.premier{background:color-mix(in srgb, var(--accent) 12%, transparent)}

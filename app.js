@@ -2442,6 +2442,18 @@ const REW_CALCUL = {
                 val: p => { const g = rewParties(p.id);
                             return g.length ? rewSerie(g, x => !x.win) : null; } },
   // Le signe typographique du site, pas le trait d'union du clavier.
+  /* Les heures laissées sur la Faille. La durée n'était pas enregistrée
+     avant aujourd'hui : tant que le rattrapage n'a pas tourné, seules
+     les parties récentes comptent, et le classement favorise ceux qui
+     ont joué en dernier. On exige donc qu'au moins la moitié des
+     parties d'un joueur porte sa durée — sinon il n'est pas classé,
+     plutôt que mal classé. */
+  faille:     { sens:"max", fmt: v => v.toFixed(1) + " h sur la Faille",
+                val: p => { const g = rewParties(p.id);
+                            if(!g.length) return null;
+                            const { total, n } = rewSomme(g, "duree_min");
+                            return n >= Math.max(5, g.length / 2) ? total / 60 : null; } },
+
   sisyphe:    { sens:"min", fmt: v => (v >= 0 ? "+" : "−")
                                     + Math.abs(v).toFixed(1) + " LP / partie",
                 val: p => { const g = rewParties(p.id);
@@ -2510,10 +2522,24 @@ const rewDonne = cle =>
   S.games.filter(g => g.kind === "rewind"
     && String(g.match_id || "").startsWith("rewind-" + cle + "-"));
 
+/* L'aperçu « challenge terminé », pour l'administrateur seul. Il ne
+   change rien en base : il fait seulement répondre « oui » à la
+   question ci-dessous, et tout le site en découle — le Rewind s'ouvre,
+   la cérémonie se lance, le décompte est à zéro. */
+let apercuFin = false;
+
 // Le challenge est-il fini ?
 function challengeFini(){
   if(!S.challenge) return false;
+  if(apercuFin && isAdmin()) return true;
   return Date.now() >= startDate().getTime() + S.challenge.days * 86400000;
+}
+
+function basculerApercuFin(v){
+  apercuFin = v && isAdmin();
+  $("#apercuFinBar").hidden = !apercuFin;
+  render();
+  if(apercuFin) $("#rewindBlock").scrollIntoView({ behavior:"smooth", block:"start" });
 }
 
 function renderRewind(){
@@ -2533,7 +2559,10 @@ function renderRewind(){
   st.textContent = fini ? "le challenge est fini" : "aperçu administrateur";
 
   $("#rewIntro").innerHTML = fini
-    ? "Vingt et un jours en douze catégories. Chacune rapporte <b>" + orFr(montant)
+    // Comptes repris du réglage, jamais écrits en toutes lettres : une
+    // catégorie de plus rendrait la phrase fausse sans prévenir.
+    ? S.challenge.days + " jours en " + S.rewcats.length
+      + " catégories. Chacune rapporte <b>" + orFr(montant)
       + " LP</b> au camp de son vainqueur — la moitié récompense le jeu, l'autre "
       + "moitié récompense son contraire."
     : "<b>Personne d'autre que toi ne voit cette section</b> tant que le challenge "
@@ -2588,13 +2617,14 @@ function renderRewind(){
       + '<div class="rewsous">' + esc(c.sous) + '</div>'
       + corps
       + detail
-      + (admin && g
-          ? '<div class="rewdon">'
-            + (deja.length
-                ? '<span class="rewdonne">✓ ' + orFr(montant) + ' LP donnés</span>'
-                  + '<button type="button" class="btn ghost" data-rewoff="' + esc(c.cle) + '">Retirer</button>'
-                : '<button type="button" class="btn" data-rewon="' + esc(c.cle) + '">Donner '
-                  + orFr(montant) + ' LP</button>')
+      /* Plus de bouton par carte : douze « Donner 100 LP » alourdissaient
+         la grille pour un geste qui se fait une fois, en fin de
+         challenge. Il ne reste que la marque de ce qui est déjà versé,
+         et l'attribution se fait en bas, d'un seul coup. */
+      + (admin && deja.length
+          ? '<div class="rewdon"><span class="rewdonne">\u2713 ' + orFr(montant)
+            + ' LP vers\u00e9s</span>'
+            + '<button type="button" class="btn ghost" data-rewoff="' + esc(c.cle) + '">Retirer</button>'
             + '</div>'
           : "")
       + '</div>';
@@ -2604,11 +2634,16 @@ function renderRewind(){
   $("#rewPied").innerHTML = admin
     ? '<button type="button" class="btn" id="rewTout"' + (restantes.length ? "" : " disabled") + '>'
       + (restantes.length
-          ? "Tout attribuer (" + restantes.length + " catégorie"
-            + (restantes.length > 1 ? "s" : "") + ")"
-          : "Tout est attribué") + '</button>'
-      + '<span class="hint" style="margin:0">Relis les vainqueurs avant : les LP partent au score d\'équipe.</span>'
-    : "";
+          ? "Attribuer les " + orFr(montant * restantes.length) + " LP ("
+            + restantes.length + " cat\u00e9gorie" + (restantes.length > 1 ? "s" : "") + ")"
+          : "Tout est attribu\u00e9") + '</button>'
+      + '<button type="button" class="btn ghost" id="cerLancer">Lancer la c\u00e9r\u00e9monie</button>'
+      + (apercuFin
+          ? '<button type="button" class="btn ghost" id="apercuFinBtn">Quitter l\'aper\u00e7u</button>'
+          : '<button type="button" class="btn ghost" id="apercuFinBtn">Voir le site comme apr\u00e8s la fin</button>')
+      + '<span class="hint" style="margin:0">Attribue <b>avant</b> la c\u00e9r\u00e9monie : '
+      + 'le score final qu\'elle annonce compte les LP d\u00e9j\u00e0 vers\u00e9s.</span>'
+    : '<button type="button" class="btn" id="cerLancer">Revoir la c\u00e9r\u00e9monie</button>';
 
   /* La carte entière bascule, sauf les boutons d'attribution : cliquer
      « Donner 100 LP » ne doit pas replier la liste sous les doigts. */
@@ -2624,6 +2659,12 @@ function renderRewind(){
     b.addEventListener("click", () => rewDonnerCat(b.dataset.rewon)));
   $("#rewGrille").querySelectorAll("[data-rewoff]").forEach(b =>
     b.addEventListener("click", () => rewRetirerCat(b.dataset.rewoff)));
+  const lancer = $("#cerLancer");
+  if(lancer) lancer.addEventListener("click", () => ouvrirCeremonie());
+
+  const ap = $("#apercuFinBtn");
+  if(ap) ap.addEventListener("click", () => basculerApercuFin(!apercuFin));
+
   const tout = $("#rewTout");
   if(tout) tout.addEventListener("click", async () => {
     tout.disabled = true;
@@ -2662,6 +2703,142 @@ async function rewRetirerCat(cle){
   log.className = "log ok";
   await loadAll();
 }
+
+
+/* ===================================================================
+   La cérémonie du Rewind
+
+   Les catégories défilent une par une, puis le score final. Elle
+   s'ouvre quand le challenge est fini ; l'administrateur peut la
+   répéter avant, pour vérifier qu'elle tourne avant de réunir tout le
+   monde.
+
+   Une annonce tient à son silence : la catégorie s'affiche seule, et
+   le vainqueur ne tombe qu'une seconde plus tard. Cliquer pendant ce
+   temps saute l'attente plutôt que de passer à la suite — sinon on
+   rate l'annonce qu'on venait voir.
+=================================================================== */
+let cerEtape = 0;
+let cerMinuteurs = [];
+let cerPret = false;      // le vainqueur de l'étape est-il déjà révélé ?
+
+function cerStop(){ cerMinuteurs.forEach(clearTimeout); cerMinuteurs = []; }
+const cerPlus = (ms, f) => cerMinuteurs.push(setTimeout(f, ms));
+
+function ouvrirCeremonie(){
+  if(!S.rewcats.length) return;
+  cerEtape = 0;
+  $("#ceremonie").hidden = false;
+  document.body.style.overflow = "hidden";
+  rendreCeremonie();
+}
+function fermerCeremonie(){
+  cerStop();
+  $("#ceremonie").hidden = true;
+  document.body.style.overflow = "";
+}
+
+// Les totaux d'équipe, objets et primes compris : le score qui tranche.
+function cerScores(){
+  const st = allStates();
+  const t = x => st.filter(s => s.player.team === x).reduce((a, s) => a + s.global, 0);
+  return { a: t("a"), b: t("b") };
+}
+
+function rendreCeremonie(){
+  cerStop();
+  cerPret = false;
+  const sc = $("#cerScene");
+  const n = S.rewcats.length;
+  const dernier = n + 1;
+  cerEtape = Math.max(0, Math.min(dernier, cerEtape));
+
+  $("#cerJauge").style.width = Math.round(cerEtape / dernier * 100) + "%";
+  $("#cerPrec").disabled = cerEtape === 0;
+  $("#cerSuiv").disabled = cerEtape === dernier;
+
+  // ---- l'ouverture ---------------------------------------------
+  if(cerEtape === 0){
+    const j = S.challenge.days;
+    sc.innerHTML = '<div class="cerkick">' + j + ' jours, ' + n + ' catégories</div>'
+      + '<h2 class="certitre">Le Rewind</h2>'
+      + '<p class="cersous">Ce que vous avez fait de ces trois semaines, '
+      + 'pour le meilleur et surtout pour le reste.</p>'
+      + '<div class="cerico">🎬</div>';
+    cerPret = true;
+    return;
+  }
+
+  // ---- le score final ------------------------------------------
+  if(cerEtape === dernier){
+    const { a, b } = cerScores();
+    const gagne = a === b ? null : (a > b ? "a" : "b");
+    const camp = (t, score) => '<div class="cercamp' + (gagne === t ? " gagne" : "") + '">'
+      + '<div class="cnom">' + esc(t === "a" ? S.challenge.team_a_name : S.challenge.team_b_name)
+      + '</div><div class="cscore">' + signed(score) + '</div></div>';
+    sc.innerHTML = '<div class="cerkick">Score final</div>'
+      + '<div class="cerico cercoupe">🏆</div>'
+      + '<h2 class="certitre">'
+        + (gagne
+            ? esc(gagne === "a" ? S.challenge.team_a_name : S.challenge.team_b_name)
+            : "Égalité parfaite")
+      + '</h2>'
+      + '<div class="cerfin">' + camp("a", a) + camp("b", b) + '</div>'
+      + '<p class="cersous">'
+        + (gagne ? Math.abs(a - b) + " LP d'écart au coup de sifflet."
+                 : "Personne n'aura su se départager.")
+      + '</p>';
+    cerPret = true;
+    return;
+  }
+
+  // ---- une catégorie -------------------------------------------
+  const c = S.rewcats[cerEtape - 1];
+  const cl = rewClassement(c.cle);
+  const g = rewVainqueurs(c.cle);
+
+  sc.innerHTML = '<div class="cerkick">' + cerEtape + ' / ' + n + '</div>'
+    + '<div class="cerico">' + esc(c.icone) + '</div>'
+    + '<h2 class="certitre">' + esc(c.nom) + '</h2>'
+    + '<p class="cersous">' + esc(c.sous) + '</p>'
+    + '<div class="cerqui" id="cerQui">'
+      + (g
+          ? '<div class="cerpav">' + avatarRing(g.joueurs[0], { lg:true })
+            + '<div><div class="cernom">' + esc(g.joueurs[0].name)
+              + (g.joueurs.length > 1 ? " +" + (g.joueurs.length - 1) : "") + '</div>'
+            + '<div class="cerval" style="color:' + (c.camp === "nul" ? "var(--down)" : "var(--up)")
+              + '">' + esc(g.fmt) + '</div>'
+            + '<div class="cerequipe" style="color:' + TEAM_COLOR[g.joueurs[0].team] + '">'
+              + esc(g.joueurs[0].team === "a" ? S.challenge.team_a_name : S.challenge.team_b_name)
+              + '</div></div></div>'
+            + '<div class="cergain">+' + orFr(S.rewind.par_categorie) + ' LP</div>'
+          : '<p class="cersous">Personne n\'a pu être départagé.</p>')
+    + '</div>'
+    + '<div class="cersuite" id="cerSuite">'
+      + (cl ? cl.classes.slice(1, 4).map(x =>
+          '<div class="cerligne"><span class="pos">' + x.rang + '</span>'
+          + '<span>' + esc(x.p.name) + '</span>'
+          + '<span>' + esc(cl.fmt(x.v)) + '</span></div>').join("") : "")
+    + '</div>';
+
+  // Une seconde de silence, puis le vainqueur ; les suivants après.
+  cerPlus(950, () => { $("#cerQui").classList.add("la"); cerPret = true; });
+  cerPlus(1700, () => { const e = $("#cerSuite"); if(e) e.classList.add("la"); });
+}
+
+function cerAvancer(){
+  // Pendant le suspense, le clic révèle au lieu d'avancer.
+  if(!cerPret){
+    cerStop();
+    const q = $("#cerQui"), su = $("#cerSuite");
+    if(q) q.classList.add("la");
+    if(su) su.classList.add("la");
+    cerPret = true;
+    return;
+  }
+  if(cerEtape < S.rewcats.length + 1){ cerEtape++; rendreCeremonie(); }
+}
+function cerReculer(){ if(cerEtape > 0){ cerEtape--; rendreCeremonie(); } }
 
 
 /* ===================================================================
@@ -4000,6 +4177,20 @@ function initUI(){
   $("#btnWar").addEventListener("click", () => openWar(true));
   $("#warClose").addEventListener("click", () => openWar(false));
   $("#warRead").addEventListener("click", toutMarquerLu);
+
+  // La cérémonie : souris et clavier.
+  $("#apercuFinOff").addEventListener("click", () => basculerApercuFin(false));
+  $("#cerClose").addEventListener("click", fermerCeremonie);
+  $("#cerSuiv").addEventListener("click", cerAvancer);
+  $("#cerPrec").addEventListener("click", cerReculer);
+  document.addEventListener("keydown", e => {
+    if($("#ceremonie").hidden) return;
+    if(e.key === "Escape"){ fermerCeremonie(); return; }
+    if(e.key === "ArrowRight" || e.key === " " || e.key === "Enter"){
+      e.preventDefault(); cerAvancer();
+    }
+    if(e.key === "ArrowLeft"){ e.preventDefault(); cerReculer(); }
+  });
 
   // Les deux filtres du journal. Le rendu relit warFiltre, rien d'autre.
   document.querySelectorAll("#warFiltres [data-etat]").forEach(b =>

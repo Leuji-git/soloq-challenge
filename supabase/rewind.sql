@@ -25,6 +25,12 @@
 --  Idempotent.
 -- =====================================================================
 
+/* La durée d'une partie était calculée par la fonction Riot — les
+   Bottes de Célérité s'en servent — mais jamais enregistrée. Sans elle,
+   impossible de compter les heures passées sur la Faille. */
+alter table public.games add column if not exists duree_min numeric;
+
+
 create table if not exists public.rewind (
   id            int primary key default 1,
   par_categorie int not null default 100,
@@ -53,13 +59,14 @@ insert into public.rewind_categories (cle, nom, sous, camp, icone, ordre) values
   ('chute',      'La Chute Libre',   'la pire journée en LP',                         'nul', '📉', 4),
   ('glacon',     'Le Glaçon',        'la plus longue série de défaites',              'nul', '🧊', 5),
   ('sisyphe',    'Le Sisyphe',       'le plus de parties pour le moins de LP',        'nul', '🪨', 6),
+  ('faille',     'Le Temps Perdu',   'le plus d''heures laissées sur la Faille',      'nul', '⏳', 7),
   -- ---- le côté lumineux --------------------------------------------
-  ('monarque',   'Le Monarque',      'le plus de LP nets',                            'bon', '👑', 7),
-  ('bourreau',   'Le Bourreau',      'le plus d''éliminations',                       'bon', '⚔️', 8),
-  ('increvable', 'L''Increvable',    'le moins de morts par partie',                  'bon', '🛡️', 9),
-  ('invaincu',   'L''Invaincu',      'la plus longue série de victoires',             'bon', '🔥', 10),
-  ('oeil',       'L''Œil',           'la meilleure vision moyenne',                   'bon', '👁️', 11),
-  ('dompteur',   'Le Dompteur',      'le plus de dragons et de barons',               'bon', '🐲', 12)
+  ('monarque',   'Le Monarque',      'le plus de LP nets',                            'bon', '👑', 8),
+  ('bourreau',   'Le Bourreau',      'le plus d''éliminations',                       'bon', '⚔️', 9),
+  ('increvable', 'L''Increvable',    'le moins de morts par partie',                  'bon', '🛡️', 10),
+  ('invaincu',   'L''Invaincu',      'la plus longue série de victoires',             'bon', '🔥', 11),
+  ('oeil',       'L''Œil',           'la meilleure vision moyenne',                   'bon', '👁️', 12),
+  ('dompteur',   'Le Dompteur',      'le plus de dragons et de barons',               'bon', '🐲', 13)
 on conflict (cle) do update
   set nom = excluded.nom, sous = excluded.sous, camp = excluded.camp,
       icone = excluded.icone, ordre = excluded.ordre;
@@ -137,6 +144,15 @@ notify pgrst, 'reload schema';
 select par_categorie, par_categorie * (select count(*) from public.rewind_categories)
        as total_en_jeu
   from public.rewind where id = 1;
+
+/* Combien de parties portent déjà leur durée. Tant que ce n'est pas
+   proche de 100 %, « Le Temps Perdu » favorise ceux qui ont joué
+   récemment : lance le rattrapage depuis la console admin. */
+select count(*) filter (where duree_min is not null) as avec_duree,
+       count(*) as parties,
+       round(100.0 * count(*) filter (where duree_min is not null)
+             / greatest(1, count(*)), 1) as couverture_pct
+  from public.games where kind = 'game';
 
 select ordre, icone, nom, camp, sous from public.rewind_categories order by ordre;
 

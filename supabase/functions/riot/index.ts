@@ -1047,6 +1047,8 @@ async function sync(force){
             partner_id: g.partnerId, match_id: g.matchId, champion: g.champion,
             approx: split.approx || !!att.forced, kind: "game",
             role: g.role, kills: g.kills, deaths: g.deaths, assists: g.assists,
+            // La duree, pour les heures passees sur la Faille.
+            duree_min: g.dureeMin == null ? null : Math.round(g.dureeMin * 100) / 100,
             vision: g.vision, dragons: g.dragons, barons: g.barons, cs: g.cs,
             gold_gagne: or,
             played_on: parisDate(g.end), created_at: new Date(g.end).toISOString(),
@@ -1389,6 +1391,55 @@ async function recalculer(user, body){
 -------------------------------------------------------------------- */
 const RATTRAPAGE_MAX = 35;          // par appel, pour tenir dans le quota Riot
 
+/* Remplit la durée des parties déjà enregistrées.
+
+   La durée était calculée depuis le début — les Bottes de Célérité s'en
+   servent — mais jamais écrite. Sans elle, impossible de compter les
+   heures laissées sur la Faille.
+
+   Un appel à Match-V5 par partie, par paquets : une clé de dev tient
+   cent appels par deux minutes, donc on s'arrête à PAQUET_DUREES et on
+   annonce ce qui reste. Relancer reprend où l'on s'était arrêté, la
+   requête écartant d'elle-même les parties déjà remplies.
+
+   Un même match couvre souvent deux joueurs du challenge : il n'est
+   demandé qu'une fois à Riot, et les deux lignes sont écrites. Les
+   lignes qui ne viennent pas de Riot (boutique, péage, bataille) n'ont
+   pas de matricule de partie et sont ignorées. */
+const PAQUET_DUREES = 60;
+const MATRICULE = /^[A-Z0-9]+_[0-9]+$/;
+
+async function rattraperDurees(user, body){
+  if(!user || !await isAdmin(user.id)) return json({ error: "Réservé à un administrateur." }, 403);
+
+  const { data: lignes } = await db.from("games")
+    .select("id,match_id")
+    .eq("kind", "game").is("duree_min", null).not("match_id", "is", null)
+    .order("created_at").limit(PAQUET_DUREES + 1);
+
+  const lot = (lignes || []).filter(g => MATRICULE.test(g.match_id || ""));
+  const bilan = { vues: lot.length, remplies: 0, ratees: 0,
+                  reste: Math.max(0, lot.length - PAQUET_DUREES) };
+
+  const vus = {};
+  for(const g of lot.slice(0, PAQUET_DUREES)){
+    try{
+      if(vus[g.match_id] === undefined){
+        const m = await riot(`${REGION}/lol/match/v5/matches/${g.match_id}`);
+        const i = m && m.info;
+        const deb = i && (i.gameStartTimestamp || i.gameCreation);
+        const fin = i && (i.gameEndTimestamp || (deb + (i.gameDuration || 0) * 1000));
+        vus[g.match_id] = (deb && fin && fin > deb) ? (fin - deb) / 60000 : null;
+      }
+      const d = vus[g.match_id];
+      if(d == null){ bilan.ratees++; continue; }
+      await db.from("games").update({ duree_min: Math.round(d * 100) / 100 }).eq("id", g.id);
+      bilan.remplies++;
+    }catch(_){ bilan.ratees++; }
+  }
+  return json(bilan);
+}
+
 async function rattraper(user, body){
   if(!user || !await isAdmin(user.id)) return json({ error: "Réservé à un administrateur." }, 403);
   if(!body.player) return json({ error: "Compte attendu." }, 400);
@@ -1443,6 +1494,7 @@ async function rattraper(user, body){
       partner_id: g.partnerId, match_id: g.matchId, champion: g.champion,
       approx: true, kind: "game",
       role: g.role, kills: g.kills, deaths: g.deaths, assists: g.assists,
+      duree_min: g.dureeMin == null ? null : Math.round(g.dureeMin * 100) / 100,
       vision: g.vision, dragons: g.dragons, barons: g.barons, cs: g.cs,
       gold_gagne: or,
       played_on: parisDate(g.end), created_at: new Date(g.end).toISOString(),
@@ -1488,6 +1540,7 @@ Deno.serve(async (req) => {
       case "sim":        return await simuler(user, body);
       case "recompute":  return await recalculer(user, body);
       case "rattrapage": return await rattraper(user, body);
+      case "durees":     return await rattraperDurees(user, body);
       default:           return json({ error: "Action inconnue." }, 400);
     }
   }catch(e){

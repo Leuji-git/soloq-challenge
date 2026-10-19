@@ -193,6 +193,26 @@
   </div>
 </aside>
 
+<!-- La cérémonie du Rewind. Plein écran, par-dessus tout le reste. -->
+<div class="ceremonie" id="ceremonie" hidden role="dialog" aria-modal="true"
+     aria-label="Cérémonie du Rewind">
+  <button type="button" class="cerx" id="cerClose" aria-label="Fermer">✕</button>
+  <div class="cerscene" id="cerScene"></div>
+  <div class="cerbas">
+    <div class="cerjauge"><i id="cerJauge"></i></div>
+    <div class="ceractions">
+      <button type="button" class="btn ghost" id="cerPrec">Précédent</button>
+      <button type="button" class="btn" id="cerSuiv">Suivant</button>
+    </div>
+    <p class="cerclavier">Espace ou → pour avancer · Échap pour fermer</p>
+  </div>
+</div>
+
+<div class="apercufin" id="apercuFinBar" hidden>
+  <span><b>Aperçu</b> — tu vois le site tel qu'il sera une fois le challenge terminé.</span>
+  <button type="button" id="apercuFinOff">Revenir au site normal</button>
+</div>
+
 <div class="floattip" id="floatTip" hidden></div>
 <div class="scrim" id="warScrim" hidden></div>
 <aside class="drawer right" id="warDrawer" aria-hidden="true" aria-label="Journal de guerre">
