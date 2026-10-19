@@ -2631,6 +2631,12 @@ function renderRewind(){
   }).join("");
 
   const restantes = S.rewcats.filter(c => rewVainqueurs(c.cle) && !rewDonne(c.cle).length);
+
+  /* Combien de parties portent déjà leur durée. Sans ce chiffre, « Le
+     Temps Perdu » reste muet sans dire pourquoi. */
+  const vraies = S.games.filter(g => g.kind === "game");
+  const datees = vraies.filter(g => g.duree_min != null).length;
+  const manquent = vraies.length - datees;
   $("#rewPied").innerHTML = admin
     ? '<button type="button" class="btn" id="rewTout"' + (restantes.length ? "" : " disabled") + '>'
       + (restantes.length
@@ -2638,11 +2644,23 @@ function renderRewind(){
             + restantes.length + " cat\u00e9gorie" + (restantes.length > 1 ? "s" : "") + ")"
           : "Tout est attribu\u00e9") + '</button>'
       + '<button type="button" class="btn ghost" id="cerLancer">Lancer la c\u00e9r\u00e9monie</button>'
+      + (manquent
+          ? '<button type="button" class="btn ghost" id="rewDurees">'
+            + (dureesEnCours ? "Arr\u00eater le rattrapage"
+                             : "Compl\u00e9ter les dur\u00e9es (" + orFr(manquent) + ")")
+            + '</button>'
+          : '')
       + (apercuFin
           ? '<button type="button" class="btn ghost" id="apercuFinBtn">Quitter l\'aper\u00e7u</button>'
           : '<button type="button" class="btn ghost" id="apercuFinBtn">Voir le site comme apr\u00e8s la fin</button>')
       + '<span class="hint" style="margin:0">Attribue <b>avant</b> la c\u00e9r\u00e9monie : '
-      + 'le score final qu\'elle annonce compte les LP d\u00e9j\u00e0 vers\u00e9s.</span>'
+      + 'le score final qu\'elle annonce compte les LP d\u00e9j\u00e0 vers\u00e9s.'
+      + (manquent
+          ? '<br><b>' + orFr(manquent) + '</b> partie' + (manquent > 1 ? "s" : "")
+            + ' sans dur\u00e9e : « Le Temps Perdu » ne classera personne tant que '
+            + 'le rattrapage n\'a pas tourn\u00e9.'
+          : '<br>Toutes les parties portent leur dur\u00e9e.')
+      + '</span>'
     : '<button type="button" class="btn" id="cerLancer">Revoir la c\u00e9r\u00e9monie</button>';
 
   /* La carte entière bascule, sauf les boutons d'attribution : cliquer
@@ -2664,6 +2682,9 @@ function renderRewind(){
 
   const ap = $("#apercuFinBtn");
   if(ap) ap.addEventListener("click", () => basculerApercuFin(!apercuFin));
+
+  const dur = $("#rewDurees");
+  if(dur) dur.addEventListener("click", lancerRattrapageDurees);
 
   const tout = $("#rewTout");
   if(tout) tout.addEventListener("click", async () => {
@@ -2691,6 +2712,54 @@ async function rewDonnerCat(cle, groupe){
   log.textContent = nom + " : " + g.joueurs.map(p => p.name).join(", ") + " \u2014 LP donnés.";
   log.className = "log ok";
   if(!groupe) await loadAll();
+}
+
+/* Le rattrapage des durées.
+
+   La fonction serveur travaille par paquets de soixante parties, soit
+   autant d'appels à Riot. Une clé de développement en autorise cent par
+   deux minutes : on attend donc entre deux paquets, sinon Riot ferme le
+   robinet au troisième.
+
+   On ne passe par aucun jeton à la main : sb.functions.invoke joint
+   celui de la session, et le serveur vérifie qu'il appartient à un
+   administrateur. */
+const PAUSE_DUREES = 100;      // secondes entre deux paquets
+let dureesEnCours = false;
+
+// Le journal est reconstruit à chaque rendu : on le relit à chaque fois.
+function direRewind(txt, cls){
+  const l = $("#rewLog");
+  if(l){ l.textContent = txt; l.className = "log" + (cls ? " " + cls : ""); }
+}
+
+async function lancerRattrapageDurees(){
+  // Deuxième clic : on s'arrête après le paquet en cours.
+  if(dureesEnCours){ dureesEnCours = false; direRewind("Arrêt demandé…"); return; }
+  dureesEnCours = true;
+  render();
+  try{
+    for(;;){
+      if(!dureesEnCours) break;
+      direRewind("Lecture des parties chez Riot…");
+      const r = await callRiot("durees");
+      await loadAll();
+      if(!r || !r.reste){
+        direRewind("Durées complètes : " + ((r && r.remplies) || 0)
+          + " partie(s) sur ce dernier paquet.", "ok");
+        break;
+      }
+      for(let t = PAUSE_DUREES; t > 0 && dureesEnCours; t--){
+        direRewind(r.remplies + " remplies · " + r.reste + " restantes · "
+          + "reprise dans " + t + " s (reclique pour arrêter)");
+        await new Promise(f => setTimeout(f, 1000));
+      }
+    }
+  }catch(e){
+    direRewind(e.message || String(e), "bad");
+  }
+  dureesEnCours = false;
+  render();
 }
 
 async function rewRetirerCat(cle){
