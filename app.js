@@ -106,8 +106,13 @@ const S = {
   inventory: [],    // exemplaires possédés, tous joueurs confondus
   session: null,
   profile: null,
+  bataille: null,   // l'événement de fin : date, lot, inscriptions ouvertes
+  inscrits: [],     // qui joue, à quel poste, dans quel camp
   ready: false
 };
+
+// Le poste choisi dans le sélecteur, tant qu'on n'a pas validé.
+let batRole = null;
 let claimDismissed = false;
 let period = "all";
 let chartMode = "players";
@@ -145,7 +150,7 @@ if(!SUPABASE_URL || SUPABASE_URL.includes("xxxxxxxx") || SUPABASE_ANON_KEY.inclu
 =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv, tb, bx, bo] = await Promise.all([
+  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv, tb, bx, bo, ba, bi] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at"),
@@ -158,7 +163,10 @@ async function loadAll(){
     sb.from("live_games").select("*"),
     sb.from("team_boosts").select("*"),
     sb.from("player_boxes").select("*"),
-    sb.from("bourse_resume").select("*").maybeSingle()
+    sb.from("bourse_resume").select("*").maybeSingle(),
+    // bataille.sql n'est peut-être pas lancé : la section reste cachée.
+    sb.from("bataille").select("*").eq("id",1).maybeSingle(),
+    sb.from("bataille_inscrits").select("*").order("inscrit_le")
   ]);
   const err = ch.error || pl.error || gm.error || sn.error || pr.error || bt.error || st.error || pi.error;
   if(err){
@@ -194,6 +202,8 @@ async function loadAll(){
   // bourse.sql n'est peut-être pas encore lancé : sans lui, l'indice
   // vaut 1 000 et les prix ne bougent pas. Le site marche comme avant.
   S.bourse    = bo.error ? null : (bo.data || null);
+  S.bataille  = ba.error ? null : (ba.data || null);
+  S.inscrits  = bi.error ? [] : (bi.data || []);
   S.ready = true;
   $("#errBox").hidden = true;
   render();
@@ -2343,6 +2353,206 @@ const OR_ROLES = {
 const OR_VICTOIRE = 50;
 const ROLE_FR = { TOP:"Top", JUNGLE:"Jungle", MIDDLE:"Mid", BOTTOM:"Bot", UTILITY:"Support" };
 
+/* ===================================================================
+   L'Ultime Bataille
+
+   Un 5 contre 5 le dernier jeudi, avec un lot de LP pour le camp qui
+   l'emporte. Chacun s'inscrit à un poste, un seul joueur par poste et
+   par camp ; les suivants sont remplaçants sur ce poste et montent si
+   le titulaire se désiste.
+
+   Le camp ne se choisit pas, et ce n'est pas qu'une affaire
+   d'affichage : bataille_inscrire() ne prend QUE le poste en
+   paramètre, et lit l'équipe sur la fiche du joueur, côté serveur.
+   Même en appelant l'API à la main, on ne peut pas demander à jouer
+   chez l'adversaire — il n'y a aucun chemin pour le dire.
+=================================================================== */
+function renderBataille(states){
+  const bloc = $("#batailleBlock");
+  if(!bloc) return;
+  // Sans la table, rien à montrer : le reste du site marche comme avant.
+  if(!S.bataille){ bloc.hidden = true; return; }
+  bloc.hidden = false;
+
+  const b = S.bataille;
+  const quand = new Date(b.quand);
+  const passe = Date.now() >= quand.getTime();
+  const close = passe || !b.ouvert;
+
+  majCompteBataille();
+
+  /* Le contexte : ce que le lot pèse face à l'écart du moment. On le
+     calcule, on ne l'écrit pas en dur — l'écart bouge à chaque partie,
+     et une phrase fausse serait pire que pas de phrase. */
+  const ga = states.filter(s => s.player.team === "a").reduce((a, s) => a + s.global, 0);
+  const gb = states.filter(s => s.player.team === "b").reduce((a, s) => a + s.global, 0);
+  const ecart = Math.abs(ga - gb);
+  const devant = ga > gb ? "a" : "b";
+  const nomDevant = devant === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
+  const suffit = b.lot >= ecart;
+
+  $("#batIntro").innerHTML =
+      "<b>" + quand.toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"long" })
+    + " à " + String(quand.getHours()).padStart(2, "0") + " h"
+    + (quand.getMinutes() ? String(quand.getMinutes()).padStart(2, "0") : "")
+    + "</b> · un <b>5 contre 5</b>, et <span class='lot'>" + orFr(b.lot) + " LP</span> "
+    + "pour le camp qui l'emporte."
+    /* Tournure qui ne s'accorde avec rien : les noms d'équipe sont
+       libres, et « Les Pitoyables mène » se voyait. */
+    + "<br>L'écart est de <b>" + orFr(ecart) + " LP</b> pour <b>"
+    + esc(nomDevant) + "</b> — "
+    + (suffit
+        ? "le lot suffit à <b>tout renverser</b>."
+        : "même gagnée, la bataille laisserait <b>" + orFr(ecart - b.lot) + " LP</b> d'écart.")
+    + " Chacun s'inscrit <b>dans son camp</b>, à un poste, et un seul par poste.";
+
+  // --- les deux camps -------------------------------------------
+  const parId = Object.fromEntries(S.players.map(p => [p.id, p]));
+  const moi = myPlayer();
+  const monInscription = moi ? S.inscrits.find(i => i.player_id === moi.id) : null;
+
+  const camp = t => {
+    const nom = t === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
+    const ici = S.inscrits.filter(i => i.team === t);
+    const titulaires = ici.filter(i => i.titulaire);
+    const rempl = ici.filter(i => !i.titulaire);
+
+    const postes = ROLES.map(r => {
+      const i = titulaires.find(x => x.role === r);
+      const p = i ? parId[i.player_id] : null;
+      return '<div class="batposte' + (i ? "" : " vide")
+          + (moi && i && i.player_id === moi.id ? " moi" : "") + '">'
+        + '<img class="roleico" src="' + roleIcon(r) + '" alt=""' + roleRepli(r) + '>'
+        + '<span class="batrole">' + esc(ROLE_FR[r] || r) + '</span>'
+        + '<span class="batqui">'
+          + (p ? avatarRing(p, { sm:true }) + '<span class="nom">' + esc(p.name) + '</span>'
+               : '<span class="nom" style="color:var(--muted)">libre</span>')
+        + '</span></div>';
+    }).join("");
+
+    return '<div class="batcamp ' + t + '">'
+      + '<h4>' + esc(nom) + ' <span style="color:var(--muted);font-weight:400">'
+        + titulaires.length + '/5</span></h4>'
+      + '<div class="batpostes">' + postes + '</div>'
+      + (rempl.length
+          ? '<p class="batrempl">Remplaçant' + (rempl.length > 1 ? "s" : "") + ' : '
+            + rempl.map(i => '<b>' + esc((parId[i.player_id] || {}).name || "?") + '</b> ('
+                + esc(ROLE_FR[i.role] || i.role) + ')').join(", ") + '</p>'
+          : "")
+      + '</div>';
+  };
+  $("#batCamps").innerHTML = camp("a") + camp("b");
+
+  // --- mon inscription ------------------------------------------
+  const zone = $("#batMoi");
+  if(!moi){
+    zone.innerHTML = '<p class="hint" style="margin:0">Connecte-toi avec ton profil joueur pour t\'inscrire.</p>';
+    return;
+  }
+  if(close){
+    zone.innerHTML = '<p class="hint" style="margin:0">'
+      + (passe ? "La bataille a commencé. Les inscriptions sont closes."
+               : "Les inscriptions sont closes.") + '</p>';
+    return;
+  }
+
+  // Les postes déjà tenus DANS MON CAMP : cliquables quand même, mais
+  // on annonce qu'on y entrerait comme remplaçant.
+  const pris = {};
+  S.inscrits.filter(i => i.team === moi.team && i.titulaire)
+    .forEach(i => { pris[i.role] = parId[i.player_id]; });
+
+  const choisi = batRole || (monInscription ? monInscription.role : null);
+  const boutons = ROLES.map(r => {
+    const q = pris[r];
+    const moiDessus = q && moi && q.id === moi.id;
+    return '<button type="button" data-batrole="' + r + '"'
+      + ' aria-pressed="' + (choisi === r ? "true" : "false") + '">'
+      + '<img src="' + roleIcon(r) + '" alt=""' + roleRepli(r) + '>'
+      + '<span>' + esc(ROLE_FR[r] || r) + '</span>'
+      + (q && !moiDessus ? '<span class="pris">· ' + esc(q.name) + '</span>' : "")
+      + '</button>';
+  }).join("");
+
+  const viseRemplacant = choisi && pris[choisi] && pris[choisi].id !== moi.id;
+
+  zone.innerHTML =
+      '<h4>' + (monInscription ? "Tu es inscrit" : "T\'inscrire") + '</h4>'
+    + '<p class="hint">'
+      + (monInscription
+          ? "Au poste de <b>" + esc(ROLE_FR[monInscription.role] || monInscription.role) + "</b>"
+            + (monInscription.titulaire ? " (titulaire)" : " (remplaçant)")
+            + ". Tu peux encore changer de poste ou te désister."
+          : "Choisis ton poste — c\'est obligatoire. Tu joueras pour <b>"
+            + esc(moi.team === "a" ? S.challenge.team_a_name : S.challenge.team_b_name)
+            + "</b> : on ne choisit pas son camp.")
+    + '</p>'
+    + '<div class="batchoix">' + boutons + '</div>'
+    + (viseRemplacant
+        ? '<p class="hint" style="margin:0 0 10px;color:var(--accent)">'
+          + esc(pris[choisi].name) + " tient déjà ce poste : tu serais <b>remplaçant</b>.</p>"
+        : "")
+    + '<div class="batactions">'
+      + '<button type="button" class="btn" id="batValider"' + (choisi ? "" : " disabled") + '>'
+        + (monInscription ? "Valider le changement" : "Je participe") + '</button>'
+      + (monInscription
+          ? '<button type="button" class="btn ghost" id="batPartir">Me désister</button>' : "")
+    + '</div>';
+
+  zone.querySelectorAll("[data-batrole]").forEach(el =>
+    el.addEventListener("click", () => { batRole = el.dataset.batrole; render(); }));
+  const ok = $("#batValider");
+  if(ok) ok.addEventListener("click", () => inscrireBataille(choisi));
+  const off = $("#batPartir");
+  if(off) off.addEventListener("click", desisterBataille);
+}
+
+/* Le compte à rebours, à la minute : la seconde n'apporte rien à trois
+   jours de distance, et ferait clignoter la ligne pour rien. */
+function majCompteBataille(){
+  const el = $("#batCompte");
+  if(!el || !S.bataille) return;
+  const ms = new Date(S.bataille.quand).getTime() - Date.now();
+  if(ms <= 0){ el.textContent = "C'est maintenant"; return; }
+  const min = Math.floor(ms / 60000), h = Math.floor(min / 60), j = Math.floor(h / 24);
+  el.textContent = j > 0 ? "dans " + j + " j " + (h % 24) + " h"
+                 : h > 0 ? "dans " + h + " h " + (min % 60) + " min"
+                 : "dans " + min + " min";
+}
+
+async function inscrireBataille(role){
+  if(!role) return;
+  const log = $("#batLog");
+  $("#batValider").disabled = true;
+  log.textContent = "Inscription…";
+  log.className = "log";
+  const { data, error } = await sb.rpc("bataille_inscrire", { p_role: role });
+  if(error){
+    log.textContent = error.message || String(error);
+    log.className = "log bad";
+    $("#batValider").disabled = false;
+    return;
+  }
+  log.textContent = data.titulaire
+    ? "C'est noté : tu joues " + (ROLE_FR[data.role] || data.role) + "."
+    : "C'est noté : remplaçant " + (ROLE_FR[data.role] || data.role) + ".";
+  log.className = "log ok";
+  batRole = null;
+  await loadAll();
+}
+
+async function desisterBataille(){
+  const log = $("#batLog");
+  log.textContent = "…";
+  log.className = "log";
+  const { error } = await sb.rpc("bataille_desister");
+  if(error){ log.textContent = error.message || String(error); log.className = "log bad"; return; }
+  log.textContent = "Tu n'es plus inscrit.";
+  log.className = "log ok";
+  batRole = null;
+  await loadAll();
+}
+
 function detailOr(g){
   const b = OR_ROLES[g.role] || OR_ROLES.MIDDLE;
   const l = [];
@@ -2861,6 +3071,7 @@ function render(){
   renderEntry();
   renderItems();
   renderWarlog();
+  renderBataille(states);
   renderShop();
   renderLadder(states);
   renderChart();
@@ -2924,7 +3135,13 @@ const RULES = [
   + "<p>Une partie compte si elle se <strong>termine</strong> pendant le challenge. Lancée à 23h58 la veille et finie à 00h02, elle compte — les LP ont bien bougé pendant. Lancée avant la fin et finie après, elle ne compte pas : la même règle des deux côtés.</p>" },
 
   { t:"Durée", h:
-    "<p>21 jours pleins. Le relevé qui compte est celui du dernier soir : le classement au coup de sifflet, pas le pic de la semaine 2.</p>" }
+    "<p>21 jours pleins. Le relevé qui compte est celui du dernier soir : le classement au coup de sifflet, pas le pic de la semaine 2.</p>" },
+
+  { t:"L'Ultime Bataille", h:
+    "<p><strong>Jeudi 22 octobre à 21 h</strong>, un <strong>5 contre 5</strong> entre les deux camps, et <strong>1 000 LP</strong> pour celui qui l'emporte. Ils comptent au score d'équipe, comme tout le reste.</p>"
+  + "<p>L'inscription se fait sur la page d'accueil, et le <strong>poste est obligatoire</strong> : un seul joueur par poste et par camp. Le premier inscrit tient le rôle, les suivants sont remplaçants et montent si quelqu'un se désiste.</p>"
+  + "<p>On ne choisit pas son camp : tu joues pour ton équipe, jamais pour l'autre.</p>"
+  + "<p><strong>Et les LP ne sont plus en vente au Commerce.</strong> À ce stade, un joueur assis sur sa bourse aurait pu acheter l'écart. Ils se gagnent désormais en jouant — ou jeudi soir, sur la faille.</p>" }
 ];
 let ruleIndex = 0;
 
@@ -2947,7 +3164,8 @@ function renderRules(){
 /* Les prix de base. Ceux des objets vivent en base, ceux-ci sont
    fixes — les avantages d'équipe ne suivent pas la bourse, ce sont des
    leviers d'équilibre, pas des marchandises. */
-const PRIX = { coffre: 500, lp25: 6000, boost: 10000, swap: 30000 };
+// Les 25 LP ont quitté la boutique : ils ne s'achètent plus.
+const PRIX = { coffre: 500, boost: 10000, swap: 30000 };
 
 /* Le Commerce suit l'indice de la Place : il monte, tout coûte plus
    cher ; il s'effondre, les rayons passent en solde.
@@ -3162,7 +3380,10 @@ function renderShop(){
           }).join("")
         : '<div class="empty">Tu ne peux acheter qu\'un objet que tu as déjà découvert. Ouvre un coffre pour en découvrir un.</div>')
     + '<h4>Pour ton équipe</h4>'
-    + article("\u{1F4C8}", "25 LP", "cr\u00e9dit\u00e9s \u00e0 ton \u00e9quipe", PRIX.lp25, 'data-lp="25"', false)
+    /* Les LP ne sont plus en vente. À trois jours de la fin, un joueur
+       assis sur sa bourse pouvait acheter l'écart ; ils se gagnent
+       désormais en jouant, ou jeudi soir à l'Ultime Bataille. Le
+       serveur refuse de toute façon : shop_buy_lp() lève. */
     + article("\u26A1", "Double LP \u00b7 " + BOOST_HEURES + " h",
         boostActif
           ? '<b class="boostvif">actif encore ' + resteBoost(finBoost) + '</b> \u00b7 rachat = +' + BOOST_HEURES + ' h'
@@ -3185,8 +3406,6 @@ function renderShop(){
     b.addEventListener("click", () => acheterObjet(b.dataset.buy, b)));
   corps.querySelectorAll("[data-box]").forEach(b =>
     b.addEventListener("click", () => acheterCoffre(b)));
-  corps.querySelectorAll("[data-lp]").forEach(b =>
-    b.addEventListener("click", () => acheterLp(Number(b.dataset.lp), b)));
   corps.querySelectorAll("[data-boost]").forEach(b =>
     b.addEventListener("click", () => acheterBoost(b)));
   corps.querySelectorAll("[data-swap]").forEach(b =>
@@ -3218,11 +3437,6 @@ function acheterObjet(cle, btn){
   const it = S.items.find(i => i.key === cle);
   acheter("shop_buy_item", { p_item: cle }, btn,
     () => (it ? it.name : "Objet") + " ajouté à ta réserve.");
-}
-
-function acheterLp(lp, btn){
-  acheter("shop_buy_lp", { p_lp: lp }, btn,
-    r => lp + " LP crédités à ton équipe pour " + orFr((r && r.prix) || 0) + " or.");
 }
 
 // « 1 h 47 » / « 23 min » : ce qu'il reste de bonus.
@@ -3488,6 +3702,7 @@ function initUI(){
   });
 
   setInterval(tickCountdown, 1000);        // à la seconde : c'est tout l'intérêt
+  setInterval(majCompteBataille, 30000);   // à la minute suffit, à trois jours de là
   setInterval(() => { if(S.ready){ renderSyncStatus(); nudgeSync(); } }, 60000);
   $("#aSaveChallenge").addEventListener("click", saveChallenge);
   $("#aSavePlayers").addEventListener("click", savePlayers);

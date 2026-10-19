@@ -283,6 +283,64 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
   letter-spacing:.02em;color:var(--muted);
 }
 /* L'en-tête du volet : « tout marquer lu » à gauche de la croix. */
+/* ---------- l'Ultime Bataille ---------- */
+.bataille{border-color:color-mix(in srgb, var(--accent) 38%, var(--line))}
+.bataille > header h2{color:var(--accent)}
+.batcompte{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--accent);
+  background:color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius:var(--pill);padding:5px 12px;white-space:nowrap;
+}
+.batintro{margin:0 0 14px;font-size:13.5px;color:var(--ink-2);line-height:1.6}
+.batintro b{color:var(--ink)}
+.batintro .lot{color:var(--accent);font-weight:600}
+
+.batcamps{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:720px){ .batcamps{grid-template-columns:1fr} }
+.batcamp{background:var(--surface-2);border-radius:var(--r-lg);padding:12px}
+.batcamp h4{margin:0 0 10px;font-size:13.5px}
+.batcamp.a h4{color:var(--team-a, #2E9BE0)}
+.batcamp.b h4{color:var(--team-b, #E33B3B)}
+.batpostes{display:flex;flex-direction:column;gap:5px}
+.batposte{
+  display:grid;grid-template-columns:22px 62px 1fr;gap:8px;align-items:center;
+  padding:6px 8px;border-radius:var(--r-sm);background:var(--surface);
+}
+.batposte.vide{opacity:.5;border:1px dashed var(--line);background:none}
+.batposte.moi{box-shadow:inset 2px 0 0 var(--accent)}
+.batposte img.roleico{width:20px;height:20px;opacity:.9}
+.batrole{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;
+  text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+}
+.batqui{display:flex;align-items:center;gap:7px;font-size:13px;min-width:0}
+.batqui span.nom{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.batrempl{margin-top:9px;font-family:"Barlow Semi Condensed",sans-serif;
+  font-size:11.5px;color:var(--muted);line-height:1.5}
+.batrempl b{color:var(--ink-2)}
+
+.batmoi{margin-top:14px;padding:12px;border-radius:var(--r-lg);
+  background:color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+  border:1px solid color-mix(in srgb, var(--accent) 24%, transparent)}
+.batmoi h4{margin:0 0 4px;font-size:13.5px}
+.batmoi .hint{margin:0 0 10px}
+.batchoix{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.batchoix button{
+  display:flex;align-items:center;gap:6px;cursor:pointer;
+  background:var(--surface);border:1px solid var(--line);color:var(--ink-2);
+  border-radius:var(--r-sm);padding:7px 11px;font-family:inherit;font-size:12.5px;
+}
+.batchoix button img{width:18px;height:18px}
+.batchoix button:hover{border-color:var(--accent)}
+.batchoix button[aria-pressed="true"]{
+  border-color:var(--accent);background:color-mix(in srgb, var(--accent) 16%, var(--surface));
+  color:var(--ink);
+}
+.batchoix button .pris{font-size:10.5px;color:var(--muted)}
+.batchoix button:disabled{opacity:.45;cursor:not-allowed}
+.batactions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
 .warfiltres{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 16px 10px}
 .warfiltres .seg button{padding:6px 11px}
 .warfiltres select{

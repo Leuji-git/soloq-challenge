@@ -280,6 +280,21 @@
 
   <div class="rosters" id="rosters"></div>
 
+  <!-- L'événement de fin de challenge. Caché tant que bataille.sql
+       n'a pas été lancé : sans la table, il n'y a rien à montrer. -->
+  <section class="block bataille" id="batailleBlock" hidden>
+    <header>
+      <h2>Ultime Bataille</h2>
+      <span class="batcompte" id="batCompte">—</span>
+    </header>
+    <div class="body">
+      <p class="batintro" id="batIntro"></p>
+      <div class="batcamps" id="batCamps"></div>
+      <div class="batmoi" id="batMoi"></div>
+      <div class="log" id="batLog"></div>
+    </div>
+  </section>
+
   <section class="block" id="entryBlock" hidden>
     <header>
       <h2>Suivi</h2>
