@@ -283,6 +283,38 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
   letter-spacing:.02em;color:var(--muted);
 }
 /* L'en-tête du volet : « tout marquer lu » à gauche de la croix. */
+/* ---------- le Rewind ---------- */
+.rewstatut{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted);
+  background:var(--surface-2);border-radius:var(--pill);padding:5px 12px;white-space:nowrap;
+}
+.rewstatut.avant{color:var(--accent);background:color-mix(in srgb, var(--accent) 14%, transparent)}
+.rewintro{margin:0 0 14px;font-size:13.5px;color:var(--ink-2);line-height:1.6}
+.rewintro b{color:var(--ink)}
+
+.rewgrille{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
+.rewcat{background:var(--surface-2);border-radius:var(--r-lg);padding:11px 13px;
+  border-left:3px solid var(--line)}
+.rewcat.nul{border-left-color:var(--down)}
+.rewcat.bon{border-left-color:var(--up)}
+.rewtitre{display:flex;align-items:center;gap:7px;font-size:13.5px}
+.rewtitre .ico{font-size:17px;line-height:1}
+.rewsous{font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;color:var(--muted);
+  margin:1px 0 9px}
+.rewgagnant{display:flex;align-items:center;gap:8px;min-width:0}
+.rewgagnant .nom{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rewval{margin-left:auto;font-family:"Outfit",system-ui,sans-serif;font-weight:600;
+  font-size:14px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rewcat.nul .rewval{color:var(--down)} .rewcat.bon .rewval{color:var(--up)}
+.rewvide{font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;color:var(--muted)}
+.rewex{font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;color:var(--muted);
+  margin-top:4px}
+.rewdon{margin-top:9px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.rewdon .btn{padding:5px 11px;font-size:11.5px}
+.rewdonne{font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;color:var(--up)}
+.rewpied{margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
 /* ---------- l'Ultime Bataille ---------- */
 .bataille{border-color:color-mix(in srgb, var(--accent) 38%, var(--line))}
 .bataille > header h2{color:var(--accent)}

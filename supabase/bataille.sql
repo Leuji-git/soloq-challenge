@@ -4,10 +4,18 @@
 --  DEUX CHOSES, LE MÊME SOIR.
 --
 --  1. ON NE VEND PLUS DE LP. Les 25 LP à 6 000 or disparaissent de la
---     boutique. À trois jours de la fin, un joueur assis sur sa bourse
---     pouvait acheter l'écart ; désormais les LP se gagnent en jouant,
---     ou se prennent jeudi soir sur la faille. Le reste du Commerce ne
---     bouge pas.
+--     boutique, et le Double LP avec eux. À trois jours de la fin, un
+--     joueur assis sur sa bourse pouvait acheter l'écart — directement
+--     pour les uns, en multipliant ses gains pour l'autre. Les LP se
+--     gagnent désormais en jouant, ou se prennent jeudi soir sur la
+--     faille.
+--
+--     Le changement d'équipe reste : il ne crée aucun LP, il déplace
+--     des joueurs. Mais il passe de 30 000 à 50 000 or, parce qu'à ce
+--     stade retourner une table vaut plus cher qu'au premier jour.
+--
+--     Un Double LP déjà payé continue de courir jusqu'à son terme :
+--     on ferme le robinet, on ne reprend pas ce qui est versé.
 --
 --  2. L'ULTIME BATAILLE. Jeudi 22 octobre à 21 h, un 5 contre 5. Le
 --     camp qui l'emporte GAGNE l'enjeu, celui qui tombe le PERD : le
@@ -60,6 +68,43 @@ end $$;
 
 revoke all     on function public.shop_buy_lp(int) from public, anon;
 grant  execute on function public.shop_buy_lp(int) to authenticated, service_role;
+
+-- Même traitement pour le doublement : il ne vend pas des LP, il les
+-- multiplie, ce qui revient au même à trois jours de la fin.
+create or replace function public.shop_buy_boost()
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  raise exception 'Le Double LP n''est plus en vente. Les LP se gagnent en jouant — ou jeudi soir, à l''Ultime Bataille.';
+end $$;
+
+revoke all     on function public.shop_buy_boost() from public, anon;
+grant  execute on function public.shop_buy_boost() to authenticated, service_role;
+
+
+-- ---------------------------------------------------------------------
+--  Le changement d'équipe : 30 000 → 50 000 or
+--
+--  On ne réécrit pas la fonction, on ne corrige que le prix : elle
+--  porte tout le tirage au sort et l'échange, et la retaper en entier
+--  pour un nombre serait le meilleur moyen d'y perdre quelque chose.
+-- ---------------------------------------------------------------------
+do $$
+declare src text;
+begin
+  select pg_get_functiondef(p.oid) into src
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = 'shop_swap_team';
+  if src is null then
+    raise notice 'shop_swap_team introuvable : rien à retarifer.';
+    return;
+  end if;
+  if position('prix int := 30000' in src) = 0 then
+    raise notice 'Le prix du changement d''équipe n''est pas à 30 000 : rien touché.';
+    return;
+  end if;
+  execute replace(src, 'prix int := 30000', 'prix int := 50000');
+  raise notice 'Changement d''équipe : 50 000 or.';
+end $$;
 
 
 -- =====================================================================
@@ -365,10 +410,23 @@ select i.team, i.role, p.name, i.titulaire, i.inscrit_le
   join public.players p on p.id = i.player_id
  order by i.team, i.titulaire desc, i.role;
 
--- Doit répondre : les LP ne sont plus en vente.
+-- Doivent répondre : ni les LP ni le Double LP ne sont en vente.
 do $$ begin
   perform public.shop_buy_lp(25);
   raise warning 'ANOMALIE : la vente de LP répond encore';
 exception when others then
   raise notice 'Vente de LP bien fermée (%)', sqlerrm;
 end $$;
+
+do $$ begin
+  perform public.shop_buy_boost();
+  raise warning 'ANOMALIE : le Double LP répond encore';
+exception when others then
+  raise notice 'Double LP bien fermé (%)', sqlerrm;
+end $$;
+
+-- Le prix du changement d'équipe, tel qu'il est désormais écrit.
+select case when position('50000' in pg_get_functiondef(p.oid)) > 0
+            then '50 000 or' else 'NON RETARIFÉ' end as changement_equipe
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public' and p.proname = 'shop_swap_team';

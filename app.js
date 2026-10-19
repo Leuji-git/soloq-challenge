@@ -108,6 +108,8 @@ const S = {
   profile: null,
   bataille: null,   // l'événement de fin : date, lot, inscriptions ouvertes
   inscrits: [],     // qui joue, à quel poste, dans quel camp
+  rewind: null,     // le réglage du Rewind : combien par catégorie
+  rewcats: [],      // les catégories, libellés compris
   ready: false
 };
 
@@ -150,7 +152,7 @@ if(!SUPABASE_URL || SUPABASE_URL.includes("xxxxxxxx") || SUPABASE_ANON_KEY.inclu
 =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv, tb, bx, bo, ba, bi] = await Promise.all([
+  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv, tb, bx, bo, ba, bi, rw, rc] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at"),
@@ -166,7 +168,10 @@ async function loadAll(){
     sb.from("bourse_resume").select("*").maybeSingle(),
     // bataille.sql n'est peut-être pas lancé : la section reste cachée.
     sb.from("bataille").select("*").eq("id",1).maybeSingle(),
-    sb.from("bataille_inscrits").select("*").order("inscrit_le")
+    sb.from("bataille_inscrits").select("*").order("inscrit_le"),
+    // rewind.sql n'est peut-être pas lancé : la section reste cachée.
+    sb.from("rewind").select("*").eq("id",1).maybeSingle(),
+    sb.from("rewind_categories").select("*").order("ordre")
   ]);
   const err = ch.error || pl.error || gm.error || sn.error || pr.error || bt.error || st.error || pi.error;
   if(err){
@@ -204,6 +209,8 @@ async function loadAll(){
   S.bourse    = bo.error ? null : (bo.data || null);
   S.bataille  = ba.error ? null : (ba.data || null);
   S.inscrits  = bi.error ? [] : (bi.data || []);
+  S.rewind    = rw.error ? null : (rw.data || null);
+  S.rewcats   = rc.error ? [] : (rc.data || []);
   S.ready = true;
   $("#errBox").hidden = true;
   render();
@@ -2359,6 +2366,250 @@ const ROLE_FR = { TOP:"Top", JUNGLE:"Jungle", MIDDLE:"Mid", BOTTOM:"Bot", UTILIT
 const MARGE_BATAILLE = 150;
 
 /* ===================================================================
+   Le Rewind
+
+   Douze catégories, cent LP chacune pour le camp du vainqueur. Six
+   récompensent la nullité — c'est l'esprit de la maison — et six
+   récompensent le jeu, pour que ceux qui ont bien joué y trouvent
+   aussi leur compte.
+
+   TROIS PRÉCAUTIONS DANS TOUS LES CALCULS
+
+   On ne compte que les VRAIES parties (kind « game ») : une ligne de
+   péage ou de boutique n'a ni morts ni vision, et la compter ferait
+   plonger toutes les moyennes de celui qui achète.
+
+   Les statistiques Riot manquent sur les parties d'avant le relevé
+   automatique. Une valeur absente n'est jamais lue comme un zéro —
+   sinon « la pire vision » irait toujours à celui dont les données
+   manquent, ce qui ne récompense rien. On ignore la partie, et on
+   compte celles qui restent.
+
+   Les moyennes exigent un MINIMUM de parties. Sans cela, celui qui a
+   joué deux fois rafle tous les ratios, et la catégorie ne dit plus
+   rien de la saison.
+=================================================================== */
+const REW_MINI = 10;          // parties minimum pour une moyenne
+
+// Les vraies parties d'un joueur, celles qui portent des chiffres.
+const rewParties = id =>
+  S.games.filter(g => g.player_id === id && g.kind === "game");
+
+// Somme d'un champ, en sautant les parties où il manque.
+function rewSomme(parties, champ){
+  let t = 0, n = 0;
+  parties.forEach(g => { if(g[champ] != null){ t += g[champ]; n++; } });
+  return { total: t, n };
+}
+// Moyenne d'un champ, ou null si trop peu de parties renseignées.
+function rewMoyenne(parties, champ, mini){
+  const { total, n } = rewSomme(parties, champ);
+  return n >= (mini || REW_MINI) ? total / n : null;
+}
+// La plus longue série de parties qui vérifient une condition.
+function rewSerie(parties, ok){
+  let max = 0, cour = 0;
+  parties.slice()
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    .forEach(g => { cour = ok(g) ? cour + 1 : 0; if(cour > max) max = cour; });
+  return max;
+}
+// Le pire (ou le meilleur) total de LP sur une seule journée.
+function rewJour(parties, pire){
+  const j = {};
+  parties.forEach(g => { j[g.played_on] = (j[g.played_on] || 0) + g.lp; });
+  const v = Object.values(j);
+  if(!v.length) return null;
+  return pire ? Math.min(...v) : Math.max(...v);
+}
+
+/* Chaque catégorie dit comment se mesure un joueur, et dans quel sens
+   on classe. `val` rend null quand le joueur n'est pas éligible — pas
+   assez de parties, ou aucune donnée — et il est alors écarté du
+   classement plutôt que relégué au fond. */
+const REW_CALCUL = {
+  // ---- le côté obscur ----------------------------------------------
+  charnier:   { sens:"max", fmt: v => v + " morts",
+                val: p => { const r = rewSomme(rewParties(p.id), "deaths");
+                            return r.n ? r.total : null; } },
+  don_de_soi: { sens:"max", fmt: v => v.toFixed(2) + " morts / partie",
+                val: p => rewMoyenne(rewParties(p.id), "deaths") },
+  aveugle:    { sens:"min", fmt: v => v.toFixed(1) + " de vision",
+                val: p => rewMoyenne(rewParties(p.id), "vision") },
+  chute:      { sens:"min", fmt: v => signed(v) + " LP en un jour",
+                val: p => rewJour(rewParties(p.id), true) },
+  glacon:     { sens:"max", fmt: v => v + " défaites d'affilée",
+                val: p => { const g = rewParties(p.id);
+                            return g.length ? rewSerie(g, x => !x.win) : null; } },
+  // Le signe typographique du site, pas le trait d'union du clavier.
+  sisyphe:    { sens:"min", fmt: v => (v >= 0 ? "+" : "−")
+                                    + Math.abs(v).toFixed(1) + " LP / partie",
+                val: p => { const g = rewParties(p.id);
+                            return g.length >= REW_MINI
+                              ? g.reduce((a, x) => a + x.lp, 0) / g.length : null; } },
+
+  // ---- le côté lumineux --------------------------------------------
+  monarque:   { sens:"max", fmt: v => signed(v) + " LP nets",
+                val: p => { const g = rewParties(p.id);
+                            return g.length ? g.reduce((a, x) => a + x.lp, 0) : null; } },
+  bourreau:   { sens:"max", fmt: v => v + " éliminations",
+                val: p => { const r = rewSomme(rewParties(p.id), "kills");
+                            return r.n ? r.total : null; } },
+  increvable: { sens:"min", fmt: v => v.toFixed(2) + " morts / partie",
+                val: p => rewMoyenne(rewParties(p.id), "deaths") },
+  invaincu:   { sens:"max", fmt: v => v + " victoires d'affilée",
+                val: p => { const g = rewParties(p.id);
+                            return g.length ? rewSerie(g, x => x.win) : null; } },
+  oeil:       { sens:"max", fmt: v => v.toFixed(1) + " de vision",
+                val: p => rewMoyenne(rewParties(p.id), "vision") },
+  dompteur:   { sens:"max", fmt: v => v + " dragons et barons",
+                val: p => { const g = rewParties(p.id);
+                            const d = rewSomme(g, "dragons"), b = rewSomme(g, "barons");
+                            return (d.n + b.n) ? d.total + b.total : null; } }
+};
+
+/* Les vainqueurs d'une catégorie. Plusieurs si égalité : départager au
+   hasard serait plus injuste que récompenser deux fois. */
+function rewVainqueurs(cle){
+  const c = REW_CALCUL[cle];
+  if(!c) return null;
+  const notes = S.players
+    .map(p => ({ p, v: c.val(p) }))
+    .filter(x => x.v != null && isFinite(x.v));
+  if(!notes.length) return null;
+  const best = c.sens === "max"
+    ? Math.max(...notes.map(x => x.v))
+    : Math.min(...notes.map(x => x.v));
+  return { valeur: best, fmt: c.fmt(best),
+           joueurs: notes.filter(x => x.v === best).map(x => x.p) };
+}
+
+// Le Rewind a-t-il déjà payé cette catégorie ?
+const rewDonne = cle =>
+  S.games.filter(g => g.kind === "rewind"
+    && String(g.match_id || "").startsWith("rewind-" + cle + "-"));
+
+// Le challenge est-il fini ?
+function challengeFini(){
+  if(!S.challenge) return false;
+  return Date.now() >= startDate().getTime() + S.challenge.days * 86400000;
+}
+
+function renderRewind(){
+  const bloc = $("#rewindBlock");
+  if(!bloc) return;
+  const admin = isAdmin();
+  const fini = challengeFini();
+  // Sans la table, rien à montrer. Avant la fin, l'administrateur seul.
+  if(!S.rewind || !S.rewcats.length || (!fini && !admin)){ bloc.hidden = true; return; }
+  bloc.hidden = false;
+
+  const montant = S.rewind.par_categorie;
+  const total = montant * S.rewcats.length;
+
+  const st = $("#rewStatut");
+  st.className = "rewstatut" + (fini ? "" : " avant");
+  st.textContent = fini ? "le challenge est fini" : "aperçu administrateur";
+
+  $("#rewIntro").innerHTML = fini
+    ? "Vingt et un jours en douze catégories. Chacune rapporte <b>" + orFr(montant)
+      + " LP</b> au camp de son vainqueur — la moitié récompense le jeu, l'autre "
+      + "moitié récompense son contraire."
+    : "<b>Personne d'autre que toi ne voit cette section</b> tant que le challenge "
+      + "n'est pas terminé. Les classements ci-dessous sont déjà calculés sur les "
+      + "parties jouées, et bougeront jusqu'au dernier soir."
+      + "<br><b>" + orFr(total) + " LP</b> sont en jeu en tout (" + S.rewcats.length
+      + " × " + orFr(montant) + "). Rien n'est attribué tant que tu n'as pas cliqué.";
+
+  $("#rewGrille").innerHTML = S.rewcats.map(c => {
+    const g = rewVainqueurs(c.cle);
+    const deja = rewDonne(c.cle);
+
+    const corps = !g
+      ? '<div class="rewvide">Pas encore assez de parties pour départager.</div>'
+      : '<div class="rewgagnant">'
+          + avatarRing(g.joueurs[0], { sm:true })
+          + '<span class="nom">' + esc(g.joueurs[0].name)
+          + (g.joueurs.length > 1 ? " +" + (g.joueurs.length - 1) : "") + '</span>'
+          + '<span class="rewval">' + esc(g.fmt) + '</span>'
+        + '</div>'
+        + (g.joueurs.length > 1
+            ? '<div class="rewex">ex æquo : '
+              + g.joueurs.map(p => esc(p.name)).join(", ") + '</div>'
+            : "");
+
+    return '<div class="rewcat ' + esc(c.camp) + '">'
+      + '<div class="rewtitre"><span class="ico">' + esc(c.icone) + '</span>'
+        + '<b>' + esc(c.nom) + '</b></div>'
+      + '<div class="rewsous">' + esc(c.sous) + '</div>'
+      + corps
+      + (admin && g
+          ? '<div class="rewdon">'
+            + (deja.length
+                ? '<span class="rewdonne">✓ ' + orFr(montant) + ' LP donnés</span>'
+                  + '<button type="button" class="btn ghost" data-rewoff="' + esc(c.cle) + '">Retirer</button>'
+                : '<button type="button" class="btn" data-rewon="' + esc(c.cle) + '">Donner '
+                  + orFr(montant) + ' LP</button>')
+            + '</div>'
+          : "")
+      + '</div>';
+  }).join("");
+
+  const restantes = S.rewcats.filter(c => rewVainqueurs(c.cle) && !rewDonne(c.cle).length);
+  $("#rewPied").innerHTML = admin
+    ? '<button type="button" class="btn" id="rewTout"' + (restantes.length ? "" : " disabled") + '>'
+      + (restantes.length
+          ? "Tout attribuer (" + restantes.length + " catégorie"
+            + (restantes.length > 1 ? "s" : "") + ")"
+          : "Tout est attribué") + '</button>'
+      + '<span class="hint" style="margin:0">Relis les vainqueurs avant : les LP partent au score d\'équipe.</span>'
+    : "";
+
+  $("#rewGrille").querySelectorAll("[data-rewon]").forEach(b =>
+    b.addEventListener("click", () => rewDonnerCat(b.dataset.rewon)));
+  $("#rewGrille").querySelectorAll("[data-rewoff]").forEach(b =>
+    b.addEventListener("click", () => rewRetirerCat(b.dataset.rewoff)));
+  const tout = $("#rewTout");
+  if(tout) tout.addEventListener("click", async () => {
+    tout.disabled = true;
+    for(const c of restantes) await rewDonnerCat(c.cle, true);
+    await loadAll();
+  });
+}
+
+async function rewDonnerCat(cle, groupe){
+  const g = rewVainqueurs(cle);
+  if(!g) return;
+  const log = $("#rewLog");
+  log.className = "log";
+  log.textContent = "Attribution…";
+  for(const p of g.joueurs){
+    const { error } = await sb.rpc("rewind_donner", { p_cle: cle, p_player: p.id });
+    if(error){
+      log.textContent = error.message || String(error);
+      log.className = "log bad";
+      return;
+    }
+  }
+  const nom = (S.rewcats.find(c => c.cle === cle) || {}).nom || cle;
+  log.textContent = nom + " : " + g.joueurs.map(p => p.name).join(", ") + " \u2014 LP donnés.";
+  log.className = "log ok";
+  if(!groupe) await loadAll();
+}
+
+async function rewRetirerCat(cle){
+  const log = $("#rewLog");
+  log.className = "log";
+  log.textContent = "…";
+  const { error } = await sb.rpc("rewind_retirer", { p_cle: cle });
+  if(error){ log.textContent = error.message || String(error); log.className = "log bad"; return; }
+  log.textContent = "Retiré.";
+  log.className = "log ok";
+  await loadAll();
+}
+
+
+/* ===================================================================
    L'Ultime Bataille
 
    Un 5 contre 5 le dernier jeudi, avec un lot de LP pour le camp qui
@@ -3099,6 +3350,7 @@ function render(){
   renderItems();
   renderWarlog();
   renderBataille(states);
+  renderRewind();
   renderShop();
   renderLadder(states);
   renderChart();
@@ -3193,8 +3445,12 @@ function renderRules(){
 /* Les prix de base. Ceux des objets vivent en base, ceux-ci sont
    fixes — les avantages d'équipe ne suivent pas la bourse, ce sont des
    leviers d'équilibre, pas des marchandises. */
-// Les 25 LP ont quitté la boutique : ils ne s'achètent plus.
-const PRIX = { coffre: 500, boost: 10000, swap: 30000 };
+/* Ce qui reste à vendre. Les 25 LP sont partis d'abord, le Double LP
+   ensuite : à la fin d'un challenge serré, de l'or accumulé ne doit
+   plus pouvoir acheter de LP, ni directement ni en les multipliant.
+   Le changement d'équipe reste — il ne crée pas de LP, il déplace des
+   joueurs — mais à un prix qui se mérite. */
+const PRIX = { coffre: 500, swap: 50000 };
 
 /* Le Commerce suit l'indice de la Place : il monte, tout coûte plus
    cher ; il s'effondre, les rayons passent en solde.
@@ -3366,10 +3622,6 @@ function renderShop(){
       + '</div>';
   };
 
-  // Le bonus en cours — celui de TON ÉQUIPE, pas le tien.
-  const finBoost = boostEquipe(moi.team);
-  const boostActif = finBoost > 0;
-
   const mouvements = S.ledger.filter(r => r.player_id === moi.id).slice(0, 12);
 
   const enAttente = S.boxes.filter(b => b.player_id === moi.id && !b.opened_at).length;
@@ -3413,14 +3665,11 @@ function renderShop(){
        assis sur sa bourse pouvait acheter l'écart ; ils se gagnent
        désormais en jouant, ou jeudi soir à l'Ultime Bataille. Le
        serveur refuse de toute façon : shop_buy_lp() lève. */
-    + article("\u26A1", "Double LP \u00b7 " + BOOST_HEURES + " h",
-        boostActif
-          ? '<b class="boostvif">actif encore ' + resteBoost(finBoost) + '</b> \u00b7 rachat = +' + BOOST_HEURES + ' h'
-          : "les gains de <b>toute ton \u00e9quipe</b> comptent double pendant " + BOOST_HEURES + " heures",
-        PRIX.boost, 'data-boost="1"', false)
     + article("\u{1F500}", "Changer d'\u00e9quipe",
         "\u00e9change avec un adversaire <b>tir\u00e9 au sort</b>", PRIX.swap, 'data-swap="1"', false)
-    + '<p class="hint">Ces LP comptent dans le <b>score de ton équipe</b>, pas dans ton classement individuel — celui-là reste du pur LP Riot. Le doublement suit la même règle, et ne double que les gains.</p>'
+    /* L'ancienne note parlait des LP achetés et du doublement : ni
+       l'un ni l'autre ne sont encore en vente. */
+    + "<p class=\"hint\"><b>Les LP ne sont plus en vente.</b> Ni directement, ni en doublant tes gains : à ce stade, de l'or accumulé ne doit plus pouvoir acheter l'écart. Ils se gagnent en jouant — ou jeudi soir, à l'Ultime Bataille. Un doublement déjà payé court jusqu'à son terme.</p>"
     + '<h4>Tes derniers mouvements</h4>'
     + (mouvements.length
         ? '<div class="ledger">' + mouvements.map(r =>
@@ -3435,8 +3684,6 @@ function renderShop(){
     b.addEventListener("click", () => acheterObjet(b.dataset.buy, b)));
   corps.querySelectorAll("[data-box]").forEach(b =>
     b.addEventListener("click", () => acheterCoffre(b)));
-  corps.querySelectorAll("[data-boost]").forEach(b =>
-    b.addEventListener("click", () => acheterBoost(b)));
   corps.querySelectorAll("[data-swap]").forEach(b =>
     b.addEventListener("click", () => echangerEquipe(b)));
 }
@@ -3473,13 +3720,6 @@ function resteBoost(fin){
   const ms = Math.max(0, fin - Date.now());
   const m = Math.round(ms / 60000);
   return m >= 60 ? Math.floor(m / 60) + " h " + String(m % 60).padStart(2, "0") : m + " min";
-}
-
-function acheterBoost(btn){
-  acheter("shop_buy_boost", {}, btn,
-    r => "Double LP actif pour toute ton équipe jusqu'à "
-       + new Date(r.boost_until).toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" })
-       + ". Seuls les gains comptent double.");
 }
 
 /* Le changement d'équipe est irréversible et coûte très cher : on le
