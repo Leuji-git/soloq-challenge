@@ -310,6 +310,26 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .rewvide{font-family:"Barlow Semi Condensed",sans-serif;font-size:12px;color:var(--muted)}
 .rewex{font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;color:var(--muted);
   margin-top:4px}
+/* La carte s'ouvre au clic : on le dit par le curseur et par un
+   chevron, sinon personne ne devine qu'il y a quelque chose dessous. */
+.rewcat{cursor:pointer;transition:background .15s}
+.rewcat:hover{background:var(--surface-3)}
+.rewcat .chev{margin-left:auto;color:var(--muted);font-size:11px;transition:transform .15s}
+.rewcat.ouvert .chev{transform:rotate(180deg)}
+
+.rewclt{margin-top:10px;padding-top:9px;border-top:1px solid var(--line);
+  display:flex;flex-direction:column;gap:3px}
+.rewrang{display:grid;grid-template-columns:20px auto 1fr auto;gap:7px;align-items:center;
+  padding:3px 5px;border-radius:var(--r-sm);font-size:12.5px}
+.rewrang.premier{background:color-mix(in srgb, var(--accent) 12%, transparent)}
+.rewrang .pos{font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;
+  color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.rewrang.premier .pos{color:var(--accent)}
+.rewrang .nom{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rewrang .v{font-variant-numeric:tabular-nums;color:var(--ink-2);white-space:nowrap}
+.rewhors{font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;color:var(--muted);
+  margin-top:5px;line-height:1.5}
+
 .rewdon{margin-top:9px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .rewdon .btn{padding:5px 11px;font-size:11.5px}
 .rewdonne{font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;color:var(--up)}

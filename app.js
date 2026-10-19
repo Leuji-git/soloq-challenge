@@ -2468,21 +2468,42 @@ const REW_CALCUL = {
                             return (d.n + b.n) ? d.total + b.total : null; } }
 };
 
-/* Les vainqueurs d'une catégorie. Plusieurs si égalité : départager au
-   hasard serait plus injuste que récompenser deux fois. */
-function rewVainqueurs(cle){
+/* Le classement complet d'une catégorie, du premier au dernier.
+
+   Ceux que la catégorie ne peut pas départager — pas assez de parties
+   pour une moyenne, ou aucune donnée Riot sur la statistique — sont mis
+   À PART, et non relégués au fond : les ranger derniers reviendrait à
+   dire qu'ils sont les pires, alors qu'on ne sait simplement pas. */
+function rewClassement(cle){
   const c = REW_CALCUL[cle];
   if(!c) return null;
-  const notes = S.players
-    .map(p => ({ p, v: c.val(p) }))
-    .filter(x => x.v != null && isFinite(x.v));
-  if(!notes.length) return null;
-  const best = c.sens === "max"
-    ? Math.max(...notes.map(x => x.v))
-    : Math.min(...notes.map(x => x.v));
-  return { valeur: best, fmt: c.fmt(best),
-           joueurs: notes.filter(x => x.v === best).map(x => x.p) };
+  const classes = [], hors = [];
+  S.players.forEach(p => {
+    const v = c.val(p);
+    if(v == null || !isFinite(v)) hors.push(p); else classes.push({ p, v });
+  });
+  classes.sort((a, b) => c.sens === "max" ? b.v - a.v : a.v - b.v);
+  // Les ex æquo partagent leur rang : 1, 1, 3 — jamais 1, 2, 3.
+  let rang = 0;
+  classes.forEach((x, i) => {
+    if(i === 0 || x.v !== classes[i - 1].v) rang = i + 1;
+    x.rang = rang;
+  });
+  return { sens: c.sens, fmt: c.fmt, classes, hors };
 }
+
+/* Les vainqueurs : le premier rang du classement. Plusieurs si égalité,
+   départager au hasard serait plus injuste que récompenser deux fois. */
+function rewVainqueurs(cle){
+  const r = rewClassement(cle);
+  if(!r || !r.classes.length) return null;
+  const best = r.classes[0].v;
+  return { valeur: best, fmt: r.fmt(best),
+           joueurs: r.classes.filter(x => x.v === best).map(x => x.p) };
+}
+
+// Les catégories dépliées, le temps de la visite.
+const rewOuvert = new Set();
 
 // Le Rewind a-t-il déjà payé cette catégorie ?
 const rewDonne = cle =>
@@ -2538,11 +2559,35 @@ function renderRewind(){
               + g.joueurs.map(p => esc(p.name)).join(", ") + '</div>'
             : "");
 
-    return '<div class="rewcat ' + esc(c.camp) + '">'
+    // Le classement complet, quand la carte est ouverte.
+    const ouvert = rewOuvert.has(c.cle);
+    let detail = "";
+    if(ouvert){
+      const cl = rewClassement(c.cle);
+      detail = '<div class="rewclt">'
+        + cl.classes.map(x =>
+            '<div class="rewrang' + (x.rang === 1 ? " premier" : "") + '">'
+            + '<span class="pos">' + x.rang + '</span>'
+            + avatarRing(x.p, { sm:true })
+            + '<span class="nom">' + esc(x.p.name) + '</span>'
+            + '<span class="v">' + esc(cl.fmt(x.v)) + '</span>'
+            + '</div>').join("")
+        + (cl.hors.length
+            ? '<div class="rewhors">Non class\u00e9' + (cl.hors.length > 1 ? "s" : "")
+              + ' : ' + cl.hors.map(p => esc(p.name)).join(", ")
+              + ' \u2014 pas assez de parties, ou statistique absente.</div>'
+            : "")
+        + '</div>';
+    }
+
+    return '<div class="rewcat ' + esc(c.camp) + (ouvert ? " ouvert" : "")
+      + '" data-rewcat="' + esc(c.cle) + '"'
+      + ' title="' + (ouvert ? "Masquer le classement" : "Voir le classement complet") + '">'
       + '<div class="rewtitre"><span class="ico">' + esc(c.icone) + '</span>'
-        + '<b>' + esc(c.nom) + '</b></div>'
+        + '<b>' + esc(c.nom) + '</b><span class="chev">\u25BC</span></div>'
       + '<div class="rewsous">' + esc(c.sous) + '</div>'
       + corps
+      + detail
       + (admin && g
           ? '<div class="rewdon">'
             + (deja.length
@@ -2564,6 +2609,16 @@ function renderRewind(){
           : "Tout est attribué") + '</button>'
       + '<span class="hint" style="margin:0">Relis les vainqueurs avant : les LP partent au score d\'équipe.</span>'
     : "";
+
+  /* La carte entière bascule, sauf les boutons d'attribution : cliquer
+     « Donner 100 LP » ne doit pas replier la liste sous les doigts. */
+  $("#rewGrille").querySelectorAll("[data-rewcat]").forEach(el =>
+    el.addEventListener("click", e => {
+      if(e.target.closest("[data-rewon],[data-rewoff]")) return;
+      const k = el.dataset.rewcat;
+      rewOuvert.has(k) ? rewOuvert.delete(k) : rewOuvert.add(k);
+      renderRewind();
+    }));
 
   $("#rewGrille").querySelectorAll("[data-rewon]").forEach(b =>
     b.addEventListener("click", () => rewDonnerCat(b.dataset.rewon)));
