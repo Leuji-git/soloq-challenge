@@ -9,8 +9,25 @@
 --     ou se prennent jeudi soir sur la faille. Le reste du Commerce ne
 --     bouge pas.
 --
---  2. L'ULTIME BATAILLE. Jeudi 22 octobre à 21 h, un 5 contre 5, et
---     1 000 LP pour le camp qui l'emporte.
+--  2. L'ULTIME BATAILLE. Jeudi 22 octobre à 21 h, un 5 contre 5. Le
+--     camp qui l'emporte GAGNE l'enjeu, celui qui tombe le PERD : le
+--     match déplace donc deux fois sa valeur.
+--
+--     L'enjeu n'est pas un nombre fixe. Il se calcule sur l'écart du
+--     moment, et il est taillé pour une chose précise : si le camp en
+--     tête perd, il reste devant — mais de peu. Ce « peu » est la
+--     marge, réglée dans la table, 150 LP par défaut.
+--
+--         enjeu = (écart − marge) / 2     gagnant +enjeu, perdant −enjeu
+--
+--     Avec 1 361 LP d'écart : enjeu ±605, soit 1 210 LP déplacés, et le
+--     meneur battu finit à +151. Celui qui chasse joue donc tout son
+--     challenge sur ce match sans pouvoir le voler d'un coup, et les
+--     deux derniers jours gardent un sens.
+--
+--     Comme l'écart bouge à chaque partie, l'enjeu est RECALCULÉ au
+--     moment où le résultat est saisi. L'annoncer en dur aujourd'hui
+--     serait l'annoncer faux jeudi.
 --
 --     Chacun s'inscrit en choisissant SON POSTE, et un seul joueur par
 --     poste et par équipe : le premier inscrit tient le rôle, les
@@ -56,10 +73,23 @@ create table if not exists public.bataille (
   constraint bataille_une_seule check (id = 1)
 );
 
+/* Ce que le camp en tête conserve s'il perd la bataille. C'est le seul
+   réglage de l'événement : l'enjeu en découle. */
+alter table public.bataille add column if not exists marge int not null default 150;
+
 -- Jeudi 22 octobre 2026, 21 h, heure de Paris.
 insert into public.bataille (id, quand, lot, ouvert)
 values (1, timestamptz '2026-10-22 21:00:00 Europe/Paris', 1000, true)
 on conflict (id) do nothing;
+
+-- Les LP de la bataille arrivent sur une ligne de partie d'un genre
+-- nouveau, comme les péages et les parts de duo avant eux.
+alter table public.games drop constraint if exists games_kind_valid;
+do $$ begin
+  alter table public.games add constraint games_kind_valid
+    check (kind in ('game','adjust','shop','peage','renvoi','partage','bataille'));
+exception when duplicate_object then null; end $$;
+
 
 create table if not exists public.bataille_inscrits (
   player_id  text primary key references public.players(id) on delete cascade,
@@ -214,14 +244,121 @@ revoke all     on function public.bataille_promouvoir(text, text) from public, a
 grant  execute on function public.bataille_inscrire(text) to authenticated, service_role;
 grant  execute on function public.bataille_desister()     to authenticated, service_role;
 
+-- ---------------------------------------------------------------------
+--  L'ENJEU DU MOMENT
+--
+--  Lisible par tout le monde : chacun doit pouvoir voir ce qui se joue
+--  et ce que chaque issue donnerait. Les parties d'un second compte
+--  sont enregistrées sous la fiche principale, donc on écarte les alias
+--  pour ne pas compter deux fois.
+-- ---------------------------------------------------------------------
+create or replace function public.bataille_enjeu()
+returns jsonb language sql stable security definer set search_path = public as $$
+  with t as (
+    select coalesce(sum(case when p.team = 'a' then g.lp + coalesce(g.lp_items, 0) end), 0)::int as a,
+           coalesce(sum(case when p.team = 'b' then g.lp + coalesce(g.lp_items, 0) end), 0)::int as b
+      from public.players p
+      join public.games g on g.player_id = p.id
+     where p.alias_of is null
+  ), b as (select marge from public.bataille where id = 1)
+  select jsonb_build_object(
+    'a', t.a, 'b', t.b,
+    'ecart',  abs(t.a - t.b),
+    'devant', case when t.a >= t.b then 'a' else 'b' end,
+    'marge',  b.marge,
+    /* Division entière : elle arrondit vers le bas, donc la marge
+       réellement conservée est toujours au moins celle annoncée,
+       jamais moins. C'est le sens de la garantie. */
+    'enjeu',  greatest(0, (abs(t.a - t.b) - b.marge) / 2)
+  ) from t, b;
+$$;
+grant execute on function public.bataille_enjeu() to anon, authenticated;
+
+
+-- ---------------------------------------------------------------------
+--  LE RÉSULTAT
+--
+--  Réservé à l'administrateur, et rejouable sans dégât : chaque ligne
+--  porte un matricule stable et l'index unique (player_id, match_id)
+--  refuse le doublon. Saisir deux fois le même vainqueur ne donne donc
+--  pas deux fois les LP.
+--
+--  L'enjeu est partagé entre les CINQ QUI ONT JOUÉ, pas entre tous les
+--  inscrits : les remplaçants n'étaient pas sur la faille. Si personne
+--  n'est inscrit dans un camp, on retombe sur l'équipe entière.
+-- ---------------------------------------------------------------------
+create or replace function public.bataille_resoudre(p_gagnant text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  e jsonb; x int; perdant text;
+  camp text; signe int; i int;
+  joueurs text[]; j text;
+  part int; reste int; k int; n int := 0;
+begin
+  if not public.is_admin() then raise exception 'Réservé à l''administrateur'; end if;
+  if p_gagnant is null or p_gagnant not in ('a','b') then
+    raise exception 'Le gagnant est « a » ou « b »';
+  end if;
+
+  e := public.bataille_enjeu();
+  x := (e->>'enjeu')::int;
+  perdant := case p_gagnant when 'a' then 'b' else 'a' end;
+  if x <= 0 then
+    raise exception 'L''écart est déjà sous la marge : il n''y a rien à déplacer';
+  end if;
+
+  /* Deux passes : le camp gagnant encaisse, le perdant règle. Chacun
+     partage par parts égales, le reste de la division allant au premier
+     inscrit — personne ne s'évapore dans un arrondi. */
+  for i in 1..2 loop
+    if i = 1 then camp := p_gagnant; signe := 1;
+    else           camp := perdant;   signe := -1; end if;
+
+    select array_agg(player_id order by inscrit_le) into joueurs
+      from public.bataille_inscrits where team = camp and titulaire;
+    if joueurs is null then
+      select array_agg(id order by sort) into joueurs
+        from public.players where team = camp and alias_of is null;
+    end if;
+    continue when joueurs is null;
+
+    part  := x / array_length(joueurs, 1);
+    reste := x - part * array_length(joueurs, 1);
+    k := 0;
+
+    foreach j in array joueurs loop
+      k := k + 1;
+      insert into public.games (player_id, lp, lp_items, win, duo, kind,
+                                match_id, played_on, created_at)
+      values (j, 0, signe * (part + case when k = 1 then reste else 0 end),
+              signe > 0, 'solo', 'bataille',
+              'bataille-' || camp || '-' || j, current_date, now())
+      on conflict do nothing;
+      n := n + 1;
+    end loop;
+  end loop;
+
+  -- La bataille a eu lieu : on referme les inscriptions.
+  update public.bataille set ouvert = false where id = 1;
+
+  return jsonb_build_object('gagnant', p_gagnant, 'perdant', perdant,
+                            'enjeu', x, 'deplace', x * 2, 'lignes', n);
+end $$;
+
+revoke all     on function public.bataille_resoudre(text) from public, anon;
+grant  execute on function public.bataille_resoudre(text) to authenticated, service_role;
+
 notify pgrst, 'reload schema';
 
 
 -- ---------------------------------------------------------------------
 --  Vérification
 -- ---------------------------------------------------------------------
-select quand at time zone 'Europe/Paris' as le_soir_dit, lot, ouvert
+select quand at time zone 'Europe/Paris' as le_soir_dit, marge, ouvert
   from public.bataille where id = 1;
+
+-- L'enjeu tel qu'il serait si la bataille se jouait maintenant.
+select public.bataille_enjeu() as enjeu_du_moment;
 
 select i.team, i.role, p.name, i.titulaire, i.inscrit_le
   from public.bataille_inscrits i

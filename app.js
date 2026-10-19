@@ -2353,6 +2353,11 @@ const OR_ROLES = {
 const OR_VICTOIRE = 50;
 const ROLE_FR = { TOP:"Top", JUNGLE:"Jungle", MIDDLE:"Mid", BOTTOM:"Bot", UTILITY:"Support" };
 
+/* Ce que le camp en tête garde s'il perd la bataille. La valeur qui
+   fait foi est celle de la table ; celle-ci ne sert que si la colonne
+   manque encore. Même nombre que la valeur par défaut en SQL. */
+const MARGE_BATAILLE = 150;
+
 /* ===================================================================
    L'Ultime Bataille
 
@@ -2388,23 +2393,45 @@ function renderBataille(states){
   const gb = states.filter(s => s.player.team === "b").reduce((a, s) => a + s.global, 0);
   const ecart = Math.abs(ga - gb);
   const devant = ga > gb ? "a" : "b";
-  const nomDevant = devant === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
-  const suffit = b.lot >= ecart;
+  const derriere = devant === "a" ? "b" : "a";
+  const nom = t => t === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
+
+  /* L'enjeu, calculé exactement comme bataille_enjeu() en SQL — c'est
+     le serveur qui tranchera jeudi, la page ne fait qu'annoncer. La
+     division entière arrondit vers le bas des DEUX côtés, donc la marge
+     réellement gardée est toujours au moins celle promise. */
+  const marge = b.marge === undefined ? MARGE_BATAILLE : b.marge;
+  const enjeu = Math.max(0, Math.floor((ecart - marge) / 2));
+  const resteSiPerd = ecart - enjeu * 2;
 
   $("#batIntro").innerHTML =
       "<b>" + quand.toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"long" })
     + " à " + String(quand.getHours()).padStart(2, "0") + " h"
     + (quand.getMinutes() ? String(quand.getMinutes()).padStart(2, "0") : "")
-    + "</b> · un <b>5 contre 5</b>, et <span class='lot'>" + orFr(b.lot) + " LP</span> "
-    + "pour le camp qui l'emporte."
-    /* Tournure qui ne s'accorde avec rien : les noms d'équipe sont
-       libres, et « Les Pitoyables mène » se voyait. */
-    + "<br>L'écart est de <b>" + orFr(ecart) + " LP</b> pour <b>"
-    + esc(nomDevant) + "</b> — "
-    + (suffit
-        ? "le lot suffit à <b>tout renverser</b>."
-        : "même gagnée, la bataille laisserait <b>" + orFr(ecart - b.lot) + " LP</b> d'écart.")
-    + " Chacun s'inscrit <b>dans son camp</b>, à un poste, et un seul par poste.";
+    + "</b> · un <b>5 contre 5</b>. Le vainqueur <b>gagne</b> l'enjeu, le perdant le "
+    + "<b>perd</b> : <span class='lot'>" + orFr(enjeu * 2) + " LP</span> changent de camp."
+    + "<br>L'écart est de <b>" + orFr(ecart) + " LP</b> pour <b>" + esc(nom(devant))
+    + "</b>. L'enjeu s'ajuste à cet écart, et il est taillé pour que le match "
+    + "<b>ne suffise jamais à renverser le challenge</b> : battu, le camp en tête garde "
+    + "<b>" + orFr(resteSiPerd) + " LP</b> d'avance, et il reste deux jours pour les perdre."
+    + "<br>Chacun s'inscrit <b>dans son camp</b>, à un poste, et un seul par poste.";
+
+  // Les deux issues, en clair.
+  $("#batIssues").innerHTML = enjeu > 0
+    /* Aucun verbe accordé avec un nom d'équipe : ils sont libres, et
+       « Si Les Médiocres gagne » se voyait. Le nom suit, entre
+       parenthèses, où il n'a rien à accorder. */
+    ? '<div class="batissue pour"><span class="quoi">Victoire du camp en retard · '
+        + esc(nom(derriere)) + '</span>'
+        + '<span class="res">L\'écart tombe à <b>' + orFr(resteSiPerd) + ' LP</b>. '
+        + 'Tout se joue sur les deux derniers jours.</span></div>'
+    + '<div class="batissue contre"><span class="quoi">Victoire du camp en tête · '
+        + esc(nom(devant)) + '</span>'
+        + '<span class="res">L\'écart passe à <b>' + orFr(ecart + enjeu * 2) + ' LP</b>. '
+        + 'Autant dire que c\'est plié.</span></div>'
+    : '<div class="batissue"><span class="quoi">Enjeu</span>'
+        + '<span class="res">L\'écart est déjà sous la marge de <b>' + orFr(marge)
+        + ' LP</b> : la bataille se jouera pour l\'honneur.</span></div>';
 
   // --- les deux camps -------------------------------------------
   const parId = Object.fromEntries(S.players.map(p => [p.id, p]));
@@ -3138,7 +3165,9 @@ const RULES = [
     "<p>21 jours pleins. Le relevé qui compte est celui du dernier soir : le classement au coup de sifflet, pas le pic de la semaine 2.</p>" },
 
   { t:"L'Ultime Bataille", h:
-    "<p><strong>Jeudi 22 octobre à 21 h</strong>, un <strong>5 contre 5</strong> entre les deux camps, et <strong>1 000 LP</strong> pour celui qui l'emporte. Ils comptent au score d'équipe, comme tout le reste.</p>"
+    "<p><strong>Jeudi 22 octobre à 21 h</strong>, un <strong>5 contre 5</strong> entre les deux camps. Le vainqueur <strong>gagne</strong> l'enjeu, le perdant le <strong>perd</strong> : le match déplace donc deux fois sa valeur.</p>"
+  + "<p>L'enjeu n'est pas un nombre fixe, il s'ajuste à l'écart du moment, et il est taillé pour une chose : <strong>la bataille ne peut pas renverser le challenge à elle seule</strong>. Battu, le camp en tête garde <strong>150 LP</strong> d'avance — assez pour que les deux derniers jours comptent encore, trop peu pour dormir dessus.</p>"
+  + "<p>Comme l'écart bouge à chaque partie, l'enjeu est recalculé au moment du résultat. La page affiche ce qu'il vaudrait si le match se jouait maintenant.</p>"
   + "<p>L'inscription se fait sur la page d'accueil, et le <strong>poste est obligatoire</strong> : un seul joueur par poste et par camp. Le premier inscrit tient le rôle, les suivants sont remplaçants et montent si quelqu'un se désiste.</p>"
   + "<p>On ne choisit pas son camp : tu joues pour ton équipe, jamais pour l'autre.</p>"
   + "<p><strong>Et les LP ne sont plus en vente au Commerce.</strong> À ce stade, un joueur assis sur sa bourse aurait pu acheter l'écart. Ils se gagnent désormais en jouant — ou jeudi soir, sur la faille.</p>" }

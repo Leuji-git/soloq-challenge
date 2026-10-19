@@ -296,6 +296,23 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .batintro b{color:var(--ink)}
 .batintro .lot{color:var(--accent);font-weight:600}
 
+/* Les deux issues, côte à côte. C'est la vraie information de
+   l'événement : ce qu'on gagne, et ce qu'on risque. */
+.batissues{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 14px}
+@media (max-width:560px){ .batissues{grid-template-columns:1fr} }
+.batissue{
+  background:var(--surface-2);border-radius:var(--r-lg);padding:10px 12px;
+  border-left:3px solid var(--line);
+}
+.batissue.pour{border-left-color:var(--up)}
+.batissue.contre{border-left-color:var(--down)}
+.batissue .quoi{
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;
+  text-transform:uppercase;letter-spacing:.08em;color:var(--muted);display:block;
+}
+.batissue .res{font-size:13.5px;margin-top:3px;color:var(--ink-2);line-height:1.5}
+.batissue .res b{color:var(--ink)}
+
 .batcamps{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 @media (max-width:720px){ .batcamps{grid-template-columns:1fr} }
 .batcamp{background:var(--surface-2);border-radius:var(--r-lg);padding:12px}
