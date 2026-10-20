@@ -181,19 +181,43 @@ async function charger(){
 
 /* L'historique COMPLET d'une seule société.
 
-   Une seule à la fois, parce qu'une seule est affichée : mille lignes
-   suffisent alors à couvrir trois jours et demi de créneaux de cinq
-   minutes, et on les prend par la fin. Si le challenge dure assez pour
-   dépasser le plafond, c'est le début qui manquera, pas le présent.
+   Une seule à la fois, parce qu'une seule est affichée — mais en
+   ENTIER, et c'est ce qui manquait : une seule requête rendait mille
+   lignes quand le serveur en garde deux mille par société
+   (bourse_tick élague au-delà). « Tout » montrait donc exactement la
+   moitié de l'histoire, et l'annonçait sans sourciller : « 1000
+   créneaux · 83,3 h ».
 
-   Le tri DESCENDANT n'est pas un détail de confort : c'est lui qui
-   décide, le jour où la coupe tombe, de quel côté elle tombe. */
+   On pagine donc jusqu'à ce qu'une page revienne incomplète. Le volume
+   ne peut pas s'emballer : la rétention du serveur borne le total à
+   RETENTION créneaux, soit trois pages, quoi qu'il arrive et aussi
+   longtemps que dure le challenge.
+
+   Le tri DESCENDANT n'est pas un détail de confort : il garantit que
+   la première page est celle du présent. Si une page manquait, ce
+   serait le passé lointain, jamais ce qui vient de se passer. */
+const RETENTION = 2000;        // ce que bourse_tick garde par société
+
 async function chargerSerie(code){
   if(!code) return;
-  const r = await sb.from("bourse_cours").select("code,slot,o,h,b,c")
-    .eq("code", code).order("slot", { ascending:false }).limit(CAP_LIGNES);
-  if(r.error) return;
-  S.cours[code] = (r.data || []).slice().reverse();
+  /* On s'arrete sur une page incomplete, et SEULEMENT la-dessus : ce
+     plafond n'est pas la regle, juste un garde-fou contre une boucle
+     folle. Le deduire de RETENTION rendrait la pagination silencieuse-
+     ment fausse le jour ou l'elagage du serveur changerait sans qu'on
+     y pense ici. */
+  const PLAFOND_PAGES = 20;
+  let out = [];
+  for(let i = 0; i < PLAFOND_PAGES; i++){
+    const de = i * CAP_LIGNES;
+    const r = await sb.from("bourse_cours").select("code,slot,o,h,b,c")
+      .eq("code", code).order("slot", { ascending:false })
+      .range(de, de + CAP_LIGNES - 1);
+    if(r.error) break;
+    const lot = r.data || [];
+    out = out.concat(lot);
+    if(lot.length < CAP_LIGNES) break;      // page incomplète : c'est la fin
+  }
+  S.cours[code] = out.reverse();
 }
 
 /* Regrouper des bougies sans mentir sur ce qu'elles disent : ouverture
