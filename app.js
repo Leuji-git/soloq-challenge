@@ -3071,13 +3071,17 @@ function renderBataille(states){
   if(!moi){
     html = '<p class="hint" style="margin:0">Connecte-toi avec ton profil joueur pour te déclarer disponible.</p>';
   }else if(S.duels.length){
-    const mien = S.duels.find(d => d.joueur_a === moi.id || d.joueur_b === moi.id);
-    html = mien
-      ? '<h4>Ton duel</h4><p class="hint" style="margin:0">Tu affrontes <b>'
-        + esc((parId[mien.joueur_a === moi.id ? mien.joueur_b : mien.joueur_a] || {}).name || "?")
-        + '</b> en <b>' + esc(nomChampion(mien.champion)) + '</b>. Premier kill gagnant.</p>'
-      : '<h4>Pas de duel pour toi</h4><p class="hint" style="margin:0">Le tirage t\'a laissé '
-        + 'sur le banc : il faut autant de joueurs de chaque côté.</p>';
+    /* Au pluriel : à camps inégaux, quelqu'un du camp le plus mince
+       remonte sur le ring et se retrouve avec deux duels. */
+    const miens = S.duels.filter(d => d.joueur_a === moi.id || d.joueur_b === moi.id);
+    html = miens.length
+      ? '<h4>' + (miens.length > 1 ? "Tes " + miens.length + " duels" : "Ton duel") + '</h4>'
+        + miens.map(d => '<p class="hint" style="margin:0 0 4px">Tu affrontes <b>'
+            + esc((parId[d.joueur_a === moi.id ? d.joueur_b : d.joueur_a] || {}).name || "?")
+            + '</b> en <b>' + esc(nomChampion(d.champion)) + '</b>.</p>').join("")
+        + '<p class="hint" style="margin:0">Premier kill gagnant.</p>'
+      : '<h4>Pas de duel pour toi</h4><p class="hint" style="margin:0">Tu n\'étais pas '
+        + 'disponible au moment du tirage.</p>';
   }else if(close){
     html = '<p class="hint" style="margin:0">'
       + (passe ? "La bataille a commencé." : "Les inscriptions sont closes.") + '</p>';
@@ -3268,8 +3272,11 @@ const inscrireBataille = () =>
 const desisterBataille = () =>
   appelBat("bataille_desister", {}, () => "Tu n'es plus dans le tirage.");
 const tirerDuels = () =>
-  appelBat("bataille_tirer", {}, d => d.duels + " duel(s) tirés."
-    + (d.banc_a || d.banc_b ? " Banc : " + d.banc_a + " / " + d.banc_b + "." : ""));
+  appelBat("bataille_tirer", {}, d => {
+    const r = (d.rejoue_a || 0) + (d.rejoue_b || 0);
+    return d.duels + " duel(s) tirés."
+      + (r ? " " + r + " joueur(s) remontent sur le ring pour équilibrer." : "");
+  });
 const marquerDuel = (id, cote) =>
   appelBat("bataille_marquer", { p_duel: id, p_gagnant: cote },
     () => cote ? "Duel " + id + " : " + cote.toUpperCase() + " l'emporte." : "Duel " + id + " remis à zéro.");

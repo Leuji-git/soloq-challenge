@@ -12,6 +12,12 @@
 --  attribue un champion à chaque duel. Le site le joue en roulette :
 --  les deux adversaires d'abord, le champion ensuite.
 --
+--  LES CAMPS N'ONT PAS BESOIN D'ÊTRE ÉGAUX. À trois contre quatre, on
+--  joue quatre duels et quelqu'un du camp le plus mince remonte sur le
+--  ring — tiré au sort comme le reste. Personne ne reste sur le banc :
+--  mettre un joueur de côté le soir de la finale serait la pire façon
+--  de régler une histoire de parité.
+--
 --  L'ÉCART SE JOUE À LA MAJORITÉ DES DUELS. Le camp qui en remporte le
 --  plus emporte tout l'enjeu ; trois victoires sur cinq valent les
 --  cinq. Et l'enjeu reste taillé comme avant : si le camp en tête
@@ -159,16 +165,18 @@ grant  execute on function public.bataille_desister() to authenticated, service_
 -- ---------------------------------------------------------------------
 --  5. LE TIRAGE
 --
---  On apparie au hasard les disponibles des deux camps, et on donne un
---  champion à chaque duel. S'il y a plus de monde d'un côté, le surplus
---  reste sur le banc — et le tirage le dit.
+--  On apparie au hasard les disponibles des deux camps. Le nombre de
+--  duels est celui du camp le PLUS FOURNI : le camp le plus mince
+--  recycle alors ses joueurs dans l'ordre du tirage, si bien que le
+--  premier d'entre eux — tiré au hasard comme les autres — joue deux
+--  fois. Trois contre quatre donne donc quatre duels, pas trois.
 --
 --  Retirer efface les duels précédents : c'est un nouveau tirage, pas
 --  un ajout. Les résultats déjà saisis partent avec, volontairement.
 -- ---------------------------------------------------------------------
 create or replace function public.bataille_tirer()
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare a text[]; b text[]; champs text[]; n int; i int;
+declare a text[]; b text[]; champs text[]; na int; nb int; n int; i int;
 begin
   if not public.is_admin() then raise exception 'Réservé à l''administrateur'; end if;
 
@@ -177,25 +185,34 @@ begin
   select array_agg(player_id order by random()) into b
     from public.bataille_inscrits where team = 'b';
 
-  n := least(coalesce(array_length(a, 1), 0), coalesce(array_length(b, 1), 0));
-  if n = 0 then
+  na := coalesce(array_length(a, 1), 0);
+  nb := coalesce(array_length(b, 1), 0);
+  if na = 0 or nb = 0 then
     raise exception 'Il faut au moins un joueur disponible dans chaque camp';
   end if;
+
+  -- Autant de duels que le camp le plus fourni compte de joueurs.
+  n := greatest(na, nb);
 
   select array_agg(cle order by random()) into champs from public.bataille_champions;
   if coalesce(array_length(champs, 1), 0) < n then
     raise exception 'Pas assez de champions au tirage';
   end if;
 
-  delete from public.bataille_duels;
+  /* La base refuse un DELETE sans WHERE (sql_safe_updates), et elle a
+     raison : c'est le garde-fou qui empêche de vider une table d'un
+     doigt qui ripe. On dit donc ce qu'on efface. */
+  delete from public.bataille_duels where id > 0;
+
+  /* Le modulo recycle le camp le plus mince. Les deux listes étant
+     déjà mélangées, celui qui rejoue est tiré au sort comme le reste. */
   for i in 1..n loop
     insert into public.bataille_duels (id, joueur_a, joueur_b, champion)
-    values (i, a[i], b[i], champs[i]);
+    values (i, a[((i - 1) % na) + 1], b[((i - 1) % nb) + 1], champs[i]);
   end loop;
 
   return jsonb_build_object('duels', n,
-    'banc_a', coalesce(array_length(a, 1), 0) - n,
-    'banc_b', coalesce(array_length(b, 1), 0) - n);
+    'rejoue_a', n - na, 'rejoue_b', n - nb);
 end $$;
 
 -- Noter le vainqueur d'un duel. p_gagnant vaut 'a', 'b', ou null pour
@@ -261,10 +278,15 @@ begin
     if i = 1 then camp := gagnant; signe := 1;
     else           camp := perdant; signe := -1; end if;
 
+    /* DISTINCT : à camps inégaux, un joueur figure dans deux duels.
+       Sans lui, il compterait deux parts — et comme le matricule de sa
+       ligne est unique, la seconde serait refusée et ces LP
+       s'évaporeraient. Les LP récompensent le camp, pas le nombre de
+       fois qu'on est monté sur le ring. */
     if camp = 'a' then
-      select array_agg(joueur_a order by id) into joueurs from public.bataille_duels;
+      select array_agg(distinct joueur_a) into joueurs from public.bataille_duels;
     else
-      select array_agg(joueur_b order by id) into joueurs from public.bataille_duels;
+      select array_agg(distinct joueur_b) into joueurs from public.bataille_duels;
     end if;
     continue when joueurs is null;
 
@@ -306,6 +328,12 @@ select quand at time zone 'Europe/Paris' as le_soir_dit, marge, ouvert
 select i.team, p.name, i.inscrit_le
   from public.bataille_inscrits i join public.players p on p.id = i.player_id
  order by i.team, i.inscrit_le;
+
+-- Combien de duels, et qui remonte sur le ring.
+select count(*) as duels,
+       count(*) - count(distinct joueur_a) as rejoue_cote_a,
+       count(*) - count(distinct joueur_b) as rejoue_cote_b
+  from public.bataille_duels;
 
 select d.id, pa.name as mediocre, pb.name as pitoyable, c.nom as champion, d.gagnant
   from public.bataille_duels d
