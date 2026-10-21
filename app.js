@@ -176,7 +176,10 @@ async function loadAll(){
     sb.from("rewind_categories").select("*").order("ordre"),
     // duels.sql n'est peut-être pas lancé : la section retombe alors
     // sur les simples disponibilités, sans duel ni champion.
-    sb.from("bataille_duels").select("*").order("id"),
+    /* La VUE, pas la table : elle rend NULL l'affiche et le champion
+       des duels que la roulette n'a pas encore sortis. La table, elle,
+       n'est plus lisible du tout depuis le navigateur. */
+    sb.from("bataille_duels_vue").select("*").order("id"),
     sb.from("bataille_champions").select("*")
   ]);
   const err = ch.error || pl.error || gm.error || sn.error || pr.error || bt.error || st.error || pi.error;
@@ -3034,14 +3037,26 @@ function renderBataille(states){
             + 'Rien n\'est décidé : on tire une manche de plus, et autant '
             + 'qu\'il en faudra pour départager les deux camps.</div>'
           : '')
-      + '<div class="batduels">' + duels.map(d => {
+      + '<div class="batduels">' + duels.map((d, i) => {
+          /* Un duel non révélé ne montre rien : ni les noms, ni le
+             champion. La vue ne nous les a même pas envoyés. */
+          if(!d.revele){
+            return '<div class="batduel cache">'
+              + '<span class="dnum">' + (i + 1) + '</span>'
+              + '<span class="dface"><span class="dpoint">?</span>'
+                + '<span class="dnom">à tirer</span></span>'
+              + '<span class="dchamp"><span class="dpoint gros">?</span></span>'
+              + '<span class="dface"><span class="dpoint">?</span>'
+                + '<span class="dnom">à tirer</span></span>'
+              + '</div>';
+          }
           const pa = parId[d.joueur_a], pb = parId[d.joueur_b];
           const face = (p, cote) => '<span class="dface' + (d.gagnant === cote ? " vainqueur" : "")
             + (d.gagnant && d.gagnant !== cote ? " battu" : "") + '">'
             + avatarRing(p, { sm:true })
             + '<span class="dnom">' + esc(p ? p.name : "?") + '</span></span>';
           return '<div class="batduel">'
-            + '<span class="dnum">' + d.id + '</span>'
+            + '<span class="dnum">' + (i + 1) + '</span>'
             + face(pa, "a")
             + '<span class="dchamp"><img src="' + CHAMP_ICONE(d.champion) + '" alt=""'
               + CHAMP_REPLI(d.champion) + '><span>' + esc(nomChampion(d.champion)) + '</span></span>'
@@ -3086,8 +3101,13 @@ function renderBataille(states){
   }else if(duels.length){
     /* Au pluriel : à camps inégaux, quelqu'un du camp le plus mince
        remonte sur le ring et se retrouve avec deux duels. */
-    const miens = duels.filter(d => d.joueur_a === moi.id || d.joueur_b === moi.id);
-    html = miens.length
+    const miens = duels.filter(d => d.revele
+      && (d.joueur_a === moi.id || d.joueur_b === moi.id));
+    const reste = duels.filter(d => !d.revele).length;
+    html = reste && !miens.length
+      ? '<h4>Le tirage n\'est pas fini</h4><p class="hint" style="margin:0">'
+        + reste + ' duel(s) restent à sortir. Patience.</p>'
+      : miens.length
       ? '<h4>' + (miens.length > 1 ? "Tes " + miens.length + " duels" : "Ton duel") + '</h4>'
         + miens.map(d => '<p class="hint" style="margin:0 0 4px">Tu affrontes <b>'
             + esc((parId[d.joueur_a === moi.id ? d.joueur_b : d.joueur_a] || {}).name || "?")
@@ -3126,7 +3146,13 @@ function renderBataille(states){
            : prets ? "Tirer la manche " + (manche + 1)
                    : "Retirer la manche " + manche) + '</button>'
       + (duels.length
-          ? '<button type="button" class="btn ghost" id="batRoulette">Lancer la roulette</button>'
+          ? '<button type="button" class="btn' + (duels.some(d => !d.revele) ? "" : " ghost")
+              + '" id="batRoulette">'
+              + (duels.some(d => !d.revele) ? "Lancer la roulette" : "Revoir la roulette")
+              + '</button>'
+            + (duels.some(d => d.revele)
+                ? '<button type="button" class="btn ghost" id="batCacher">Tout recacher</button>'
+                : "")
             + '<button type="button" class="btn" id="batFinir"'
               + (prets && !egal ? "" : " disabled") + '>Clore la bataille ('
               + prets + '/' + duels.length + ')</button>'
@@ -3144,6 +3170,7 @@ function renderBataille(states){
   const r = $("#batRoulette");if(r) r.addEventListener("click", ouvrirRoulette);
   const f = $("#batFinir");   if(f) f.addEventListener("click", clorebataille);
   const z = $("#batReset");   if(z) z.addEventListener("click", reinitBataille);
+  const c = $("#batCacher");  if(c) c.addEventListener("click", cacherDuels);
   $("#batCamps").querySelectorAll("[data-duel]").forEach(el =>
     el.addEventListener("click", () =>
       marquerDuel(+el.dataset.duel, el.dataset.cote || null)));
@@ -3168,7 +3195,7 @@ let rouPret = false;
 const rouStop = () => { rouMinuteurs.forEach(clearTimeout); rouMinuteurs = []; };
 const rouPlus = (ms, f) => rouMinuteurs.push(setTimeout(f, ms));
 
-function ouvrirRoulette(){
+async function ouvrirRoulette(){
   // La manche en cours, et elle seule : rejouer les anciennes n'a
   // aucun intérêt une fois qu'elles sont départagées ou périmées.
   const m = S.duels.reduce((x, d) => Math.max(x, d.manche || 1), 0);
@@ -3177,6 +3204,32 @@ function ouvrirRoulette(){
   rouEtape = 0;
   $("#rouletteBox").hidden = false;
   document.body.style.overflow = "hidden";
+  await rouPreparer();
+}
+
+/* Sortir l'affiche du chapeau, juste avant de la faire tourner.
+
+   C'est le serveur qui la donne, et il la marque révélée au passage :
+   avant ce moment, elle n'existe pour personne — ni sur la page des
+   autres, ni dans l'API. C'est ce qui fait que la roulette surprend
+   encore celui qui l'a lancée. */
+async function rouPreparer(){
+  const d = rouDuels[rouEtape];
+  if(!d) return;
+  if(!d.revele){
+    const sc = $("#rouScene");
+    if(sc) sc.innerHTML = '<div class="cerkick">Duel ' + (rouEtape + 1)
+      + ' sur ' + rouDuels.length + '</div><h2 class="certitre">…</h2>';
+    const { data, error } = await sb.rpc("bataille_reveler", { p_duel: d.id });
+    if(error){
+      if(sc) sc.innerHTML = '<p class="cersous">' + esc(error.message || String(error)) + '</p>';
+      return;
+    }
+    Object.assign(d, data, { revele: true });
+    // Les autres pages l'apprendront à leur prochain rafraîchissement.
+    const vrai = S.duels.find(x => x.id === d.id);
+    if(vrai) Object.assign(vrai, d);
+  }
   rendreRoulette();
 }
 function fermerRoulette(){
@@ -3320,9 +3373,9 @@ function rouPoser(){
 function rouAvancer(){
   // Pendant le défilement, le clic abrège au lieu de passer au suivant.
   if(!rouPret){ rouPoser(); return; }
-  if(rouEtape + 1 >= rouDuels.length){ fermerRoulette(); return; }
+  if(rouEtape + 1 >= rouDuels.length){ fermerRoulette(); render(); return; }
   rouEtape++;
-  rendreRoulette();
+  rouPreparer();
 }
 
 const nomChampion = cle =>
@@ -3380,6 +3433,10 @@ function reinitBataille(){
     "Remis à zéro : " + d.duels_effaces + " duel(s), "
     + d.lignes_lp_effacees + " ligne(s) de LP.");
 }
+
+// Répéter la roulette avant de réunir la salle.
+const cacherDuels = () =>
+  appelBat("bataille_cacher", {}, d => d.recaches + " duel(s) remis sous le chapeau.");
 
 const clorebataille = () =>
   appelBat("bataille_resoudre", {}, d => d.egalite

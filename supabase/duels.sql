@@ -12,6 +12,13 @@
 --  attribue un champion à chaque duel. Le site le joue en roulette :
 --  les deux adversaires d'abord, le champion ensuite.
 --
+--  LE TIRAGE RESTE SECRET JUSQU'À LA ROULETTE. Un duel tiré n'est
+--  visible de personne tant qu'il n'a pas été révélé : ni l'affiche,
+--  ni le champion. Et ce n'est pas qu'une affaire d'affichage — la
+--  table n'est plus lisible directement, le site passe par une vue qui
+--  rend NULL tout ce qui n'est pas encore sorti. Interroger l'API à la
+--  main ne donne rien de plus que ce que la salle a déjà vu.
+--
 --  LES CAMPS N'ONT PAS BESOIN D'ÊTRE ÉGAUX. À trois contre quatre, on
 --  joue quatre duels et quelqu'un du camp le plus mince remonte sur le
 --  ring — tiré au sort comme le reste. Personne ne reste sur le banc :
@@ -109,6 +116,7 @@ on conflict (cle) do update set nom = excluded.nom;
 create table if not exists public.bataille_duels (
   id       int primary key,
   manche   int not null default 1,
+  revele   boolean not null default false,
   joueur_a text not null references public.players(id) on delete cascade,
   joueur_b text not null references public.players(id) on delete cascade,
   champion text not null,
@@ -117,17 +125,31 @@ create table if not exists public.bataille_duels (
 );
 
 alter table public.bataille_duels add column if not exists manche int not null default 1;
+alter table public.bataille_duels add column if not exists revele boolean not null default false;
 
 alter table public.bataille_champions enable row level security;
 alter table public.bataille_duels     enable row level security;
 drop policy if exists bataille_champions_read on public.bataille_champions;
-drop policy if exists bataille_duels_read     on public.bataille_duels;
 create policy bataille_champions_read on public.bataille_champions for select to anon, authenticated using (true);
-create policy bataille_duels_read     on public.bataille_duels     for select to anon, authenticated using (true);
 
-do $$ begin
-  alter publication supabase_realtime add table public.bataille_duels;
-exception when duplicate_object then null; end $$;
+/* PLUS AUCUNE POLICY DE LECTURE sur les duels. C'est le point : tant
+   qu'un duel n'est pas révélé, son affiche et son champion ne doivent
+   sortir d'ici par aucun chemin.
+
+   Le site lit la vue ci-dessous. Une vue ordinaire s'exécute avec les
+   droits de son propriétaire et traverse donc la RLS — c'est ce qui lui
+   permet de répondre « il y a quatre duels » tout en rendant NULL ce
+   qui n'est pas encore sorti. */
+drop policy if exists bataille_duels_read on public.bataille_duels;
+
+create or replace view public.bataille_duels_vue as
+select id, manche, revele, gagnant, tire_le,
+       case when revele then joueur_a end as joueur_a,
+       case when revele then joueur_b end as joueur_b,
+       case when revele then champion end as champion
+  from public.bataille_duels;
+
+grant select on public.bataille_duels_vue to anon, authenticated;
 
 
 -- La manche en cours : la dernière tirée, ou zéro si rien n'est tiré.
@@ -262,6 +284,58 @@ revoke all     on function public.bataille_tirer()             from public, anon
 revoke all     on function public.bataille_marquer(int, text)  from public, anon;
 grant  execute on function public.bataille_tirer()             to authenticated, service_role;
 grant  execute on function public.bataille_marquer(int, text)  to authenticated, service_role;
+
+
+-- ---------------------------------------------------------------------
+--  RÉVÉLER UN DUEL
+--
+--  Appelée par la roulette, un duel à la fois. C'est elle qui sort
+--  l'affiche du chapeau : avant son passage, la donnée existe en base
+--  mais personne ne peut l'atteindre.
+--
+--  Sans argument, elle prend le premier duel non révélé de la manche en
+--  cours. Rejouer un duel déjà sorti est permis et sans effet de bord :
+--  on peut relancer la roulette pour la galerie.
+-- ---------------------------------------------------------------------
+create or replace function public.bataille_reveler(p_duel int default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare d public.bataille_duels;
+begin
+  if not public.is_admin() then raise exception 'Réservé à l''administrateur'; end if;
+
+  if p_duel is null then
+    select * into d from public.bataille_duels
+     where manche = public.bataille_manche() and not revele
+     order by id limit 1;
+    if not found then raise exception 'Tous les duels de la manche sont déjà révélés'; end if;
+  else
+    select * into d from public.bataille_duels where id = p_duel;
+    if not found then raise exception 'Duel % inconnu', p_duel; end if;
+  end if;
+
+  update public.bataille_duels set revele = true where id = d.id;
+
+  return jsonb_build_object('id', d.id, 'manche', d.manche,
+    'joueur_a', d.joueur_a, 'joueur_b', d.joueur_b,
+    'champion', d.champion, 'gagnant', d.gagnant);
+end $$;
+
+-- Tout recacher : pour répéter la roulette avant de réunir la salle.
+create or replace function public.bataille_cacher()
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if not public.is_admin() then raise exception 'Réservé à l''administrateur'; end if;
+  update public.bataille_duels set revele = false
+   where manche = public.bataille_manche() and revele;
+  get diagnostics n = row_count;
+  return jsonb_build_object('recaches', n);
+end $$;
+
+revoke all     on function public.bataille_reveler(int) from public, anon;
+revoke all     on function public.bataille_cacher()     from public, anon;
+grant  execute on function public.bataille_reveler(int) to authenticated, service_role;
+grant  execute on function public.bataille_cacher()     to authenticated, service_role;
 
 
 -- ---------------------------------------------------------------------
@@ -406,11 +480,17 @@ select count(*) as duels,
        count(*) - count(distinct joueur_b) as rejoue_cote_b
   from public.bataille_duels;
 
-select d.manche, d.id, pa.name as mediocre, pb.name as pitoyable,
-       c.nom as champion, d.gagnant
+/* Volontairement muette sur ce qui n'est pas sorti : lancer cette
+   requête avant la roulette ne doit pas gâcher la soirée de celui qui
+   l'anime. */
+select d.manche, d.id, d.revele,
+       case when d.revele then pa.name else '—' end as mediocre,
+       case when d.revele then pb.name else '—' end as pitoyable,
+       case when d.revele then c.nom   else '—' end as champion,
+       d.gagnant
   from public.bataille_duels d
-  join public.players pa on pa.id = d.joueur_a
-  join public.players pb on pb.id = d.joueur_b
+  left join public.players pa on pa.id = d.joueur_a
+  left join public.players pb on pb.id = d.joueur_b
   left join public.bataille_champions c on c.cle = d.champion
  order by d.manche, d.id;
 

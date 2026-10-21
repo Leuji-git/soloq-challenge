@@ -393,6 +393,12 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .dnom{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dface.vainqueur .dnom{color:var(--up);font-weight:600}
 .dface.battu{opacity:.45}
+/* Un duel pas encore sorti : la place est tenue, rien n'est dit. */
+.batduel.cache{opacity:.55;border:1px dashed var(--line);background:none}
+.dpoint{display:flex;align-items:center;justify-content:center;
+  width:26px;height:26px;border-radius:50%;background:var(--surface-3);
+  color:var(--muted);font-family:"Outfit",system-ui,sans-serif;font-size:13px}
+.dpoint.gros{width:36px;height:36px;border-radius:var(--r-sm);font-size:15px}
 .dchamp{display:flex;flex-direction:column;align-items:center;gap:2px;width:62px}
 .dchamp img{width:36px;height:36px;border-radius:var(--r-sm)}
 .dchamp span{font-family:"Barlow Semi Condensed",sans-serif;font-size:10.5px;
