@@ -354,6 +354,39 @@ end $$;
 revoke all     on function public.bataille_resoudre() from public, anon;
 grant  execute on function public.bataille_resoudre() to authenticated, service_role;
 
+
+-- ---------------------------------------------------------------------
+--  7. TOUT REMETTRE À ZÉRO
+--
+--  Efface les manches, les résultats, ET les LP déjà versés. Les trois
+--  ensemble, sinon ce n'est pas une remise à zéro : laisser les lignes
+--  de LP en place ferait qu'une seconde clôture n'écrirait rien du tout
+--  — leur matricule est unique — et le camp gagnant resterait celui de
+--  la première fois.
+--
+--  Les disponibilités, elles, restent : personne n'a envie de refaire
+--  l'appel à vingt et une heures.
+-- ---------------------------------------------------------------------
+create or replace function public.bataille_reinitialiser()
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare n_duels int; n_lp int;
+begin
+  if not public.is_admin() then raise exception 'Réservé à l''administrateur'; end if;
+
+  delete from public.bataille_duels where id > 0;
+  get diagnostics n_duels = row_count;
+
+  delete from public.games where kind = 'bataille';
+  get diagnostics n_lp = row_count;
+
+  update public.bataille set ouvert = true where id = 1;
+
+  return jsonb_build_object('duels_effaces', n_duels, 'lignes_lp_effacees', n_lp);
+end $$;
+
+revoke all     on function public.bataille_reinitialiser() from public, anon;
+grant  execute on function public.bataille_reinitialiser() to authenticated, service_role;
+
 notify pgrst, 'reload schema';
 
 

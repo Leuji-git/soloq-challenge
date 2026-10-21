@@ -3131,6 +3131,9 @@ function renderBataille(states){
               + (prets && !egal ? "" : " disabled") + '>Clore la bataille ('
               + prets + '/' + duels.length + ')</button>'
           : "")
+      + (duels.length || S.games.some(g => g.kind === "bataille")
+          ? '<button type="button" class="btn ghost danger" id="batReset">Tout remettre à zéro</button>'
+          : "")
       + '</div>';
   }
   zone.innerHTML = html;
@@ -3140,6 +3143,7 @@ function renderBataille(states){
   const t = $("#batTirer");   if(t) t.addEventListener("click", tirerDuels);
   const r = $("#batRoulette");if(r) r.addEventListener("click", ouvrirRoulette);
   const f = $("#batFinir");   if(f) f.addEventListener("click", clorebataille);
+  const z = $("#batReset");   if(z) z.addEventListener("click", reinitBataille);
   $("#batCamps").querySelectorAll("[data-duel]").forEach(el =>
     el.addEventListener("click", () =>
       marquerDuel(+el.dataset.duel, el.dataset.cote || null)));
@@ -3179,23 +3183,29 @@ function fermerRoulette(){
   rouStop();
   $("#rouletteBox").hidden = true;
   document.body.style.overflow = "";
-}/* Le rythme du tirage. Trois rouleaux qui s'arrêtent l'un après
-   l'autre, six secondes et demie en tout : assez pour que la salle ait
-   le temps de crier, trop peu pour qu'elle s'ennuie. */
-const ROU_A = 2400;        // le premier rouleau se cale
-const ROU_B = 4100;        // le deuxième
-const ROU_FIN = 6500;      // celui du champion
+}/* LE TEMPO. Un seul nombre à bouger si le tirage paraît encore trop
+   vif : tout le reste en découle. 1 donnait six secondes et demie, et
+   c'était trop court pour que l'œil suive quoi que ce soit. */
+const ROU_TEMPO = 1.55;
 
-/* La courbe. Presque toute la distance est avalée dans la première
-   seconde, puis ça rampe : c'est ce profil-là qui fait la machine à
-   sous, et pas la vitesse elle-même. */
-const ROU_COURBE = "cubic-bezier(.08,.74,.12,1)";
+const ROU_A = Math.round(2600 * ROU_TEMPO);   // le premier rouleau se cale
+const ROU_B = Math.round(4300 * ROU_TEMPO);   // le deuxième
+const ROU_FIN = Math.round(6800 * ROU_TEMPO); // celui du champion
+
+/* La courbe. L'ancienne avalait presque toute la distance dans la
+   première seconde : les cases passaient en bouillie, et on ne voyait
+   que le dernier mètre. Celle-ci garde une vitesse LISIBLE pendant la
+   moitié du trajet, puis freine franchement — c'est ce qu'on regarde
+   sur une vraie machine, pas le flou. */
+const ROU_COURBE = "cubic-bezier(.17,.59,.2,1)";
 
 // Hauteur d'une case. Deux jeux de mesures, selon la place qu'on a.
 const rouPetit = () => window.innerWidth < 620;
 const rouHJ = () => rouPetit() ? 112 : 152;   // une case « joueur »
 const rouHC = () => rouPetit() ? 140 : 176;   // une case « champion »
-const ROU_NB_J = 20, ROU_NB_C = 26;           // cases par rouleau
+/* Moins de cases qu'avant, pour la même raison : à nombre égal et
+   durée plus longue, chacune reste lisible au passage. */
+const ROU_NB_J = 15, ROU_NB_C = 19;           // cases par rouleau
 
 /* Un rouleau : une fenêtre d'une case, une bande de N cases dessous,
    la bonne tout en bas. On remonte la bande de (N-1) cases et la
@@ -3358,6 +3368,19 @@ const tirerDuels = () =>
 const marquerDuel = (id, cote) =>
   appelBat("bataille_marquer", { p_duel: id, p_gagnant: cote },
     () => cote ? "Duel " + id + " : " + cote.toUpperCase() + " l'emporte." : "Duel " + id + " remis à zéro.");
+/* La remise à zéro efface les manches ET les LP déjà versés. C'est
+   irréversible et ça touche le score du challenge : on demande. */
+function reinitBataille(){
+  const lp = S.games.filter(g => g.kind === "bataille").length;
+  const quoi = "Effacer toutes les manches"
+    + (lp ? " et reprendre les " + lp + " ligne(s) de LP déjà versées" : "")
+    + " ?\n\nLes disponibilités sont conservées.";
+  if(!window.confirm(quoi)) return;
+  appelBat("bataille_reinitialiser", {}, d =>
+    "Remis à zéro : " + d.duels_effaces + " duel(s), "
+    + d.lignes_lp_effacees + " ligne(s) de LP.");
+}
+
 const clorebataille = () =>
   appelBat("bataille_resoudre", {}, d => d.egalite
     ? "Égalité " + d.a + "—" + d.b + " : rien n'est décidé, tire la manche "

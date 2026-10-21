@@ -402,6 +402,9 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
   background:var(--surface);border:1px solid var(--line);color:var(--muted);font-size:11px}
 .dadmin button.on{border-color:var(--accent);color:var(--ink);
   background:color-mix(in srgb, var(--accent) 18%, var(--surface))}
+/* Un bouton qui efface doit se distinguer de ceux qui construisent. */
+.btn.danger{border-color:color-mix(in srgb, var(--down) 45%, transparent);color:var(--down)}
+.btn.danger:hover{background:color-mix(in srgb, var(--down) 14%, transparent)}
 .batadmin{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:11px;
   border-top:1px dashed var(--line)}
 
