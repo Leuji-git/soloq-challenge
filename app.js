@@ -3011,17 +3011,30 @@ function renderBataille(states){
   const moi = myPlayer();
   const dispo = moi ? S.inscrits.find(i => i.player_id === moi.id) : null;
 
+  /* Seule la DERNIÈRE manche compte. Une égalité ne tranche rien : on
+     en rejoue une, et les précédentes ne sont plus que de l'histoire. */
+  const manche = S.duels.reduce((m, d) => Math.max(m, d.manche || 1), 0);
+  const duels = S.duels.filter(d => (d.manche || 1) === manche);
+
   // ---- les duels tirés, ou les disponibles ---------------------
   const camps = $("#batCamps");
-  camps.classList.toggle("duels", S.duels.length > 0);
-  if(S.duels.length){
-    const va = S.duels.filter(d => d.gagnant === "a").length;
-    const vb = S.duels.filter(d => d.gagnant === "b").length;
+  camps.classList.toggle("duels", duels.length > 0);
+  if(duels.length){
+    const va = duels.filter(d => d.gagnant === "a").length;
+    const vb = duels.filter(d => d.gagnant === "b").length;
+    const tousJoues = duels.every(d => d.gagnant);
+    const egalite = tousJoues && va === vb;
     $("#batCamps").innerHTML =
-        '<div class="batscore"><span class="sa">' + esc(nom("a")) + ' <b>' + va + '</b></span>'
+        (manche > 1 ? '<div class="batmanche">Manche ' + manche + '</div>' : '')
+      + '<div class="batscore"><span class="sa">' + esc(nom("a")) + ' <b>' + va + '</b></span>'
       + '<span class="stiret">—</span>'
       + '<span class="sb"><b>' + vb + '</b> ' + esc(nom("b")) + '</span></div>'
-      + '<div class="batduels">' + S.duels.map(d => {
+      + (egalite
+          ? '<div class="bategalite"><b>Égalité ' + va + ' — ' + vb + '.</b> '
+            + 'Rien n\'est décidé : on tire une manche de plus, et autant '
+            + 'qu\'il en faudra pour départager les deux camps.</div>'
+          : '')
+      + '<div class="batduels">' + duels.map(d => {
           const pa = parId[d.joueur_a], pb = parId[d.joueur_b];
           const face = (p, cote) => '<span class="dface' + (d.gagnant === cote ? " vainqueur" : "")
             + (d.gagnant && d.gagnant !== cote ? " battu" : "") + '">'
@@ -3070,10 +3083,10 @@ function renderBataille(states){
   let html = "";
   if(!moi){
     html = '<p class="hint" style="margin:0">Connecte-toi avec ton profil joueur pour te déclarer disponible.</p>';
-  }else if(S.duels.length){
+  }else if(duels.length){
     /* Au pluriel : à camps inégaux, quelqu'un du camp le plus mince
        remonte sur le ring et se retrouve avec deux duels. */
-    const miens = S.duels.filter(d => d.joueur_a === moi.id || d.joueur_b === moi.id);
+    const miens = duels.filter(d => d.joueur_a === moi.id || d.joueur_b === moi.id);
     html = miens.length
       ? '<h4>' + (miens.length > 1 ? "Tes " + miens.length + " duels" : "Ton duel") + '</h4>'
         + miens.map(d => '<p class="hint" style="margin:0 0 4px">Tu affrontes <b>'
@@ -3100,15 +3113,23 @@ function renderBataille(states){
   }
 
   if(admin){
-    const prets = S.duels.filter(d => d.gagnant).length;
+    const prets = duels.filter(d => d.gagnant).length;
+    const egal = duels.length && prets === duels.length
+      && duels.filter(d => d.gagnant === "a").length
+         === duels.filter(d => d.gagnant === "b").length;
     html += '<div class="batadmin">'
-      + '<button type="button" class="btn ghost" id="batTirer">'
-        + (S.duels.length ? "Retirer au sort" : "Tirer les duels") + '</button>'
-      + (S.duels.length
+      /* Le même bouton refait la manche tant que rien n'y est joué, et
+         ouvre la suivante dès qu'un vainqueur est noté. Son libellé dit
+         lequel des deux il va faire. */
+      + '<button type="button" class="btn' + (egal ? "" : " ghost") + '" id="batTirer">'
+        + (!duels.length ? "Tirer les duels"
+           : prets ? "Tirer la manche " + (manche + 1)
+                   : "Retirer la manche " + manche) + '</button>'
+      + (duels.length
           ? '<button type="button" class="btn ghost" id="batRoulette">Lancer la roulette</button>'
             + '<button type="button" class="btn" id="batFinir"'
-              + (prets ? "" : " disabled") + '>Clore la bataille ('
-              + prets + '/' + S.duels.length + ')</button>'
+              + (prets && !egal ? "" : " disabled") + '>Clore la bataille ('
+              + prets + '/' + duels.length + ')</button>'
           : "")
       + '</div>';
   }
@@ -3136,6 +3157,7 @@ function renderBataille(states){
    quoi il suffirait de recharger la page pour retenter sa chance.
 =================================================================== */
 let rouEtape = 0;        // quel duel on révèle
+let rouDuels = [];       // la manche qu'on est en train de jouer
 let rouMinuteurs = [];
 let rouPret = false;
 
@@ -3143,7 +3165,11 @@ const rouStop = () => { rouMinuteurs.forEach(clearTimeout); rouMinuteurs = []; }
 const rouPlus = (ms, f) => rouMinuteurs.push(setTimeout(f, ms));
 
 function ouvrirRoulette(){
-  if(!S.duels.length) return;
+  // La manche en cours, et elle seule : rejouer les anciennes n'a
+  // aucun intérêt une fois qu'elles sont départagées ou périmées.
+  const m = S.duels.reduce((x, d) => Math.max(x, d.manche || 1), 0);
+  rouDuels = S.duels.filter(d => (d.manche || 1) === m);
+  if(!rouDuels.length) return;
   rouEtape = 0;
   $("#rouletteBox").hidden = false;
   document.body.style.overflow = "hidden";
@@ -3153,86 +3179,138 @@ function fermerRoulette(){
   rouStop();
   $("#rouletteBox").hidden = true;
   document.body.style.overflow = "";
+}/* Le rythme du tirage. Trois rouleaux qui s'arrêtent l'un après
+   l'autre, six secondes et demie en tout : assez pour que la salle ait
+   le temps de crier, trop peu pour qu'elle s'ennuie. */
+const ROU_A = 2400;        // le premier rouleau se cale
+const ROU_B = 4100;        // le deuxième
+const ROU_FIN = 6500;      // celui du champion
+
+/* La courbe. Presque toute la distance est avalée dans la première
+   seconde, puis ça rampe : c'est ce profil-là qui fait la machine à
+   sous, et pas la vitesse elle-même. */
+const ROU_COURBE = "cubic-bezier(.08,.74,.12,1)";
+
+// Hauteur d'une case. Deux jeux de mesures, selon la place qu'on a.
+const rouPetit = () => window.innerWidth < 620;
+const rouHJ = () => rouPetit() ? 112 : 152;   // une case « joueur »
+const rouHC = () => rouPetit() ? 140 : 176;   // une case « champion »
+const ROU_NB_J = 20, ROU_NB_C = 26;           // cases par rouleau
+
+/* Un rouleau : une fenêtre d'une case, une bande de N cases dessous,
+   la bonne tout en bas. On remonte la bande de (N-1) cases et la
+   transition fait le reste.
+
+   Le reflow forcé n'est pas décoratif : sans lui, le navigateur voit
+   le départ et l'arrivée posés dans le même tour de boucle, n'a donc
+   aucun changement à animer, et la bande se téléporte. */
+function rouLancer(id, cases, haut, duree){
+  const bande = $("#" + id);
+  if(!bande) return;
+  bande.style.transition = "none";
+  bande.style.transform = "translateY(0px)";
+  void bande.offsetHeight;
+  bande.style.transition = "transform " + duree + "ms " + ROU_COURBE;
+  bande.style.transform = "translateY(-" + ((cases - 1) * haut) + "px)";
+}
+
+// Caler un rouleau sur-le-champ : ce que fait un clic impatient.
+function rouCaler(id, cases, haut){
+  const bande = $("#" + id);
+  if(!bande) return;
+  bande.style.transition = "none";
+  bande.style.transform = "translateY(-" + ((cases - 1) * haut) + "px)";
 }
 
 function rendreRoulette(){
   rouStop();
   rouPret = false;
   const sc = $("#rouScene");
-  const n = S.duels.length;
+  const n = rouDuels.length;
   $("#rouJauge").style.width = Math.round((rouEtape + 1) / n * 100) + "%";
   $("#rouSuiv").textContent = rouEtape + 1 >= n ? "Terminer" : "Tirer le duel suivant";
 
-  const d = S.duels[rouEtape];
+  const d = rouDuels[rouEtape];
   const parId = Object.fromEntries(S.players.map(p => [p.id, p]));
-  const pa = parId[d.joueur_a], pb = parId[d.joueur_b];
   const nom = t => t === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
+  const hj = rouHJ(), hc = rouHC();
 
-  const cote = (p, t, id) => '<div class="roucote tourne" id="' + id + '">'
+  /* Le défilement est un leurre assumé : les cases qui passent sont
+     tirées au hasard, seule la dernière compte. Le résultat était écrit
+     en base avant l'ouverture — la roulette révèle, elle ne tire pas. */
+  const vivier = t => {
+    const v = S.players.filter(p => p.team === t);
+    return v.length ? v : S.players;
+  };
+  const pioche = v => v[Math.floor(Math.random() * v.length)];
+
+  const caseJoueur = (p, t) => '<div class="roucase" style="height:' + hj + 'px">'
     + avatarRing(p, { lg:true })
     + '<div class="rounom">' + esc(p ? p.name : "?") + '</div>'
-    + '<div class="routeam" style="color:' + TEAM_COLOR[t] + '">' + esc(nom(t)) + '</div></div>';
+    + '<div class="routeam" style="color:' + TEAM_COLOR[t] + '">' + esc(nom(t)) + '</div>'
+    + '</div>';
+  const caseChamp = c => '<div class="roucase" style="height:' + hc + 'px">'
+    + '<img src="' + CHAMP_ICONE(c.cle) + '" alt=""' + CHAMP_REPLI(c.cle) + '>'
+    + '<div class="rouchampnom">' + esc(c.nom) + '</div></div>';
 
-  sc.innerHTML = '<div class="cerkick">Duel ' + (rouEtape + 1) + ' sur ' + n + '</div>'
-    + '<div class="rouduel">' + cote(pa, "a", "rouA")
-    + '<span class="rouvs">VS</span>' + cote(pb, "b", "rouB") + '</div>'
-    + '<div class="rouchamp tourne" id="rouChamp">'
-      + '<img id="rouChampImg" src="" alt="">'
-      + '<div class="rouchampnom" id="rouChampNom">…</div></div>'
-    + '<p class="rousous">Premier kill gagnant.</p>';
-
-  /* Le défilement est un leurre assumé : on fait clignoter des visages
-     et des portraits au hasard, le temps que l'attente existe. Le
-     résultat, lui, était déjà écrit en base avant l'ouverture. */
-  const autres = S.players.filter(p => p.id !== d.joueur_a && p.id !== d.joueur_b);
-  const img = $("#rouChampImg"), nomC = $("#rouChampNom");
-  let bat = null;
-  if(S.champions.length){
-    bat = setInterval(() => {
-      const c = S.champions[Math.floor(Math.random() * S.champions.length)];
-      img.src = CHAMP_ICONE(c.cle);
-      nomC.textContent = c.nom;
-    }, 90);
-    rouMinuteurs.push(bat);
-  }
-
-  const poser = (id, p) => {
-    const el = $("#" + id);
-    if(!el) return;
-    el.classList.remove("tourne");
-    el.classList.add("pose");
+  const bande = (combien, tirer, final) => {
+    const t = [];
+    for(let i = 0; i < combien - 1; i++) t.push(tirer());
+    t.push(final);
+    return t.join("");
   };
 
-  rouPlus(1100, () => poser("rouA", pa));
-  rouPlus(2000, () => poser("rouB", pb));
-  rouPlus(3100, () => {
-    if(bat) clearInterval(bat);
-    const ch = $("#rouChamp");
-    if(ch) ch.classList.remove("tourne");
-    if(img) img.src = CHAMP_ICONE(d.champion);
-    if(nomC) nomC.textContent = nomChampion(d.champion);
-    if(ch) ch.classList.add("la");
+  const vA = vivier("a"), vB = vivier("b");
+  const champs = S.champions.length ? S.champions : [{ cle: d.champion, nom: d.champion }];
+
+  const rouleauJ = (id, v, t, vrai) =>
+    '<div class="roucote" id="' + id + 'Box"><div class="roureel" style="height:' + hj + 'px">'
+    + '<div class="roubande" id="' + id + '">'
+    + bande(ROU_NB_J, () => caseJoueur(pioche(v), t), caseJoueur(vrai, t))
+    + '</div></div></div>';
+
+  sc.innerHTML = '<div class="cerkick">Duel ' + (rouEtape + 1) + ' sur ' + n + '</div>'
+    + '<div class="rouduel">'
+      + rouleauJ("rouA", vA, "a", parId[d.joueur_a])
+      + '<span class="rouvs">VS</span>'
+      + rouleauJ("rouB", vB, "b", parId[d.joueur_b])
+    + '</div>'
+    + '<div class="rouchamp la" id="rouChamp">'
+      + '<div class="roureel" style="height:' + hc + 'px"><div class="roubande" id="rouC">'
+      + bande(ROU_NB_C, () => caseChamp(pioche(champs)),
+              caseChamp({ cle: d.champion, nom: nomChampion(d.champion) }))
+      + '</div></div></div>'
+    + '<p class="rousous">Premier kill gagnant.</p>';
+
+  rouLancer("rouA", ROU_NB_J, hj, ROU_A);
+  rouLancer("rouB", ROU_NB_J, hj, ROU_B);
+  rouLancer("rouC", ROU_NB_C, hc, ROU_FIN);
+
+  rouPlus(ROU_A,   () => { const e = $("#rouABox"); if(e) e.classList.add("pose"); });
+  rouPlus(ROU_B,   () => { const e = $("#rouBBox"); if(e) e.classList.add("pose"); });
+  rouPlus(ROU_FIN, () => {
+    const e = $("#rouChamp"); if(e) e.classList.add("pose");
     rouPret = true;
   });
-  // Le portrait part invisible : on l'allume avec le défilement.
-  rouPlus(60, () => { const ch = $("#rouChamp"); if(ch) ch.classList.add("la"); });
+}
+
+// Tout caler d'un coup : ce que fait un clic impatient.
+function rouPoser(){
+  rouStop();
+  const hj = rouHJ(), hc = rouHC();
+  rouCaler("rouA", ROU_NB_J, hj);
+  rouCaler("rouB", ROU_NB_J, hj);
+  rouCaler("rouC", ROU_NB_C, hc);
+  ["rouABox","rouBBox","rouChamp"].forEach(id => {
+    const e = $("#" + id); if(e) e.classList.add("pose");
+  });
+  rouPret = true;
 }
 
 function rouAvancer(){
   // Pendant le défilement, le clic abrège au lieu de passer au suivant.
-  if(!rouPret){
-    rouStop();
-    const d = S.duels[rouEtape];
-    ["rouA","rouB"].forEach(id => { const e = $("#" + id);
-      if(e){ e.classList.remove("tourne"); e.classList.add("pose"); } });
-    const ch = $("#rouChamp"), img = $("#rouChampImg"), nomC = $("#rouChampNom");
-    if(ch){ ch.classList.remove("tourne"); ch.classList.add("la"); }
-    if(img) img.src = CHAMP_ICONE(d.champion);
-    if(nomC) nomC.textContent = nomChampion(d.champion);
-    rouPret = true;
-    return;
-  }
-  if(rouEtape + 1 >= S.duels.length){ fermerRoulette(); return; }
+  if(!rouPret){ rouPoser(); return; }
+  if(rouEtape + 1 >= rouDuels.length){ fermerRoulette(); return; }
   rouEtape++;
   rendreRoulette();
 }
@@ -3274,7 +3352,7 @@ const desisterBataille = () =>
 const tirerDuels = () =>
   appelBat("bataille_tirer", {}, d => {
     const r = (d.rejoue_a || 0) + (d.rejoue_b || 0);
-    return d.duels + " duel(s) tirés."
+    return "Manche " + d.manche + " : " + d.duels + " duel(s) tirés."
       + (r ? " " + r + " joueur(s) remontent sur le ring pour équilibrer." : "");
   });
 const marquerDuel = (id, cote) =>
@@ -3282,8 +3360,10 @@ const marquerDuel = (id, cote) =>
     () => cote ? "Duel " + id + " : " + cote.toUpperCase() + " l'emporte." : "Duel " + id + " remis à zéro.");
 const clorebataille = () =>
   appelBat("bataille_resoudre", {}, d => d.egalite
-    ? "Égalité " + d.a + "—" + d.b + " : rien ne bouge."
-    : d.a + "—" + d.b + " · " + orFr(d.deplace) + " LP déplacés.");
+    ? "Égalité " + d.a + "—" + d.b + " : rien n'est décidé, tire la manche "
+      + (d.manche + 1) + "."
+    : "Manche " + d.manche + " · " + d.a + "—" + d.b + " · "
+      + orFr(d.deplace) + " LP déplacés.");
 
 function detailOr(g){
   const b = OR_ROLES[g.role] || OR_ROLES.MIDDLE;

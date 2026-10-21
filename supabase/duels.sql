@@ -25,7 +25,11 @@
 --
 --      Médiocres 4 — Pitoyables 1  →  l'écart tombe à 150
 --      Médiocres 1 — Pitoyables 4  →  l'écart se creuse d'autant
---      égalité                     →  rien ne bouge
+--      égalité 2 — 2               →  ON REJOUE
+--
+--  Une égalité ne décide rien : on tire une MANCHE de plus, et autant
+--  qu'il en faudra. Seule la dernière manche compte — celle qui aura
+--  fini par départager les deux camps.
 --
 --  Ce script est autonome : il crée ce qui manque si bataille.sql n'a
 --  pas été lancé, et transforme ce qui existe sinon. Idempotent.
@@ -104,12 +108,15 @@ on conflict (cle) do update set nom = excluded.nom;
 -- ---------------------------------------------------------------------
 create table if not exists public.bataille_duels (
   id       int primary key,
+  manche   int not null default 1,
   joueur_a text not null references public.players(id) on delete cascade,
   joueur_b text not null references public.players(id) on delete cascade,
   champion text not null,
   gagnant  text check (gagnant in ('a','b')),
   tire_le  timestamptz not null default now()
 );
+
+alter table public.bataille_duels add column if not exists manche int not null default 1;
 
 alter table public.bataille_champions enable row level security;
 alter table public.bataille_duels     enable row level security;
@@ -121,6 +128,14 @@ create policy bataille_duels_read     on public.bataille_duels     for select to
 do $$ begin
   alter publication supabase_realtime add table public.bataille_duels;
 exception when duplicate_object then null; end $$;
+
+
+-- La manche en cours : la dernière tirée, ou zéro si rien n'est tiré.
+create or replace function public.bataille_manche()
+returns int language sql stable security definer set search_path = public as $$
+  select coalesce(max(manche), 0) from public.bataille_duels;
+$$;
+grant execute on function public.bataille_manche() to anon, authenticated;
 
 
 -- ---------------------------------------------------------------------
@@ -171,14 +186,24 @@ grant  execute on function public.bataille_desister() to authenticated, service_
 --  premier d'entre eux — tiré au hasard comme les autres — joue deux
 --  fois. Trois contre quatre donne donc quatre duels, pas trois.
 --
---  Retirer efface les duels précédents : c'est un nouveau tirage, pas
---  un ajout. Les résultats déjà saisis partent avec, volontairement.
+--  Tant que la manche en cours n'a AUCUN résultat, retirer la refait :
+--  c'est le cas du tirage qu'on veut recommencer. Dès qu'un vainqueur
+--  est noté, tirer ouvre la MANCHE SUIVANTE et conserve la précédente.
+--  Une seule commande, et elle fait ce qu'on attend d'elle aux deux
+--  moments où on l'utilise.
 -- ---------------------------------------------------------------------
 create or replace function public.bataille_tirer()
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare a text[]; b text[]; champs text[]; na int; nb int; n int; i int;
+        m int; joues int; depart int;
 begin
   if not public.is_admin() then raise exception 'Réservé à l''administrateur'; end if;
+
+  m := public.bataille_manche();
+  select count(*) filter (where gagnant is not null) into joues
+    from public.bataille_duels where manche = m;
+  -- Rien de joué sur la manche en cours : on la refait. Sinon, suivante.
+  if m = 0 or joues > 0 then m := m + 1; end if;
 
   select array_agg(player_id order by random()) into a
     from public.bataille_inscrits where team = 'a';
@@ -199,19 +224,23 @@ begin
     raise exception 'Pas assez de champions au tirage';
   end if;
 
-  /* La base refuse un DELETE sans WHERE (sql_safe_updates), et elle a
-     raison : c'est le garde-fou qui empêche de vider une table d'un
-     doigt qui ripe. On dit donc ce qu'on efface. */
-  delete from public.bataille_duels where id > 0;
+  /* On n'efface que la manche qu'on refait — les précédentes restent,
+     elles racontent la soirée. La base refuse un DELETE sans WHERE
+     (sql_safe_updates), et elle a raison : c'est le garde-fou qui
+     empêche de vider une table d'un doigt qui ripe. */
+  delete from public.bataille_duels where manche = m;
+
+  -- Les identifiants continuent de courir d'une manche à l'autre.
+  select coalesce(max(id), 0) into depart from public.bataille_duels;
 
   /* Le modulo recycle le camp le plus mince. Les deux listes étant
      déjà mélangées, celui qui rejoue est tiré au sort comme le reste. */
   for i in 1..n loop
-    insert into public.bataille_duels (id, joueur_a, joueur_b, champion)
-    values (i, a[((i - 1) % na) + 1], b[((i - 1) % nb) + 1], champs[i]);
+    insert into public.bataille_duels (id, manche, joueur_a, joueur_b, champion)
+    values (depart + i, m, a[((i - 1) % na) + 1], b[((i - 1) % nb) + 1], champs[i]);
   end loop;
 
-  return jsonb_build_object('duels', n,
+  return jsonb_build_object('duels', n, 'manche', m,
     'rejoue_a', n - na, 'rejoue_b', n - nb);
 end $$;
 
@@ -238,28 +267,35 @@ grant  execute on function public.bataille_marquer(int, text)  to authenticated,
 -- ---------------------------------------------------------------------
 --  6. LE RÉSULTAT
 --
---  La majorité des duels emporte tout l'enjeu. L'ancienne version
---  prenait le vainqueur en paramètre ; celle-ci le lit dans les duels,
---  ce qui est moins discutable un soir de fin de challenge.
+--  La majorité des duels de la DERNIÈRE MANCHE emporte tout l'enjeu.
+--  Le vainqueur n'est pas un paramètre, il se lit dans les duels : un
+--  soir de fin de challenge, c'est moins discutable.
+--
+--  Sur une égalité, on ne tranche pas et on ne ferme rien : la réponse
+--  est de rejouer une manche, pas de tirer à pile ou face.
 -- ---------------------------------------------------------------------
 drop function if exists public.bataille_resoudre(text);
 
 create or replace function public.bataille_resoudre()
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
-  va int; vb int; gagnant text; perdant text;
+  va int; vb int; m int; gagnant text; perdant text;
   e jsonb; x int; camp text; signe int; i int;
   joueurs text[]; j text; part int; reste int; k int; n int := 0;
 begin
   if not public.is_admin() then raise exception 'Réservé à l''administrateur'; end if;
 
+  m := public.bataille_manche();
   select count(*) filter (where gagnant = 'a'), count(*) filter (where gagnant = 'b')
-    into va, vb from public.bataille_duels;
+    into va, vb from public.bataille_duels where manche = m;
 
   if va + vb = 0 then raise exception 'Aucun duel n''a encore de vainqueur'; end if;
+
+  /* Égalité : rien n'est décidé, rien n'est fermé. On tire une manche
+     de plus, et autant qu'il en faudra. */
   if va = vb then
-    update public.bataille set ouvert = false where id = 1;
-    return jsonb_build_object('egalite', true, 'a', va, 'b', vb, 'deplace', 0);
+    return jsonb_build_object('egalite', true, 'manche', m,
+                              'a', va, 'b', vb, 'deplace', 0);
   end if;
 
   gagnant := case when va > vb then 'a' else 'b' end;
@@ -284,9 +320,11 @@ begin
        s'évaporeraient. Les LP récompensent le camp, pas le nombre de
        fois qu'on est monté sur le ring. */
     if camp = 'a' then
-      select array_agg(distinct joueur_a) into joueurs from public.bataille_duels;
+      select array_agg(distinct joueur_a) into joueurs
+        from public.bataille_duels where manche = m;
     else
-      select array_agg(distinct joueur_b) into joueurs from public.bataille_duels;
+      select array_agg(distinct joueur_b) into joueurs
+        from public.bataille_duels where manche = m;
     end if;
     continue when joueurs is null;
 
@@ -309,7 +347,7 @@ begin
   update public.bataille set ouvert = false where id = 1;
 
   return jsonb_build_object('gagnant', gagnant, 'perdant', perdant,
-                            'a', va, 'b', vb, 'enjeu', x,
+                            'manche', m, 'a', va, 'b', vb, 'enjeu', x,
                             'deplace', x * 2, 'lignes', n);
 end $$;
 
@@ -335,12 +373,13 @@ select count(*) as duels,
        count(*) - count(distinct joueur_b) as rejoue_cote_b
   from public.bataille_duels;
 
-select d.id, pa.name as mediocre, pb.name as pitoyable, c.nom as champion, d.gagnant
+select d.manche, d.id, pa.name as mediocre, pb.name as pitoyable,
+       c.nom as champion, d.gagnant
   from public.bataille_duels d
   join public.players pa on pa.id = d.joueur_a
   join public.players pb on pb.id = d.joueur_b
   left join public.bataille_champions c on c.cle = d.champion
- order by d.id;
+ order by d.manche, d.id;
 
 select count(*) as champions_au_tirage from public.bataille_champions;
 select public.bataille_enjeu() as enjeu_du_moment;
