@@ -300,6 +300,92 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 }
 .apercufin button:hover{border-color:var(--accent);color:var(--ink)}
 
+/* ---------- la roulette des duels ---------- */
+.roulette{
+  position:fixed;inset:0;z-index:300;background:var(--bg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:24px 18px 0;
+}
+.roulette[hidden]{display:none}
+.roulette::before{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(60% 50% at 50% 42%,
+    color-mix(in srgb, var(--accent) 13%, transparent), transparent 70%);
+}
+.rouscene{position:relative;z-index:1;width:100%;max-width:760px;flex:1;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:16px}
+
+.rouduel{display:flex;align-items:center;justify-content:center;gap:18px;width:100%}
+.roucote{flex:1;max-width:240px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.roucote .pav{width:84px;height:84px}
+.rounom{font-family:"Outfit",system-ui,sans-serif;font-size:21px;font-weight:600;
+  line-height:1.15}
+.routeam{font-family:"Barlow Semi Condensed",sans-serif;font-size:11.5px;
+  letter-spacing:.1em;text-transform:uppercase}
+.rouvs{font-family:"Outfit",system-ui,sans-serif;font-size:26px;font-weight:700;
+  color:var(--muted)}
+
+/* Le défilement : on fait tourner les visages, puis on s'arrête. */
+.roucote.tourne .pav img, .roucote.tourne .pav i{animation:rouFlash .09s steps(1) infinite}
+@keyframes rouFlash{ 0%{opacity:1} 50%{opacity:.25} }
+.roucote.pose{animation:rouPose .45s cubic-bezier(.2,.9,.3,1.4)}
+@keyframes rouPose{ from{transform:scale(.82)} to{transform:none} }
+
+.rouchamp{opacity:0;transform:translateY(18px);transition:opacity .5s, transform .5s;
+  display:flex;flex-direction:column;align-items:center;gap:8px}
+.rouchamp.la{opacity:1;transform:none}
+.rouchamp img{width:132px;height:132px;border-radius:var(--r-lg);
+  border:2px solid color-mix(in srgb, var(--accent) 55%, transparent)}
+.rouchamp.tourne img{animation:rouFlash .09s steps(1) infinite}
+.rouchampnom{font-family:"Outfit",system-ui,sans-serif;font-size:27px;font-weight:700}
+.rousous{font-family:"Barlow Semi Condensed",sans-serif;font-size:13px;color:var(--muted);
+  margin:0}
+
+@media (max-width:620px){
+  .rouduel{gap:10px}
+  .roucote .pav{width:60px;height:60px}
+  .rounom{font-size:16px}
+  .rouchamp img{width:104px;height:104px}
+  .rouchampnom{font-size:21px}
+}
+
+/* ---------- les duels dans la section ---------- */
+/* Les duels occupent toute la largeur : la grille a deux colonnes,
+   faite pour les deux camps du 5 contre 5, n'a plus lieu d'etre. */
+.batcamps.duels{display:block}
+.batscore{display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:12px;
+  font-family:"Outfit",system-ui,sans-serif;font-size:16px}
+.batscore .sa{color:var(--team-a)} .batscore .sb{color:var(--team-b)}
+.batscore b{font-size:22px}
+.batscore .stiret{color:var(--muted)}
+.batduels{display:flex;flex-direction:column;gap:7px}
+.batduel{display:grid;grid-template-columns:20px 1fr auto 1fr auto;gap:10px;
+  align-items:center;background:var(--surface-2);border-radius:var(--r-lg);padding:8px 11px}
+.dnum{font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;color:var(--muted)}
+.dface{display:flex;align-items:center;gap:7px;min-width:0}
+.dface:last-of-type{flex-direction:row-reverse;text-align:right}
+.dnom{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dface.vainqueur .dnom{color:var(--up);font-weight:600}
+.dface.battu{opacity:.45}
+.dchamp{display:flex;flex-direction:column;align-items:center;gap:2px;width:62px}
+.dchamp img{width:36px;height:36px;border-radius:var(--r-sm)}
+.dchamp span{font-family:"Barlow Semi Condensed",sans-serif;font-size:10.5px;
+  color:var(--muted);text-align:center;line-height:1.1}
+.dadmin{display:flex;gap:3px}
+.dadmin button{width:26px;height:24px;border-radius:var(--r-sm);cursor:pointer;
+  background:var(--surface);border:1px solid var(--line);color:var(--muted);font-size:11px}
+.dadmin button.on{border-color:var(--accent);color:var(--ink);
+  background:color-mix(in srgb, var(--accent) 18%, var(--surface))}
+.batadmin{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:11px;
+  border-top:1px dashed var(--line)}
+
+@media (max-width:620px){
+  .batduel{grid-template-columns:1fr auto 1fr;row-gap:6px}
+  .dnum{display:none}
+  .dadmin{grid-column:1 / -1;justify-content:center}
+}
+
 /* ---------- la cérémonie ---------- */
 .ceremonie{
   position:fixed;inset:0;z-index:300;background:var(--bg);

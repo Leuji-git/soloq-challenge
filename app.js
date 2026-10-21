@@ -110,6 +110,8 @@ const S = {
   inscrits: [],     // qui joue, à quel poste, dans quel camp
   rewind: null,     // le réglage du Rewind : combien par catégorie
   rewcats: [],      // les catégories, libellés compris
+  duels: [],        // les duels tirés pour l'Ultime Bataille
+  champions: [],    // le vivier du tirage : clé Riot et nom lisible
   ready: false
 };
 
@@ -152,7 +154,7 @@ if(!SUPABASE_URL || SUPABASE_URL.includes("xxxxxxxx") || SUPABASE_ANON_KEY.inclu
 =================================================================== */
 async function loadAll(){
   if(!sb) return;
-  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv, tb, bx, bo, ba, bi, rw, rc] = await Promise.all([
+  const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv, tb, bx, bo, ba, bi, rw, rc, bd, bc] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
     sb.from("players").select("*").order("sort"),
     sb.from("games").select("*").order("created_at"),
@@ -171,7 +173,11 @@ async function loadAll(){
     sb.from("bataille_inscrits").select("*").order("inscrit_le"),
     // rewind.sql n'est peut-être pas lancé : la section reste cachée.
     sb.from("rewind").select("*").eq("id",1).maybeSingle(),
-    sb.from("rewind_categories").select("*").order("ordre")
+    sb.from("rewind_categories").select("*").order("ordre"),
+    // duels.sql n'est peut-être pas lancé : la section retombe alors
+    // sur les simples disponibilités, sans duel ni champion.
+    sb.from("bataille_duels").select("*").order("id"),
+    sb.from("bataille_champions").select("*")
   ]);
   const err = ch.error || pl.error || gm.error || sn.error || pr.error || bt.error || st.error || pi.error;
   if(err){
@@ -211,6 +217,8 @@ async function loadAll(){
   S.inscrits  = bi.error ? [] : (bi.data || []);
   S.rewind    = rw.error ? null : (rw.data || null);
   S.rewcats   = rc.error ? [] : (rc.data || []);
+  S.duels     = bd.error ? [] : (bd.data || []);
+  S.champions = bc.error ? [] : (bc.data || []);
   S.ready = true;
   $("#errBox").hidden = true;
   render();
@@ -2923,11 +2931,39 @@ function cerReculer(){ if(cerEtape > 0){ cerEtape--; rendreCeremonie(); } }
    paramètre, et lit l'équipe sur la fiche du joueur, côté serveur.
    Même en appelant l'API à la main, on ne peut pas demander à jouer
    chez l'adversaire — il n'y a aucun chemin pour le dire.
+=================================================================== *//* ===================================================================
+   L'Ultime Bataille — des duels en ARAM
+
+   Un contre un, premier kill gagnant. On ne s'inscrit plus à un poste
+   (un duel n'en a pas) : on dit seulement qu'on est disponible. Le
+   soir venu, un tirage apparie les disponibles des deux camps et donne
+   un champion à chaque duel.
+
+   L'écart se joue à la MAJORITÉ des duels : le camp qui en remporte le
+   plus emporte tout l'enjeu, trois victoires sur cinq valant les cinq.
+   L'enjeu reste taillé pour que le camp en tête, battu, garde la marge.
+
+   Le camp ne se choisit toujours pas : bataille_inscrire() ne prend
+   aucun paramètre et lit l'équipe sur la fiche du joueur, côté serveur.
 =================================================================== */
+/* Les portraits de champions, servis depuis le dépôt.
+
+   Community Dragon les rend très bien, mais on a déjà payé pour le
+   savoir sur les icônes de poste : des cases vides tant qu'on n'avait
+   pas fait défiler jusqu'à elles, et des réponses qui mettaient parfois
+   huit secondes. Un soir de roulette devant tout le monde, ce n'est pas
+   le moment de découvrir que le CDN tousse. Les quatre-vingt-deux
+   fichiers sont dans le dépôt ; le CDN reste en secours. */
+const CHAMP_CD =
+  "https://cdn.communitydragon.org/latest/champion/";
+const CHAMP_ICONE = cle => "icones/champions/" + encodeURIComponent(cle) + ".png";
+// onerror ne tire qu'une fois : on le coupe avant de changer la source.
+const CHAMP_REPLI = cle =>
+  ' onerror="this.onerror=null;this.src=\'' + CHAMP_CD + encodeURIComponent(cle) + '/square\'"';
+
 function renderBataille(states){
   const bloc = $("#batailleBlock");
   if(!bloc) return;
-  // Sans la table, rien à montrer : le reste du site marche comme avant.
   if(!S.bataille){ bloc.hidden = true; return; }
   bloc.hidden = false;
 
@@ -2935,12 +2971,9 @@ function renderBataille(states){
   const quand = new Date(b.quand);
   const passe = Date.now() >= quand.getTime();
   const close = passe || !b.ouvert;
-
+  const admin = isAdmin();
   majCompteBataille();
 
-  /* Le contexte : ce que le lot pèse face à l'écart du moment. On le
-     calcule, on ne l'écrit pas en dur — l'écart bouge à chaque partie,
-     et une phrase fausse serait pire que pas de phrase. */
   const ga = states.filter(s => s.player.team === "a").reduce((a, s) => a + s.global, 0);
   const gb = states.filter(s => s.player.team === "b").reduce((a, s) => a + s.global, 0);
   const ecart = Math.abs(ga - gb);
@@ -2948,10 +2981,6 @@ function renderBataille(states){
   const derriere = devant === "a" ? "b" : "a";
   const nom = t => t === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
 
-  /* L'enjeu, calculé exactement comme bataille_enjeu() en SQL — c'est
-     le serveur qui tranchera jeudi, la page ne fait qu'annoncer. La
-     division entière arrondit vers le bas des DEUX côtés, donc la marge
-     réellement gardée est toujours au moins celle promise. */
   const marge = b.marge === undefined ? MARGE_BATAILLE : b.marge;
   const enjeu = Math.max(0, Math.floor((ecart - marge) / 2));
   const resteSiPerd = ecart - enjeu * 2;
@@ -2960,131 +2989,252 @@ function renderBataille(states){
       "<b>" + quand.toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"long" })
     + " à " + String(quand.getHours()).padStart(2, "0") + " h"
     + (quand.getMinutes() ? String(quand.getMinutes()).padStart(2, "0") : "")
-    + "</b> · un <b>5 contre 5</b>. Le vainqueur <b>gagne</b> l'enjeu, le perdant le "
-    + "<b>perd</b> : <span class='lot'>" + orFr(enjeu * 2) + " LP</span> changent de camp."
-    + "<br>L'écart est de <b>" + orFr(ecart) + " LP</b> pour <b>" + esc(nom(devant))
-    + "</b>. L'enjeu s'ajuste à cet écart, et il est taillé pour que le match "
-    + "<b>ne suffise jamais à renverser le challenge</b> : battu, le camp en tête garde "
-    + "<b>" + orFr(resteSiPerd) + " LP</b> d'avance, et il reste deux jours pour les perdre."
-    + "<br>Chacun s'inscrit <b>dans son camp</b>, à un poste, et un seul par poste.";
+    + "</b> · des <b>duels en ARAM</b>, un contre un, <b>premier kill gagnant</b>. "
+    + "Un tirage apparie les disponibles et donne un champion à chaque duel."
+    + "<br>Le camp qui remporte <b>le plus de duels</b> emporte tout : "
+    + "<span class='lot'>" + orFr(enjeu * 2) + " LP</span> changent de camp. "
+    + "L'écart est de <b>" + orFr(ecart) + " LP</b> pour <b>" + esc(nom(devant))
+    + "</b>, et l'enjeu est taillé pour que le match <b>ne renverse jamais le challenge "
+    + "à lui seul</b> : battu, le camp en tête garde <b>" + orFr(resteSiPerd) + " LP</b>.";
 
-  // Les deux issues, en clair.
   $("#batIssues").innerHTML = enjeu > 0
-    /* Aucun verbe accordé avec un nom d'équipe : ils sont libres, et
-       « Si Les Médiocres gagne » se voyait. Le nom suit, entre
-       parenthèses, où il n'a rien à accorder. */
-    ? '<div class="batissue pour"><span class="quoi">Victoire du camp en retard · '
-        + esc(nom(derriere)) + '</span>'
-        + '<span class="res">L\'écart tombe à <b>' + orFr(resteSiPerd) + ' LP</b>. '
-        + 'Tout se joue sur les deux derniers jours.</span></div>'
-    + '<div class="batissue contre"><span class="quoi">Victoire du camp en tête · '
-        + esc(nom(devant)) + '</span>'
-        + '<span class="res">L\'écart passe à <b>' + orFr(ecart + enjeu * 2) + ' LP</b>. '
-        + 'Autant dire que c\'est plié.</span></div>'
-    : '<div class="batissue"><span class="quoi">Enjeu</span>'
-        + '<span class="res">L\'écart est déjà sous la marge de <b>' + orFr(marge)
-        + ' LP</b> : la bataille se jouera pour l\'honneur.</span></div>';
+    ? '<div class="batissue pour"><span class="quoi">Majorité des duels · '
+        + esc(nom(derriere)) + '</span><span class="res">L\'écart tombe à <b>'
+        + orFr(resteSiPerd) + ' LP</b>. Tout se joue sur les derniers jours.</span></div>'
+    + '<div class="batissue contre"><span class="quoi">Majorité des duels · '
+        + esc(nom(devant)) + '</span><span class="res">L\'écart passe à <b>'
+        + orFr(ecart + enjeu * 2) + ' LP</b>. Autant dire que c\'est plié.</span></div>'
+    : '<div class="batissue"><span class="quoi">Enjeu</span><span class="res">L\'écart est '
+      + 'déjà sous la marge de <b>' + orFr(marge) + ' LP</b> : on joue pour l\'honneur.</span></div>';
 
-  // --- les deux camps -------------------------------------------
   const parId = Object.fromEntries(S.players.map(p => [p.id, p]));
   const moi = myPlayer();
-  const monInscription = moi ? S.inscrits.find(i => i.player_id === moi.id) : null;
+  const dispo = moi ? S.inscrits.find(i => i.player_id === moi.id) : null;
 
-  const camp = t => {
-    const nom = t === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
-    const ici = S.inscrits.filter(i => i.team === t);
-    const titulaires = ici.filter(i => i.titulaire);
-    const rempl = ici.filter(i => !i.titulaire);
+  // ---- les duels tirés, ou les disponibles ---------------------
+  const camps = $("#batCamps");
+  camps.classList.toggle("duels", S.duels.length > 0);
+  if(S.duels.length){
+    const va = S.duels.filter(d => d.gagnant === "a").length;
+    const vb = S.duels.filter(d => d.gagnant === "b").length;
+    $("#batCamps").innerHTML =
+        '<div class="batscore"><span class="sa">' + esc(nom("a")) + ' <b>' + va + '</b></span>'
+      + '<span class="stiret">—</span>'
+      + '<span class="sb"><b>' + vb + '</b> ' + esc(nom("b")) + '</span></div>'
+      + '<div class="batduels">' + S.duels.map(d => {
+          const pa = parId[d.joueur_a], pb = parId[d.joueur_b];
+          const face = (p, cote) => '<span class="dface' + (d.gagnant === cote ? " vainqueur" : "")
+            + (d.gagnant && d.gagnant !== cote ? " battu" : "") + '">'
+            + avatarRing(p, { sm:true })
+            + '<span class="dnom">' + esc(p ? p.name : "?") + '</span></span>';
+          return '<div class="batduel">'
+            + '<span class="dnum">' + d.id + '</span>'
+            + face(pa, "a")
+            + '<span class="dchamp"><img src="' + CHAMP_ICONE(d.champion) + '" alt=""'
+              + CHAMP_REPLI(d.champion) + '><span>' + esc(nomChampion(d.champion)) + '</span></span>'
+            + face(pb, "b")
+            + (admin
+                ? '<span class="dadmin">'
+                  + '<button type="button" data-duel="' + d.id + '" data-cote="a"'
+                  + (d.gagnant === "a" ? ' class="on"' : '') + '>A</button>'
+                  + '<button type="button" data-duel="' + d.id + '" data-cote=""'
+                  + (!d.gagnant ? ' class="on"' : '') + '>—</button>'
+                  + '<button type="button" data-duel="' + d.id + '" data-cote="b"'
+                  + (d.gagnant === "b" ? ' class="on"' : '') + '>B</button></span>'
+                : '')
+            + '</div>';
+        }).join("") + '</div>';
+  }else{
+    const camp = t => {
+      const ici = S.inscrits.filter(i => i.team === t);
+      return '<div class="batcamp ' + t + '">'
+        + '<h4>' + esc(nom(t)) + ' <span style="color:var(--muted);font-weight:400">'
+          + ici.length + ' dispo</span></h4>'
+        + (ici.length
+            ? '<div class="batpostes">' + ici.map(i => {
+                const p = parId[i.player_id];
+                return '<div class="batposte' + (moi && i.player_id === moi.id ? " moi" : "") + '"'
+                  + ' style="grid-template-columns:auto 1fr">'
+                  + avatarRing(p, { sm:true })
+                  + '<span class="batqui"><span class="nom">' + esc(p ? p.name : "?")
+                  + '</span></span></div>';
+              }).join("") + '</div>'
+            : '<p class="batrempl">Personne pour l\'instant.</p>')
+        + '</div>';
+    };
+    $("#batCamps").innerHTML = camp("a") + camp("b");
+  }
 
-    const postes = ROLES.map(r => {
-      const i = titulaires.find(x => x.role === r);
-      const p = i ? parId[i.player_id] : null;
-      return '<div class="batposte' + (i ? "" : " vide")
-          + (moi && i && i.player_id === moi.id ? " moi" : "") + '">'
-        + '<img class="roleico" src="' + roleIcon(r) + '" alt=""' + roleRepli(r) + '>'
-        + '<span class="batrole">' + esc(ROLE_FR[r] || r) + '</span>'
-        + '<span class="batqui">'
-          + (p ? avatarRing(p, { sm:true }) + '<span class="nom">' + esc(p.name) + '</span>'
-               : '<span class="nom" style="color:var(--muted)">libre</span>')
-        + '</span></div>';
-    }).join("");
+  // ---- ma disponibilité ----------------------------------------
+  const zone = $("#batMoi");
+  let html = "";
+  if(!moi){
+    html = '<p class="hint" style="margin:0">Connecte-toi avec ton profil joueur pour te déclarer disponible.</p>';
+  }else if(S.duels.length){
+    const mien = S.duels.find(d => d.joueur_a === moi.id || d.joueur_b === moi.id);
+    html = mien
+      ? '<h4>Ton duel</h4><p class="hint" style="margin:0">Tu affrontes <b>'
+        + esc((parId[mien.joueur_a === moi.id ? mien.joueur_b : mien.joueur_a] || {}).name || "?")
+        + '</b> en <b>' + esc(nomChampion(mien.champion)) + '</b>. Premier kill gagnant.</p>'
+      : '<h4>Pas de duel pour toi</h4><p class="hint" style="margin:0">Le tirage t\'a laissé '
+        + 'sur le banc : il faut autant de joueurs de chaque côté.</p>';
+  }else if(close){
+    html = '<p class="hint" style="margin:0">'
+      + (passe ? "La bataille a commencé." : "Les inscriptions sont closes.") + '</p>';
+  }else{
+    html = '<h4>' + (dispo ? "Tu es disponible" : "Es-tu disponible ?") + '</h4>'
+      + '<p class="hint">'
+      + (dispo
+          ? "Tu seras dans le tirage de jeudi soir, pour <b>" + esc(nom(moi.team)) + "</b>."
+          : "Dis si tu peux être là jeudi soir. Tu joueras pour <b>" + esc(nom(moi.team))
+            + "</b> : on ne choisit pas son camp.")
+      + '</p><div class="batactions">'
+      + (dispo
+          ? '<button type="button" class="btn ghost" id="batPartir">Finalement non</button>'
+          : '<button type="button" class="btn" id="batValider">Je suis disponible</button>')
+      + '</div>';
+  }
 
-    return '<div class="batcamp ' + t + '">'
-      + '<h4>' + esc(nom) + ' <span style="color:var(--muted);font-weight:400">'
-        + titulaires.length + '/5</span></h4>'
-      + '<div class="batpostes">' + postes + '</div>'
-      + (rempl.length
-          ? '<p class="batrempl">Remplaçant' + (rempl.length > 1 ? "s" : "") + ' : '
-            + rempl.map(i => '<b>' + esc((parId[i.player_id] || {}).name || "?") + '</b> ('
-                + esc(ROLE_FR[i.role] || i.role) + ')').join(", ") + '</p>'
+  if(admin){
+    const prets = S.duels.filter(d => d.gagnant).length;
+    html += '<div class="batadmin">'
+      + '<button type="button" class="btn ghost" id="batTirer">'
+        + (S.duels.length ? "Retirer au sort" : "Tirer les duels") + '</button>'
+      + (S.duels.length
+          ? '<button type="button" class="btn ghost" id="batRoulette">Lancer la roulette</button>'
+            + '<button type="button" class="btn" id="batFinir"'
+              + (prets ? "" : " disabled") + '>Clore la bataille ('
+              + prets + '/' + S.duels.length + ')</button>'
           : "")
       + '</div>';
-  };
-  $("#batCamps").innerHTML = camp("a") + camp("b");
-
-  // --- mon inscription ------------------------------------------
-  const zone = $("#batMoi");
-  if(!moi){
-    zone.innerHTML = '<p class="hint" style="margin:0">Connecte-toi avec ton profil joueur pour t\'inscrire.</p>';
-    return;
   }
-  if(close){
-    zone.innerHTML = '<p class="hint" style="margin:0">'
-      + (passe ? "La bataille a commencé. Les inscriptions sont closes."
-               : "Les inscriptions sont closes.") + '</p>';
-    return;
-  }
+  zone.innerHTML = html;
 
-  // Les postes déjà tenus DANS MON CAMP : cliquables quand même, mais
-  // on annonce qu'on y entrerait comme remplaçant.
-  const pris = {};
-  S.inscrits.filter(i => i.team === moi.team && i.titulaire)
-    .forEach(i => { pris[i.role] = parId[i.player_id]; });
-
-  const choisi = batRole || (monInscription ? monInscription.role : null);
-  const boutons = ROLES.map(r => {
-    const q = pris[r];
-    const moiDessus = q && moi && q.id === moi.id;
-    return '<button type="button" data-batrole="' + r + '"'
-      + ' aria-pressed="' + (choisi === r ? "true" : "false") + '">'
-      + '<img src="' + roleIcon(r) + '" alt=""' + roleRepli(r) + '>'
-      + '<span>' + esc(ROLE_FR[r] || r) + '</span>'
-      + (q && !moiDessus ? '<span class="pris">· ' + esc(q.name) + '</span>' : "")
-      + '</button>';
-  }).join("");
-
-  const viseRemplacant = choisi && pris[choisi] && pris[choisi].id !== moi.id;
-
-  zone.innerHTML =
-      '<h4>' + (monInscription ? "Tu es inscrit" : "T\'inscrire") + '</h4>'
-    + '<p class="hint">'
-      + (monInscription
-          ? "Au poste de <b>" + esc(ROLE_FR[monInscription.role] || monInscription.role) + "</b>"
-            + (monInscription.titulaire ? " (titulaire)" : " (remplaçant)")
-            + ". Tu peux encore changer de poste ou te désister."
-          : "Choisis ton poste — c\'est obligatoire. Tu joueras pour <b>"
-            + esc(moi.team === "a" ? S.challenge.team_a_name : S.challenge.team_b_name)
-            + "</b> : on ne choisit pas son camp.")
-    + '</p>'
-    + '<div class="batchoix">' + boutons + '</div>'
-    + (viseRemplacant
-        ? '<p class="hint" style="margin:0 0 10px;color:var(--accent)">'
-          + esc(pris[choisi].name) + " tient déjà ce poste : tu serais <b>remplaçant</b>.</p>"
-        : "")
-    + '<div class="batactions">'
-      + '<button type="button" class="btn" id="batValider"' + (choisi ? "" : " disabled") + '>'
-        + (monInscription ? "Valider le changement" : "Je participe") + '</button>'
-      + (monInscription
-          ? '<button type="button" class="btn ghost" id="batPartir">Me désister</button>' : "")
-    + '</div>';
-
-  zone.querySelectorAll("[data-batrole]").forEach(el =>
-    el.addEventListener("click", () => { batRole = el.dataset.batrole; render(); }));
-  const ok = $("#batValider");
-  if(ok) ok.addEventListener("click", () => inscrireBataille(choisi));
-  const off = $("#batPartir");
-  if(off) off.addEventListener("click", desisterBataille);
+  const v = $("#batValider"); if(v) v.addEventListener("click", inscrireBataille);
+  const d = $("#batPartir");  if(d) d.addEventListener("click", desisterBataille);
+  const t = $("#batTirer");   if(t) t.addEventListener("click", tirerDuels);
+  const r = $("#batRoulette");if(r) r.addEventListener("click", ouvrirRoulette);
+  const f = $("#batFinir");   if(f) f.addEventListener("click", clorebataille);
+  $("#batCamps").querySelectorAll("[data-duel]").forEach(el =>
+    el.addEventListener("click", () =>
+      marquerDuel(+el.dataset.duel, el.dataset.cote || null)));
 }
+
+/* ===================================================================
+   La roulette
+
+   Pour chaque duel : les deux visages tournent, se posent l'un après
+   l'autre, puis le champion tombe. Trois temps, parce qu'annoncer
+   l'adversaire et l'arme en même temps revient à n'annoncer rien.
+
+   Elle ne tire rien : le tirage est fait en base par bataille_tirer(),
+   une fois, côté serveur. La roulette ne fait que le RÉVÉLER — sans
+   quoi il suffirait de recharger la page pour retenter sa chance.
+=================================================================== */
+let rouEtape = 0;        // quel duel on révèle
+let rouMinuteurs = [];
+let rouPret = false;
+
+const rouStop = () => { rouMinuteurs.forEach(clearTimeout); rouMinuteurs = []; };
+const rouPlus = (ms, f) => rouMinuteurs.push(setTimeout(f, ms));
+
+function ouvrirRoulette(){
+  if(!S.duels.length) return;
+  rouEtape = 0;
+  $("#rouletteBox").hidden = false;
+  document.body.style.overflow = "hidden";
+  rendreRoulette();
+}
+function fermerRoulette(){
+  rouStop();
+  $("#rouletteBox").hidden = true;
+  document.body.style.overflow = "";
+}
+
+function rendreRoulette(){
+  rouStop();
+  rouPret = false;
+  const sc = $("#rouScene");
+  const n = S.duels.length;
+  $("#rouJauge").style.width = Math.round((rouEtape + 1) / n * 100) + "%";
+  $("#rouSuiv").textContent = rouEtape + 1 >= n ? "Terminer" : "Tirer le duel suivant";
+
+  const d = S.duels[rouEtape];
+  const parId = Object.fromEntries(S.players.map(p => [p.id, p]));
+  const pa = parId[d.joueur_a], pb = parId[d.joueur_b];
+  const nom = t => t === "a" ? S.challenge.team_a_name : S.challenge.team_b_name;
+
+  const cote = (p, t, id) => '<div class="roucote tourne" id="' + id + '">'
+    + avatarRing(p, { lg:true })
+    + '<div class="rounom">' + esc(p ? p.name : "?") + '</div>'
+    + '<div class="routeam" style="color:' + TEAM_COLOR[t] + '">' + esc(nom(t)) + '</div></div>';
+
+  sc.innerHTML = '<div class="cerkick">Duel ' + (rouEtape + 1) + ' sur ' + n + '</div>'
+    + '<div class="rouduel">' + cote(pa, "a", "rouA")
+    + '<span class="rouvs">VS</span>' + cote(pb, "b", "rouB") + '</div>'
+    + '<div class="rouchamp tourne" id="rouChamp">'
+      + '<img id="rouChampImg" src="" alt="">'
+      + '<div class="rouchampnom" id="rouChampNom">…</div></div>'
+    + '<p class="rousous">Premier kill gagnant.</p>';
+
+  /* Le défilement est un leurre assumé : on fait clignoter des visages
+     et des portraits au hasard, le temps que l'attente existe. Le
+     résultat, lui, était déjà écrit en base avant l'ouverture. */
+  const autres = S.players.filter(p => p.id !== d.joueur_a && p.id !== d.joueur_b);
+  const img = $("#rouChampImg"), nomC = $("#rouChampNom");
+  let bat = null;
+  if(S.champions.length){
+    bat = setInterval(() => {
+      const c = S.champions[Math.floor(Math.random() * S.champions.length)];
+      img.src = CHAMP_ICONE(c.cle);
+      nomC.textContent = c.nom;
+    }, 90);
+    rouMinuteurs.push(bat);
+  }
+
+  const poser = (id, p) => {
+    const el = $("#" + id);
+    if(!el) return;
+    el.classList.remove("tourne");
+    el.classList.add("pose");
+  };
+
+  rouPlus(1100, () => poser("rouA", pa));
+  rouPlus(2000, () => poser("rouB", pb));
+  rouPlus(3100, () => {
+    if(bat) clearInterval(bat);
+    const ch = $("#rouChamp");
+    if(ch) ch.classList.remove("tourne");
+    if(img) img.src = CHAMP_ICONE(d.champion);
+    if(nomC) nomC.textContent = nomChampion(d.champion);
+    if(ch) ch.classList.add("la");
+    rouPret = true;
+  });
+  // Le portrait part invisible : on l'allume avec le défilement.
+  rouPlus(60, () => { const ch = $("#rouChamp"); if(ch) ch.classList.add("la"); });
+}
+
+function rouAvancer(){
+  // Pendant le défilement, le clic abrège au lieu de passer au suivant.
+  if(!rouPret){
+    rouStop();
+    const d = S.duels[rouEtape];
+    ["rouA","rouB"].forEach(id => { const e = $("#" + id);
+      if(e){ e.classList.remove("tourne"); e.classList.add("pose"); } });
+    const ch = $("#rouChamp"), img = $("#rouChampImg"), nomC = $("#rouChampNom");
+    if(ch){ ch.classList.remove("tourne"); ch.classList.add("la"); }
+    if(img) img.src = CHAMP_ICONE(d.champion);
+    if(nomC) nomC.textContent = nomChampion(d.champion);
+    rouPret = true;
+    return;
+  }
+  if(rouEtape + 1 >= S.duels.length){ fermerRoulette(); return; }
+  rouEtape++;
+  rendreRoulette();
+}
+
+const nomChampion = cle =>
+  (S.champions.find(c => c.cle === cle) || {}).nom || cle;
 
 /* Le compte à rebours, à la minute : la seconde n'apporte rien à trois
    jours de distance, et ferait clignoter la ligne pour rien. */
@@ -3099,38 +3249,34 @@ function majCompteBataille(){
                  : "dans " + min + " min";
 }
 
-async function inscrireBataille(role){
-  if(!role) return;
-  const log = $("#batLog");
-  $("#batValider").disabled = true;
-  log.textContent = "Inscription…";
-  log.className = "log";
-  const { data, error } = await sb.rpc("bataille_inscrire", { p_role: role });
-  if(error){
-    log.textContent = error.message || String(error);
-    log.className = "log bad";
-    $("#batValider").disabled = false;
-    return;
-  }
-  log.textContent = data.titulaire
-    ? "C'est noté : tu joues " + (ROLE_FR[data.role] || data.role) + "."
-    : "C'est noté : remplaçant " + (ROLE_FR[data.role] || data.role) + ".";
-  log.className = "log ok";
-  batRole = null;
-  await loadAll();
+function direBat(txt, cls){
+  const l = $("#batLog");
+  if(l){ l.textContent = txt; l.className = "log" + (cls ? " " + cls : ""); }
 }
 
-async function desisterBataille(){
-  const log = $("#batLog");
-  log.textContent = "…";
-  log.className = "log";
-  const { error } = await sb.rpc("bataille_desister");
-  if(error){ log.textContent = error.message || String(error); log.className = "log bad"; return; }
-  log.textContent = "Tu n'es plus inscrit.";
-  log.className = "log ok";
-  batRole = null;
+async function appelBat(fn, args, bien){
+  direBat("…");
+  const { data, error } = await sb.rpc(fn, args || {});
+  if(error){ direBat(error.message || String(error), "bad"); return null; }
+  direBat(bien(data), "ok");
   await loadAll();
+  return data;
 }
+
+const inscrireBataille = () =>
+  appelBat("bataille_inscrire", {}, () => "C'est noté : tu es disponible jeudi soir.");
+const desisterBataille = () =>
+  appelBat("bataille_desister", {}, () => "Tu n'es plus dans le tirage.");
+const tirerDuels = () =>
+  appelBat("bataille_tirer", {}, d => d.duels + " duel(s) tirés."
+    + (d.banc_a || d.banc_b ? " Banc : " + d.banc_a + " / " + d.banc_b + "." : ""));
+const marquerDuel = (id, cote) =>
+  appelBat("bataille_marquer", { p_duel: id, p_gagnant: cote },
+    () => cote ? "Duel " + id + " : " + cote.toUpperCase() + " l'emporte." : "Duel " + id + " remis à zéro.");
+const clorebataille = () =>
+  appelBat("bataille_resoudre", {}, d => d.egalite
+    ? "Égalité " + d.a + "—" + d.b + " : rien ne bouge."
+    : d.a + "—" + d.b + " · " + orFr(d.deplace) + " LP déplacés.");
 
 function detailOr(g){
   const b = OR_ROLES[g.role] || OR_ROLES.MIDDLE;
@@ -4249,6 +4395,15 @@ function initUI(){
 
   // La cérémonie : souris et clavier.
   $("#apercuFinOff").addEventListener("click", () => basculerApercuFin(false));
+  $("#rouClose").addEventListener("click", fermerRoulette);
+  $("#rouSuiv").addEventListener("click", rouAvancer);
+  document.addEventListener("keydown", e => {
+    if($("#rouletteBox").hidden) return;
+    if(e.key === "Escape"){ fermerRoulette(); return; }
+    if(e.key === " " || e.key === "Enter" || e.key === "ArrowRight"){
+      e.preventDefault(); rouAvancer();
+    }
+  });
   $("#cerClose").addEventListener("click", fermerCeremonie);
   $("#cerSuiv").addEventListener("click", cerAvancer);
   $("#cerPrec").addEventListener("click", cerReculer);

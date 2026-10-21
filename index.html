@@ -208,6 +208,20 @@
   </div>
 </div>
 
+<!-- La roulette des duels : plein écran, par-dessus le reste. -->
+<div class="roulette" id="rouletteBox" hidden role="dialog" aria-modal="true"
+     aria-label="Tirage des duels">
+  <button type="button" class="cerx" id="rouClose" aria-label="Fermer">✕</button>
+  <div class="rouscene" id="rouScene"></div>
+  <div class="cerbas">
+    <div class="cerjauge"><i id="rouJauge"></i></div>
+    <div class="ceractions">
+      <button type="button" class="btn" id="rouSuiv">Tirer le duel suivant</button>
+    </div>
+    <p class="cerclavier">Espace pour enchaîner · Échap pour fermer</p>
+  </div>
+</div>
+
 <div class="apercufin" id="apercuFinBar" hidden>
   <span><b>Aperçu</b> — tu vois le site tel qu'il sera une fois le challenge terminé.</span>
   <button type="button" id="apercuFinOff">Revenir au site normal</button>
