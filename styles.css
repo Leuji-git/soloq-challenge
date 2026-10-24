@@ -285,6 +285,17 @@ a.pn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 /* L'en-tête du volet : « tout marquer lu » à gauche de la croix. */
 /* Le bandeau d'aperçu. Volontairement voyant : on ne doit pas oublier
    qu'on regarde une simulation, surtout en montrant son écran. */
+/* Le bandeau d'archive. Discret mais permanent : on doit savoir
+   qu'on regarde une photo, pas un direct. */
+.museebar{
+  position:sticky;top:0;z-index:240;text-align:center;
+  padding:7px 16px;background:var(--surface-2);border-bottom:1px solid var(--line);
+  font-family:"Barlow Semi Condensed",sans-serif;font-size:12.5px;color:var(--muted);
+}
+.museebar[hidden]{display:none}
+.museebar b{color:var(--ink-2)}
+/* En musee, le bouton de connexion n'a plus d'objet. */
+body.musee #btnLogin,body.musee #livePill,body.musee #btnRefresh{display:none}
 .apercufin{
   position:fixed;left:0;right:0;bottom:0;z-index:250;
   display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;

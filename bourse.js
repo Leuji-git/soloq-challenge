@@ -63,7 +63,49 @@ const MAX_BOUGIES = 240;
 const CAP_LIGNES = 1000;
 
 /* ---------------- chargement ---------------- */
+/* Le mode musée, comme sur la page principale : si `archive.json` est
+   là, la Place se rejoue depuis lui et n'appelle plus la base. Les
+   cours y sont dégrossis — un point toutes les trente minutes — parce
+   qu'on ne regarde plus ces courbes que de loin. */
+const MUSEE = { actif: false, data: null };
+
+async function chargerMusee(){
+  try{
+    const r = await fetch("archive.json", { cache: "no-cache" });
+    if(!r.ok) return false;
+    const a = await r.json();
+    MUSEE.data = a; MUSEE.actif = true;
+
+    S.societes = a.societes || [];
+    S.etat = { id:1, ouvert:false, slot:0, secousse_reste:0 };
+    S.positions = a.positions || [];
+    S.depeches = a.depeches || [];
+    S.objets = a.items || [];
+    S.shorts = []; S.etats = {}; S.v2 = false;
+    S.qui = Object.fromEntries((a.players || []).map(p => {
+      const pr = (a.profiles || []).find(x => x.id === p.claimed_by);
+      return [p.id, { nom: p.name, team: p.team, avatar: pr ? pr.avatar_url : null }];
+    }));
+    S.achats = [];
+    if(a.challenge) S.equipes = { a: a.challenge.team_a_name, b: a.challenge.team_b_name };
+
+    S.cours = {};
+    (a.cours || []).forEach(r2 => { (S.cours[r2.code] = S.cours[r2.code] || []).push(r2); });
+    S.prix = {};
+    Object.keys(S.cours).forEach(code => {
+      const h = S.cours[code];
+      if(!h.length) return;
+      S.prix[code] = { c: h[h.length - 1].c,
+                       veille: h[Math.max(0, h.length - 25)].c };
+    });
+    S.slotActuel = 0;
+    if(!selection && S.societes.length) selection = S.societes[0].code;
+    return true;
+  }catch(_){ return false; }
+}
+
 async function charger(){
+  if(MUSEE.actif) return;
   const [so, et, po, de, ch, it, sh, es] = await Promise.all([
     sb.from("bourse_societes").select("*").eq("actif", true).order("sort"),
     sb.from("bourse_etat").select("*").eq("id", 1).maybeSingle(),
@@ -200,6 +242,7 @@ const RETENTION = 2000;        // ce que bourse_tick garde par société
 
 async function chargerSerie(code){
   if(!code) return;
+  if(MUSEE.actif) return;   // tout est déjà là
   /* On s'arrete sur une page incomplete, et SEULEMENT la-dessus : ce
      plafond n'est pas la regle, juste un garde-fou contre une boucle
      folle. Le deduire de RETENTION rendrait la pagination silencieuse-
@@ -1049,6 +1092,15 @@ function brancher(){
 }
 
 async function boot(){
+  // L'archive d'abord : si elle est la, la base ne sera pas appelee.
+  if(await chargerMusee()){
+    document.body.classList.add("musee");
+    brancher();
+    brancherTuto();
+    rendre();
+    return;
+  }
+
   const { data: { session } } = await sb.auth.getSession();
   S.session = session;
   sb.auth.onAuthStateChange(async (_e, s) => { S.session = s; await charger(); rendre(); });

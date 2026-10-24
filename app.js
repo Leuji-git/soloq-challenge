@@ -152,7 +152,66 @@ if(!SUPABASE_URL || SUPABASE_URL.includes("xxxxxxxx") || SUPABASE_ANON_KEY.inclu
 /* ===================================================================
    Chargement des données
 =================================================================== */
+/* ===================================================================
+   Le mode musée
+
+   Le challenge est fini. Plutôt que d'interroger une base qui n'a plus
+   rien à dire — et dont le forfait gratuit a fini par rendre l'âme sur
+   la bande passante — le site lit une ARCHIVE figée, posée à côté de
+   lui, et servie par le même hébergeur que la page.
+
+   Il s'allume tout seul : si `archive.json` est là, on le prend. Rien
+   à régler, et retirer le fichier rend le site à sa base.
+
+   Personne n'est connecté en musée. Ce n'est pas une restriction
+   ajoutée après coup : sans session, tout le site retombe de lui-même
+   sur son mode « consultation libre », qui existait déjà. Les boutons
+   d'achat et d'inscription disparaissent parce qu'ils n'ont jamais été
+   montrés à un visiteur anonyme. */
+const MUSEE = { actif: false, data: null };
+
+async function chargerArchive(){
+  try{
+    const r = await fetch("archive.json", { cache: "no-cache" });
+    if(!r.ok) return false;
+    MUSEE.data = await r.json();
+    MUSEE.actif = true;
+    return true;
+  }catch(_){ return false; }
+}
+
+function poserArchive(){
+  const a = MUSEE.data || {};
+  S.challenge = a.challenge || S.challenge;
+  S.players   = (a.players || []).filter(p => !p.alias_of)
+    .map(p => Object.assign({}, p, { name: cleanRiot(p.name), tag: cleanRiot(p.tag) }));
+  S.games     = a.games || [];
+  S.snaps     = Object.fromEntries((a.snaps || []).map(r => [r.player_id, r]));
+  S.profiles  = Object.fromEntries((a.profiles || []).map(r => [r.id, r]));
+  S.items     = a.items || [];
+  S.inventory = a.inventory || [];
+  S.boxes     = a.boxes || [];
+  S.ledger    = a.ledger || [];
+  S.sync      = a.sync || null;
+  S.bourse    = a.bourse || null;
+  S.live      = {};
+  S.boosts    = {};
+  S.bataille  = a.bataille || null;
+  S.inscrits  = a.inscrits || [];
+  S.duels     = a.duels || [];
+  S.champions = a.champions || [];
+  S.rewind    = a.rewind || null;
+  S.rewcats   = a.rewcats || [];
+  // Personne n'est connecté dans un musée.
+  S.session = null;
+  S.profile = null;
+  S.ready = true;
+  $("#errBox").hidden = true;
+  render();
+}
+
 async function loadAll(){
+  if(MUSEE.actif){ poserArchive(); return; }
   if(!sb) return;
   const [ch, pl, gm, sn, pr, bt, st, pi, gl, lv, tb, bx, bo, ba, bi, rw, rc, bd, bc] = await Promise.all([
     sb.from("challenge").select("*").eq("id",1).maybeSingle(),
@@ -228,6 +287,12 @@ async function loadAll(){
 }
 
 function subscribeRealtime(){
+  /* Le temps réel est ce qui a coûté le forfait : la page écoutait
+     `sync_state`, que le relevé touchait toutes les cinq minutes, et
+     rechargeait TOUT à chaque fois. Un onglet oublié rapatriait le
+     challenge entier près de trois cents fois par jour. En musée, plus
+     rien ne bouge — et il n'y a plus rien à écouter. */
+  if(MUSEE.actif) return;
   if(!sb) return;
   sb.channel("board")
     .on("postgres_changes", { event:"*", schema:"public", table:"games" },      loadAll)
@@ -4669,6 +4734,20 @@ function initUI(){
 
 async function boot(){
   initUI();
+  // L'archive d'abord : si elle est là, la base ne sera pas appelée.
+  if(await chargerArchive()){
+    document.body.classList.add("musee");
+    poserArchive();
+    const b = $("#museeBar");
+    if(b){
+      b.hidden = false;
+      const q = $("#museeQuand");
+      if(q && MUSEE.data && MUSEE.data.fige_le)
+        q.textContent = new Date(MUSEE.data.fige_le)
+          .toLocaleDateString("fr-FR", { day:"numeric", month:"long", year:"numeric" });
+    }
+    return;
+  }
   if(!sb) return;
   const { data } = await sb.auth.getSession();
   S.session = data.session;
